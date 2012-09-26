@@ -1,3 +1,20 @@
+condor (7.8.2~dfsg.1-1+deb7u1) unstable; urgency=high
+
+  * Security update. This release addresses four CVE issues (Closes: #688210):
+    - Security Item: Some code that was no longer used was removed. The presence
+      of this code could expose information which would allow an attacker to
+      control another user's job. (CVE-2012-3493)
+    - Security Item: Some code that was no longer used was removed. The presence
+      of this code could have lead to a Denial-of-Service attack which would
+      allow an attacker to remove another user's idle job. (CVE-2012-3491)
+    - Security Item: Filesystem (FS) authentication was improved to check the
+      UNIX permissions of the directory used for authentication. Without this,
+      an attacker may have been able to impersonate another submitter on the
+      same submit machine. (CVE-2012-3492)
+    - Security item: Check setuid return value (CVE-2012-3490)
+
+ -- Michael Hanke <mih@debian.org>  Wed, 26 Sep 2012 16:10:17 +0200
+
 condor (7.8.2~dfsg.1-1) unstable; urgency=high
 
   * Upstream security release. Prevent an attacker who is manipulating

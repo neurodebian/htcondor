@@ -3,3 +3,7 @@ no_java_for_now
 no_compress
 # should be obsolete in condor 7.7.6+, but cannot confirm
 fix_condor_run
+cve-2012-3490.patch
+cve-2012-3491.patch
+cve-2012-3492.patch
+cve-2012-3493.patch
