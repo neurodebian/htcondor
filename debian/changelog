@@ -1,3 +1,21 @@
+condor (7.8.7~dfsg.1-1) experimental; urgency=low
+
+  * New upstream bug fix release.
+    - Fixed a bug wherein running the condor_suspend command on a scheduler
+      universe job would cause the schedd to crash (Ticket 3259).
+    - Jobs that were submitted with condor_submit -spool and failed during
+      submission were left indefinitely in the queue in the Hold state
+      (Ticket 3200).
+    - When using privilege separation, jobs would be put on hold after
+      they finished running if the working directory contained links to
+      files that were not globally readable (Ticket 2904).
+    - condor_master would sometimes crash on reconfiguration when the
+      High Availability configuration had changed (Ticket 3292).
+  * Condor is now officially called HTCondor. The Debian package will keep the
+    name 'condor' for now and change when switching to the 7.9 or 8.0 series.
+
+ -- Michael Hanke <mih@debian.org>  Thu, 10 Jan 2013 16:47:47 +0100
+
 condor (7.8.6~dfsg.1-1) experimental; urgency=low
 
   * New upstream bug fix release (skipped 7.8.5).
