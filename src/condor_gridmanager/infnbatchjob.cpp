@@ -142,7 +142,7 @@ INFNBatchJob::INFNBatchJob( ClassAd *classad )
 {
 	std::string buff;
 	std::string error_string = "";
-	char *gahp_path;
+	char *gahp_path = NULL;
 	ArgList gahp_args;
 
 	gahpAd = NULL;
@@ -159,6 +159,7 @@ INFNBatchJob::INFNBatchJob( ClassAd *classad )
 	gahp = NULL;
 	jobProxy = NULL;
 	remoteProxyExpireTime = 0;
+	batchType = NULL;
 
 	// In GM_HOLD, we assume HoldReason to be set only if we set it, so make
 	// sure it's unset when we start.
@@ -173,16 +174,19 @@ INFNBatchJob::INFNBatchJob( ClassAd *classad )
 		Tokenize( buff );
 
 		token = GetNextToken( " ", false );
-		if ( !strcmp( "batch", token ) ) {
+		if ( token && !strcmp( "batch", token ) ) {
 			token = GetNextToken( " ", false );
 		}
-		batchType = strdup( token );
+		if ( token ) {
+			batchType = strdup( token );
+		}
 
 		while ( (token = GetNextToken( " ", false )) ) {
 			gahp_args.AppendArg( token );
 		}
-	} else {
-		sprintf( error_string, "%s is not set in the job ad",
+	}
+	if ( !batchType ) {
+		sprintf( error_string, "%s is not set properly in the job ad",
 							  ATTR_GRID_RESOURCE );
 		goto error_exit;
 	}
@@ -204,8 +208,13 @@ INFNBatchJob::INFNBatchJob( ClassAd *classad )
 			goto error_exit;
 		}
 	} else {
-		sprintf( buff, "%s_GAHP", batchType );
-		gahp_path = param(buff.c_str());
+		// CRUFT: BATCH_GAHP was added in 7.7.6.
+		//   Checking <batch-type>_GAHP should be removed at some
+		//   point in the future.
+		if ( strcasecmp( batchType, "condor" ) ) {
+			sprintf( buff, "%s_GAHP", batchType );
+			gahp_path = param(buff.c_str());
+		}
 		if ( gahp_path == NULL ) {
 			gahp_path = param( "BATCH_GAHP" );
 			if ( gahp_path == NULL ) {
