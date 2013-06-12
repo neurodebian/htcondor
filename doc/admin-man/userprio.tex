@@ -79,11 +79,14 @@ The effective user priority (EUP) of a user is used to determine
 how many resources that user may receive.
 The EUP is linearly related to the RUP
 by a \emph{priority factor} which may be defined on a per-user basis.
-Unless otherwise configured, the priority factor for all users is 1.0,
-and so the EUP is the same as the the RUP.
-However, if desired, the priority factors of
-specific users can be increased so that 
-some are served preferentially.
+Unless otherwise configured, 
+an initial priority factor for all users as they first submit jobs
+is set by the configuration variable \Macro{DEFAULT\_PRIO\_FACTOR},
+and defaults to the value 1.0.
+This default makes the EUP the same as the RUP.
+If desired, the priority factors of
+specific users can be increased using \Condor{userprio},
+so that some are served preferentially.
 
 The number of resources that a user may receive is inversely related
 to the ratio between the EUPs of submitting users.
@@ -434,7 +437,13 @@ accounting is primarily used to compute priorities for HTCondor's
 fair-share scheduling algorithms. 
 However, accounting can also be done on a per-group basis.
 Multiple users can all submit jobs into the same accounting group,
-and all of the jobs will be treated with the same priority.
+and all jobs with the same accounting group
+will be treated with the same priority.
+Jobs that do \emph{not} specify an accounting group have 
+all accounting and priority based on the user, 
+which may be identified by the job ClassAd attribute \Attr{Owner}.
+Jobs that do specify an accounting group have 
+all accounting and priority based on the specified accounting group.
 
 \index{ClassAd job attribute!AccountingGroup}
 To use an accounting group,
@@ -502,17 +511,21 @@ period matches a group name,
 as described in the next section on group quotas.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection{\label{sec:group-quotas}Hierarchical Group Quotas}
+\subsection{\label{sec:group-quotas}Accounting Groups with Hierarchical Group Quotas}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \index{negotiation!by group}
 \index{groups!quotas}
 \index{quotas!hierarchical quotas for a group}
-The use of group quotas modifies the negotiation for 
+Quotas can be applied to the allocation of slots/machines
+for groups of users.
+The use of these group quotas modifies the negotiation for 
 available resources (machines) within an HTCondor pool.
-This solves the difficulties inherent when
-priorities assigned based on each single user are insufficient.
-This may be the case when
+When accounting groups together with group quotas are specified,
+the priorities and usage information are calculated per user.
+Numbers of slots/machines can be negotiated for preferentially
+by group.
+This may be useful when
 different groups (of varying size) own computers,
 and the groups choose to combine their computers to
 form an HTCondor pool.
@@ -532,7 +545,7 @@ perhaps causing more preemption than necessary.
 The (fair allocation) policy desired is likely somewhat different,
 if these thirty machines have been pooled.
 The desired policy does not tie users to specific sets of machines,
-but to numbers of machines (a quota).
+but to numbers of slots/machines (a quota).
 Given thirty similar machines,
 the desired policy allows users within the physics group to have
 preference on up to twenty of the machines within the pool,
@@ -585,10 +598,12 @@ A static quota specifies an integral numbers of machines (slots),
 independent of the size of the pool.
 A dynamic quota specifies a percentage of machines (slots) calculated
 based on the current number of machines in the pool.
-It is intended that only one of a static or a dynamic quota is defined 
-for a specified group.
-If both are defined, then the static quota is implemented, 
+It is intended that only one of static or a dynamic quotas are defined 
+for a specified group and for the pool.
+If both are defined for a group, then the static quota is implemented, 
 and the dynamic quota is ignored.
+The behavior is not defined and not documented
+for pools with both static and dynamic quotas defined.
 
 \begin{description}
 \item[Static Quotas]
@@ -697,8 +712,5 @@ and \Expr{project2} results in the truncated amount of 13 machines,
 with the 0.1818 + .6364 + .1818 = 1.0 remaining machine assigned to
 job submitters in the parent group, \Expr{group\_stat}. 
 
-
-\item[Mixed Quotas - Both Static and Dynamic]
 \end{description}
-\MoreTodo
 

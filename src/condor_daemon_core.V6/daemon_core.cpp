@@ -1084,7 +1084,9 @@ DaemonCore::InfoCommandSinfulStringMyself(bool usePrivateAddress)
 				// If SharedPortServer is not running yet, and an address
 				// that is local to this machine is good enough, then just
 				// get enough information to connect directly without going
-				// through SharedPortServer.
+				// through SharedPortServer.  This will only work if the
+				// process trying to connect to us has permission to open
+				// our named socket.
 			addr = m_shared_port_endpoint->GetMyLocalAddress();
 		}
 		if( addr ) {
@@ -2812,6 +2814,7 @@ DaemonCore::reconfig(void) {
 		if ( !max_hang_time ) {
 			max_hang_time = 60 * 60;	// default to 1 hour
 		}
+		int old_child_alive_period = m_child_alive_period;
 		m_child_alive_period = (max_hang_time / 3) - 30;
 		if ( m_child_alive_period < 1 )
 			m_child_alive_period = 1;
@@ -2837,7 +2840,11 @@ DaemonCore::reconfig(void) {
 				// sending this message, our parent will not kill us.
 				// (Commented out.  See reason above.)
 				// SendAliveToParent();
-		} else {
+		} else if( m_child_alive_period != old_child_alive_period ) {
+				// Our parent will not know about our new alive period
+				// until the next time we send it an ALIVE message, so
+				// we can't just increase the time to our next call
+				// without risking being killed as a hung child.
 			Reset_Timer(send_child_alive_timer, 1, m_child_alive_period);
 		}
 	}
@@ -2913,6 +2920,14 @@ DaemonCore::InitSharedPort(bool in_init_dc_command_socket)
 	}
 	else if( DebugFlags & D_FULLDEBUG ) {
 		dprintf(D_FULLDEBUG,"Not using shared port because %s\n",why_not.Value());
+	}
+}
+
+void
+DaemonCore::ClearSharedPortServerAddr()
+{
+	if( m_shared_port_endpoint ) {
+		m_shared_port_endpoint->ClearSharedPortServerAddr();
 	}
 }
 
