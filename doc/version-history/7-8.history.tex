@@ -16,6 +16,140 @@ New features will be added in the 7.9.x development series.
 The details of each version are described below.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{\label{sec:New-7-8-8}Version 7.8.8}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\noindent Release Notes:
+
+\begin{itemize}
+
+\item HTCondor version 7.8.8 released on March 28, 2013.
+
+\end{itemize}
+
+
+\noindent New Features:
+
+\begin{itemize}
+
+\item When using \Prog{glexec}, HTCondor now automatically retries
+each \Prog{glexec} operation if \Prog{glexec} exits with an error
+code that is likely to be caused by a transient error, such as a
+communication error with the mapping service.  Previously, any
+\Prog{glexec} error would cause the job to be put on hold.  Now, the
+job will only go on hold if the maximum number of \Prog{glexec}
+retries is exceeded.
+\Ticket{2415}
+
+\end{itemize}
+
+\noindent Configuration Variable and ClassAd Attribute Additions and Changes:
+
+\begin{itemize}
+
+\item The new configuration variable \Macro{GLEXEC\_RETRIES} is an
+integer value that specifies the maximum number of times to retry a
+call to \Prog{glexec} when \Prog{glexec} exits with status 202 or
+203, error codes that indicate a possible transient error condition.
+The default number of retries is 3.
+\Ticket{2415}
+
+\item The new configuration variable \Macro{GLEXEC\_RETRY\_DELAY} is
+an integer value that specifies the minimum number of seconds to
+wait between retries of a failed call to \Prog{glexec}.
+The default is 5 seconds.
+The actual delay to be used is determined by a random exponential
+backoff algorithm that chooses a delay with a minimum of
+the value of \MacroNI{GLEXEC\_RETRY\_DELAY} 
+and a maximum of 100 times that value.
+\Ticket{2415}
+
+\end{itemize}
+
+\noindent Bugs Fixed:
+
+\begin{itemize}
+
+\item Fixed a bug that caused the \Condor{gridmanager} to frequently
+delegate the X.509 proxy for jobs of the condor grid type to the remote
+\Condor{schedd} when the delegated proxy's lifetime is not limited.
+This occurred when configuration variable
+\Macro{DELEGATE\_JOB\_GSI\_CREDENTIALS\_LIFETIME}
+or job ClassAd attribute \Attr{DelegateJobGSICredentialsLifetime} was set to 0.
+\Ticket{3395}
+
+\item Fixed a bug in \Condor{advertise} that could cause failure to
+publish ClassAds to \Condor{collector} daemons other than the first 
+one in the list of \Condor{collector} daemons.
+\Ticket{3404}
+
+\item (This bug was fixed in HTCondor version 7.8.4.)
+\Condor{userlog} no longer ignores \Expr{ULOG\_JOB\_RECONNECT\_FAILED} events.
+\Ticket{3215}
+
+\item Fixed a bug that caused cream grid jobs to become held with a
+\Attr{HoldReason} attribute stating
+\footnotesize
+\begin{verbatim}
+"CREAM error: Transfer failed: globus_ftp_client: 
+  an invalid value for url was used"
+\end{verbatim}
+\normalsize
+when the jobs did not have any input or output files to transfer.
+\Ticket{3415}
+
+\item Fixed a bug that could cause HTCondor daemons to abort on 
+\Condor{reconfig} when the value of configuration variable 
+\Macro{STATISTICS\_WINDOW\_SECONDS} was reduced.
+\Ticket{3443}
+
+\item Fixed a bug that could cause daemons using CCB to fail to reconnect to
+the CCB server after becoming disconnected.  This condition would cause the
+daemon to become unreachable via CCB until the daemon was restarted.
+\Ticket{3476}
+
+\item If \Condor{shared\_port} was using a dynamic port and the
+\Condor{master} was using the shared port, 
+then if \Condor{shared\_port} died, all
+subsequent attempts to restart it on a different port failed.
+\Ticket{3478}
+
+\item The \Prog{nordugrid\_gahp} no longer exits if the job ClassAd contains
+a bad \Attr{NordugridRSL} attribute value.
+\Ticket{3495}
+
+\item Fixed a bug that caused the command-line arguments of grid universe
+jobs of grid type cream 
+to be ignored if specified using the new quoting syntax in
+the submit description file.
+\Ticket{3473}
+
+\item Reduced the likelihood of a problem that caused the
+\Condor{master} to restart some of its children after a recent
+reconfiguration, because the \Condor{master} incorrectly concluded that the
+children were hung.
+\Ticket{3510}
+
+\end{itemize}
+
+\noindent Known Bugs:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+\noindent Additions and Changes to the Manual:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection*{\label{sec:New-7-8-7}Version 7.8.7}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -160,7 +294,12 @@ prevented the Condor service from being stopped during system shutdown.
 High Availability configuration had changed. It no longer crashes.
 \Ticket{3292}
 
-\item Fixed a bug in the non-standard universe \Condor{shadow} that prevented parallel universe jobs from running when \verb|USE_NFS=True=| or \verb|USE_AFS=True=|. \Ticket{3361}
+\item Fixed a bug that caused the \Condor{starter} to crash 
+when \Condor{chirp} is used and there is a configuration variable
+setting of \Expr{USE\_NFS = True} or \Expr{USE\_AFS = True}.
+This will happen with parallel universe jobs,
+because the MPI scripts invoke \Condor{chirp}.
+\Ticket{3361}
 
 \end{itemize}
 

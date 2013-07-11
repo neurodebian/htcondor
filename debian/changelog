@@ -1,3 +1,24 @@
+condor (7.8.8~dfsg.1-1) experimental; urgency=low
+
+  * New upstream bug fix release.
+    - Fixed a bug in condor_advertise that could cause failure to publish
+    ClassAds to condor_collector daemons other than the first one in the list of
+    condor_collector daemons (Ticket #3404).
+    - Fixed a bug that could cause HTCondor daemons to abort on condor_reconfig
+    when the value of configuration variable STATISTICS_WINDOW_SECONDS was reduced.
+    (Ticket #3443).
+    - If condor_shared_port was using a dynamic port and the condor_master was
+    using the shared port, then if condor_shared_port died, all subsequent attempts
+    to restart it on a different port failed. (Ticket #3478).
+    - Reduced the likelihood of a problem that caused the condor_master to
+    restart some of its children after a recent reconfiguration, because the
+    condor_master incorrectly concluded that the children were hung. (Ticket
+    #3510)
+  * Added patch to automatically retry glexec operations if they exit with an
+    error code likely caused by a transient error (Ticket 2415).
+
+ -- Brian Lin <blin@vdt-c05.cs.wisc.edu>  Wed, 10 Jul 2013 09:36:40 -0500
+
 condor (7.8.7~dfsg.1-1) experimental; urgency=low
 
   * New upstream bug fix release.
