@@ -5,11 +5,11 @@ condor (7.8.8~dfsg.1-1) experimental; urgency=low
     ClassAds to condor_collector daemons other than the first one in the list of
     condor_collector daemons (Ticket #3404).
     - Fixed a bug that could cause HTCondor daemons to abort on condor_reconfig
-    when the value of configuration variable STATISTICS_WINDOW_SECONDS was reduced.
-    (Ticket #3443).
+    when the value of configuration variable STATISTICS_WINDOW_SECONDS was
+    reduced. (Ticket #3443).
     - If condor_shared_port was using a dynamic port and the condor_master was
-    using the shared port, then if condor_shared_port died, all subsequent attempts
-    to restart it on a different port failed. (Ticket #3478).
+    using the shared port, then if condor_shared_port died, all subsequent
+    attempts to restart it on a different port failed. (Ticket #3478).
     - Reduced the likelihood of a problem that caused the condor_master to
     restart some of its children after a recent reconfiguration, because the
     condor_master incorrectly concluded that the children were hung. (Ticket
