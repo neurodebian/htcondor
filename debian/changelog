@@ -17,6 +17,7 @@ condor (7.8.8~dfsg.1-1) unstable; urgency=low
     #3510)
     - Now installs the condor_kbdd daemon.
     - Does no longer provide condor_glidein
+    - Fix a number of bashisms (Closes: #690640)
   * Added patch to automatically retry glexec operations if they exit with an
     error code likely caused by a transient error (Ticket 2415).
 
@@ -25,7 +26,6 @@ condor (7.8.8~dfsg.1-1) unstable; urgency=low
   * Adjust code to determine Condor's upstream version in debian/rules'
     get-orig-source target.
   * Add citation information in debian/upstream. Thanks to Andreas Tille.
-  * 
 
  -- Brian Lin <blin@cs.wisc.edu>  Wed, 10 Jul 2013 09:36:40 -0500
 
