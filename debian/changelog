@@ -26,8 +26,10 @@ condor (7.8.8~dfsg.1-1) unstable; urgency=low
   * Adjust code to determine Condor's upstream version in debian/rules'
     get-orig-source target.
   * Add citation information in debian/upstream. Thanks to Andreas Tille.
+  * Add explicit note to README.Debian that the standard universe is not
+    supported at this point (Closes: #717357).
 
- -- Brian Lin <blin@cs.wisc.edu>  Wed, 10 Jul 2013 09:36:40 -0500
+ - Brian Lin <blin@cs.wisc.edu>  Wed, 10 Jul 2013 09:36:40 -0500
 
 condor (7.8.7~dfsg.1-1) experimental; urgency=low
 
