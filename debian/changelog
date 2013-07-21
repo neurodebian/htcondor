@@ -1,3 +1,10 @@
+condor (7.8.8~dfsg.1-2) unstable; urgency=low
+
+  * Fix corrupted Russian and French debconf template translations.
+    Thanks to David Prévot for the fixes (Closes: #671510, #673138).
+
+ -- Michael Hanke <mih@debian.org>  Sun, 21 Jul 2013 09:23:43 +0200
+
 condor (7.8.8~dfsg.1-1) unstable; urgency=low
 
   [ Brian Lin ]
