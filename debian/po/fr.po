@@ -27,7 +27,7 @@ msgstr "Configuration de Condor"
 #. Description
 #: ../condor.templates:2001
 msgid "Manage initial Condor configuration automatically?"
-msgstr "Faut-il gÃ©rer la configuration initiale de Condor automatiquementÂ ?"
+msgstr "Faut-il gérer la configuration initiale de Condor automatiquement ?"
 
 #. Type: boolean
 #. Description
@@ -39,11 +39,11 @@ msgid ""
 "installation\". This generated initial configuration can be further extended "
 "later on."
 msgstr ""
-"La mise en place de Condor peut Ãªtre gÃ©rÃ©e automatiquement en rÃ©pondant Ã  "
-"quelques questions afin de crÃ©er une configuration initiale appropriÃ©e pour "
-"une machine qui est soit membre d'un groupement (Â«Â poolÂ Â») existant, soit "
-"une Â«Â installation personnelle de CondorÂ Â» complÃ¨tement fonctionnelle. Cette "
-"configuration initiale gÃ©nÃ©rÃ©e peut Ãªtre par la suite modifiÃ©e."
+"La mise en place de Condor peut être gérée automatiquement en répondant à "
+"quelques questions afin de créer une configuration initiale appropriée pour "
+"une machine qui est soit membre d'un groupement (« pool ») existant, soit "
+"une « installation personnelle de Condor » complètement fonctionnelle. Cette "
+"configuration initiale générée peut être par la suite modifiée."
 
 #. Type: boolean
 #. Description
@@ -52,14 +52,14 @@ msgid ""
 "Otherwise, Condor will be installed with a default configuration that needs "
 "to be customized manually."
 msgstr ""
-"Dans le cas contraire, Condor sera installÃ© avec une configuration "
-"par dÃ©faut qu'il est conseillÃ© d'adapter manuellement."
+"Dans le cas contraire, Condor sera installé avec une configuration "
+"par défaut qu'il est conseillé d'adapter manuellement."
 
 #. Type: boolean
 #. Description
 #: ../condor.templates:3001
 msgid "Enable submission of usage statistics?"
-msgstr "Faut-il activer l'inscription des statistiques d'utilisationÂ ?"
+msgstr "Faut-il activer l'inscription des statistiques d'utilisation ?"
 
 #. Type: boolean
 #. Description
@@ -72,19 +72,19 @@ msgid ""
 "manager, and the name of the pool. These updates help the Condor Team see "
 "how Condor is being used around the world."
 msgstr ""
-"Les auteurs de Condor suggÃ¨rent que chaque groupement de Condor "
-"leur envoie rÃ©guliÃ¨rement des informations basiques Ã  propos de l'Ã©tat du "
+"Les auteurs de Condor suggèrent que chaque groupement de Condor "
+"leur envoie régulièrement des informations basiques à propos de l'état du "
 "groupement. Ces informations incluent le nombre total de machines, le nombre "
-"de travaux soumis, le nombre de machines exÃ©cutant des travaux, le nom "
-"d'hÃ´te du gestionnaire central et le nom du groupement. Elles "
-"permettent Ã  l'Ã©quipe de Condor de savoir comment leur logiciel est utilisÃ© Ã  "
+"de travaux soumis, le nombre de machines exécutant des travaux, le nom "
+"d'hôte du gestionnaire central et le nom du groupement. Elles "
+"permettent à l'équipe de Condor de savoir comment leur logiciel est utilisé à "
 "travers le monde."
 
 #. Type: string
 #. Description
 #: ../condor.templates:4001
 msgid "Address of the central manager:"
-msgstr "Adresse du gestionnaire centralÂ :"
+msgstr "Adresse du gestionnaire central :"
 
 #. Type: string
 #. Description
@@ -95,15 +95,15 @@ msgid ""
 "supported by Condor can be used, including macro expressions."
 msgstr ""
 "Si cette machine doit rejoindre un groupement Condor existant, il est alors "
-"nÃ©cessaire d'indiquer l'adresse de la machine faisant office de gestionnaire "
-"central. Tout format d'adresse gÃ©rÃ© par Condor peut Ãªtre utilisÃ© en incluant "
+"nécessaire d'indiquer l'adresse de la machine faisant office de gestionnaire "
+"central. Tout format d'adresse géré par Condor peut être utilisé en incluant "
 "des macros."
 
 #. Type: string
 #. Description
 #: ../condor.templates:4001
 msgid "Example: condor-manager.example.org"
-msgstr "ExempleÂ : condor-manager.example.org"
+msgstr "Exemple : condor-manager.example.org"
 
 #. Type: multiselect
 #. Choices
@@ -115,7 +115,7 @@ msgstr "Soumission de travail"
 #. Choices
 #: ../condor.templates:5001
 msgid "Job execution"
-msgstr "ExÃ©cution de travail"
+msgstr "Exécution de travail"
 
 #. Type: multiselect
 #. Choices
@@ -127,7 +127,7 @@ msgstr "Gestionnaire central"
 #. Description
 #: ../condor.templates:5002
 msgid "Role of this machine in the Condor pool:"
-msgstr "RÃ´le de cette machine au sein du groupement CondorÂ :"
+msgstr "Rôle de cette machine au sein du groupement Condor :"
 
 #. Type: multiselect
 #. Description
@@ -136,8 +136,8 @@ msgid ""
 "Please specify the intended role or roles of this machine, for which the "
 "corresponding daemons will be started automatically."
 msgstr ""
-"Veuillez indiquer le(s) rÃ´le(s) prÃ©vu(s) pour cette machine afin que les "
-"dÃ©mons correspondant soient dÃ©marrÃ©s automatiquement."
+"Veuillez indiquer le(s) rôle(s) prévu(s) pour cette machine afin que les "
+"démons correspondant soient démarrés automatiquement."
 
 #. Type: multiselect
 #. Description
@@ -148,8 +148,8 @@ msgid ""
 "is also the machine from which users submit jobs. However, it is also "
 "possible to have multiple machines available for job submission."
 msgstr ""
-"Une machine dans un groupement Condor peut avoir diffÃ©rents rÃ´les. En "
-"gÃ©nÃ©ral, il y a un gestionnaire central et plusieurs nÅuds qui exÃ©cutent des "
+"Une machine dans un groupement Condor peut avoir différents rôles. En "
+"général, il y a un gestionnaire central et plusieurs nœuds qui exécutent des "
 "travaux. Il arrive souvent que le gestionnaire central soit aussi la machine "
 "depuis laquelle les utilisateurs soumettent leurs travaux. Toutefois, il est "
 "aussi possible d'avoir plusieurs machines disponibles pour la soumission de "
@@ -159,7 +159,7 @@ msgstr ""
 #. Description
 #: ../condor.templates:6001
 msgid "Email address of the local Condor administrator:"
-msgstr "Adresse Ã©lectronique de l'administrateur local de CondorÂ :"
+msgstr "Adresse électronique de l'administrateur local de Condor :"
 
 #. Type: string
 #. Description
@@ -168,14 +168,14 @@ msgid ""
 "The Condor administrator will receive error messages if something goes wrong "
 "with Condor on this machine."
 msgstr ""
-"L'administrateur de Condor recevra les messages d'erreur en cas de problÃ¨me "
+"L'administrateur de Condor recevra les messages d'erreur en cas de problème "
 "avec Condor sur cette machine."
 
 #. Type: string
 #. Description
 #: ../condor.templates:7001
 msgid "user directory domain label:"
-msgstr "Ãtiquette de domaine du rÃ©pertoire utilisateurÂ :"
+msgstr "Étiquette de domaine du répertoire utilisateur :"
 
 #. Type: string
 #. Description
@@ -190,16 +190,16 @@ msgid ""
 "run all jobs as user \"nobody\". Leaving it blank will cause Condor to run "
 "all jobs on this machine as user \"nobody\"."
 msgstr ""
-"Cette Ã©tiquette est une chaÃ®ne de caractÃ¨res que Condor utilise pour dÃ©cider "
-"si une machine qui soumet un travail et une machine qui exÃ©cute le travail "
-"partagent le mÃªme rÃ©pertoire d'un compte utilisateur (c'est-Ã -dire si l'UID "
-"1000 d'une machine est la mÃªme personne que l'UID 1000 d'une autre machine). "
-"Si les Ã©tiquettes des deux machines correspondent, Condor exÃ©cutera chaque "
+"Cette étiquette est une chaîne de caractères que Condor utilise pour décider "
+"si une machine qui soumet un travail et une machine qui exécute le travail "
+"partagent le même répertoire d'un compte utilisateur (c'est-à-dire si l'UID "
+"1000 d'une machine est la même personne que l'UID 1000 d'une autre machine). "
+"Si les étiquettes des deux machines correspondent, Condor exécutera chaque "
 "travail sous l'UID qui a soumis le travail et enverra un message "
-"Ã©lectronique Ã  l'adresse utilisateur@DOMAINE (en utilisant l'Ã©tiquette comme "
-"valeur pour DOMAINE). Dans le cas contraire, Condor exÃ©cutera tous les "
-"travaux en tant qu'utilisateur Â«Â nobodyÂ Â». Si vous laissez ce champ vide, "
-"Condor exÃ©cutera tous les travaux en tant qu'utilisateur Â«Â nobodyÂ Â»."
+"électronique à l'adresse utilisateur@DOMAINE (en utilisant l'étiquette comme "
+"valeur pour DOMAINE). Dans le cas contraire, Condor exécutera tous les "
+"travaux en tant qu'utilisateur « nobody ». Si vous laissez ce champ vide, "
+"Condor exécutera tous les travaux en tant qu'utilisateur « nobody »."
 
 #. Type: string
 #. Description
@@ -208,14 +208,14 @@ msgid ""
 "Any domain format supported by Condor can be used, including macro "
 "expressions. Example: $(FULL_HOSTNAME)"
 msgstr ""
-"Tout format de domaine gÃ©rÃ© par Condor peut Ãªtre utilisÃ© en incluant des "
-"macros. ExempleÂ : $(NOM_DHOTE_COMPLET)"
+"Tout format de domaine géré par Condor peut être utilisé en incluant des "
+"macros. Exemple : $(NOM_DHOTE_COMPLET)"
 
 #. Type: string
 #. Description
 #: ../condor.templates:8001
 msgid "File system domain label:"
-msgstr "Ãtiquette de domaine du systÃ¨me de fichiersÂ :"
+msgstr "Étiquette de domaine du système de fichiers :"
 
 #. Type: string
 #. Description
@@ -228,27 +228,27 @@ msgid ""
 "the fully qualified hostname of the local machine, which will prevent Condor "
 "assuming that any two machines share a file system."
 msgstr ""
-"Cette Ã©tiquette est une chaÃ®ne de caractÃ¨res alÃ©atoire qui est utilisÃ©e pour "
-"dÃ©cider si une machine qui soumet un travail et une machine qui exÃ©cute un "
-"travail partagent un mÃªme systÃ¨me de fichiers. Dans une grappe dÃ©diÃ©e de "
-"machines, il est fort probable que toutes les machines utilisent un systÃ¨me "
-"de fichiers partagÃ© et par consÃ©quent elles devraient utiliser la mÃªme "
-"Ã©tiquette. Si vous laissez ce champ vide, "
-"le nom d'hÃ´te complÃ¨tement qualifiÃ© de la machine "
-"locale sera utilisÃ©, ce qui empÃªchera Condor de supposer que des machines prises deux Ã  "
-"deux partagent le mÃªme systÃ¨me de fichiers."
+"Cette étiquette est une chaîne de caractères aléatoire qui est utilisée pour "
+"décider si une machine qui soumet un travail et une machine qui exécute un "
+"travail partagent un même système de fichiers. Dans une grappe dédiée de "
+"machines, il est fort probable que toutes les machines utilisent un système "
+"de fichiers partagé et par conséquent elles devraient utiliser la même "
+"étiquette. Si vous laissez ce champ vide, "
+"le nom d'hôte complètement qualifié de la machine "
+"locale sera utilisé, ce qui empêchera Condor de supposer que des machines prises deux à "
+"deux partagent le même système de fichiers."
 
 #. Type: string
 #. Description
 #: ../condor.templates:8001
 msgid "Example: my_shared_volume"
-msgstr "ExempleÂ : mon_volume_partagÃ©"
+msgstr "Exemple : mon_volume_partagé"
 
 #. Type: boolean
 #. Description
 #: ../condor.templates:9001
 msgid "Perform a \"Personal Condor installation\"?"
-msgstr "Faut-il effectuer une Â«Â installation personnelle de CondorÂ Â»Â ?"
+msgstr "Faut-il effectuer une « installation personnelle de Condor » ?"
 
 #. Type: boolean
 #. Description
@@ -259,11 +259,11 @@ msgid ""
 "it detects CPU cores on this machine. Condor daemons will not be available "
 "through external network interfaces."
 msgstr ""
-"Une Â«Â installation personnelle de CondorÂ Â» est un groupement de Condor "
+"Une « installation personnelle de Condor » est un groupement de Condor "
 "autonome sur une seule machine. Condor configurera et "
-"annoncera automatiquement autant de crÃ©neaux (Â«Â slotsÂ Â») que de cÅurs CPU "
-"dÃ©tectÃ©s sur cette machine. Les dÃ©mons de Condor ne seront pas disponibles "
-"pour des interfaces rÃ©seau externes."
+"annoncera automatiquement autant de créneaux (« slots ») que de cœurs CPU "
+"détectés sur cette machine. Les démons de Condor ne seront pas disponibles "
+"pour des interfaces réseau externes."
 
 #. Type: boolean
 #. Description
@@ -272,14 +272,14 @@ msgid ""
 "This configuration is not appropriate if this machine is intended to be a "
 "member of a pool."
 msgstr ""
-"Cette configuration n'est pas adaptÃ©e si cette machine est prÃ©vue pour "
-"Ãªtre membre d'un groupement."
+"Cette configuration n'est pas adaptée si cette machine est prévue pour "
+"être membre d'un groupement."
 
 #. Type: string
 #. Description
 #: ../condor.templates:10001
 msgid "Amount of physical memory to withhold from Condor (in MB):"
-msgstr "QuantitÃ© de mÃ©moire physique Ã  retenir pour Condor (en Mo)Â :"
+msgstr "Quantité de mémoire physique à retenir pour Condor (en Mo) :"
 
 #. Type: string
 #. Description
@@ -289,21 +289,21 @@ msgid ""
 "available to be used by Condor jobs. If this value is defined, Condor "
 "subtracts it from the amount of memory it advertises as available."
 msgstr ""
-"Condor considÃ¨re par dÃ©faut que toute la mÃ©moire physique d'une machine est "
-"disponible pour les travaux Condor. Si cette valeur est dÃ©finie, elle sera "
-"soustraite Ã  la quantitÃ© de mÃ©moire annoncÃ©e comme Ã©tant disponible."
+"Condor considère par défaut que toute la mémoire physique d'une machine est "
+"disponible pour les travaux Condor. Si cette valeur est définie, elle sera "
+"soustraite à la quantité de mémoire annoncée comme étant disponible."
 
 #. Type: string
 #. Description
 #: ../condor.templates:10001
 msgid "Example (to reserve 1 GB): 1024"
-msgstr "Exemple pour rÃ©server 1Â GoÂ : 1024"
+msgstr "Exemple pour réserver 1 Go : 1024"
 
 #. Type: string
 #. Description
 #: ../condor.templates:11001
 msgid "Machines with write access to this host:"
-msgstr "Machines ayant un accÃ¨s en Ã©criture sur cet hÃ´teÂ :"
+msgstr "Machines ayant un accès en écriture sur cet hôte :"
 
 #. Type: string
 #. Description
@@ -314,25 +314,25 @@ msgid ""
 "wildcards, or a macro expression. By default only localhost is allowed to "
 "access Condor daemons on this machine."
 msgstr ""
-"Toutes les machines qui feront partie d'un groupement Condor doivent Ãªtre "
-"indiquÃ©es ici. Ce paramÃ©trage peut Ãªtre une liste simple sÃ©parÃ©e par des "
-"virgules, un domaine avec des caractÃ¨res gÃ©nÃ©riques (Â«Â wildcardsÂ Â») ou une "
-"macro. Par dÃ©faut seul l'hÃ´te local a la permission d'accÃ©der aux dÃ©mons "
+"Toutes les machines qui feront partie d'un groupement Condor doivent être "
+"indiquées ici. Ce paramétrage peut être une liste simple séparée par des "
+"virgules, un domaine avec des caractères génériques (« wildcards ») ou une "
+"macro. Par défaut seul l'hôte local a la permission d'accéder aux démons "
 "Condor de cette machine."
 
 #. Type: string
 #. Description
 #: ../condor.templates:11001
 msgid "Example: *.condor-pool.example.org"
-msgstr "ExempleÂ : *.groupement-condor.example.org"
+msgstr "Exemple : *.groupement-condor.example.org"
 
 #. Type: boolean
 #. Description
 #: ../condor.templates:12001
 msgid "Run Condor jobs regardless of other machine activity?"
 msgstr ""
-"Faut-il exÃ©cuter les travaux de Condor malgrÃ© l'activitÃ© des autres "
-"machinesÂ ?"
+"Faut-il exécuter les travaux de Condor malgré l'activité des autres "
+"machines ?"
 
 #. Type: boolean
 #. Description
@@ -346,14 +346,14 @@ msgid ""
 "they are submitted (given that resources are still available), and to run "
 "them continuously regardless of other activity on this machine."
 msgstr ""
-"Par dÃ©faut, Condor ne dÃ©marre des travaux que si une machine est inoccupÃ©e, "
-"c'est Ã  dire qu'il n'y a aucune activitÃ© du clavier ou de charge du CPU "
-"pendant un certain temps. De plus, il suspend un travail quand il dÃ©tecte de "
-"l'activitÃ© sur une console et ne continue que quand la machine redevient "
-"inoccupÃ©e. Toutefois, pour un nÅud dÃ©diÃ© ou une Â«Â installation personnelle "
-"de Condor Â Â», il peut Ãªtre souhaitable de toujours dÃ©buter un travail dÃ¨s "
+"Par défaut, Condor ne démarre des travaux que si une machine est inoccupée, "
+"c'est à dire qu'il n'y a aucune activité du clavier ou de charge du CPU "
+"pendant un certain temps. De plus, il suspend un travail quand il détecte de "
+"l'activité sur une console et ne continue que quand la machine redevient "
+"inoccupée. Toutefois, pour un nœud dédié ou une « installation personnelle "
+"de Condor  », il peut être souhaitable de toujours débuter un travail dès "
 "que soumis (en supposant que les ressources soient encore disponibles) et de "
-"l'exÃ©cuter en continu indiffÃ©remment d'autres activitÃ©s sur cette machine."
+"l'exécuter en continu indifféremment d'autres activités sur cette machine."
 
 #. Type: boolean
 #. Description
@@ -362,5 +362,5 @@ msgid ""
 "If you plan to compose a custom policy it is best to keep Condor's default "
 "here."
 msgstr ""
-"Si vous prÃ©voyez de crÃ©er une politique personnalisÃ©e, il est prÃ©fÃ©rable de "
-"conserver la politique par dÃ©faut de Condor ici."
+"Si vous prévoyez de créer une politique personnalisée, il est préférable de "
+"conserver la politique par défaut de Condor ici."
