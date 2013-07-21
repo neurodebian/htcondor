@@ -184,3 +184,11 @@ get-orig-source: dfsg-source-tree
 	# orig tarball, turn directory into something nicer
 	git archive --format=tar --prefix=$(srcpkg)-$(gitver)/ HEAD | \
 		gzip -9 > $(srcpkg)_$(gitver).orig.tar.gz
+
+# check that DSC patches still apply
+maint-check-dsc-patches:
+	@for p in debian/patches/*-dsc-patch; \
+		do echo "check $$p"; \
+		patch -p1 --dry-run < $$p || exit 1 ; \
+	done
+
