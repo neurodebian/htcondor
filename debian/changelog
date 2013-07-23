@@ -1,3 +1,34 @@
+condor (8.0.1~dfsg.1-1) unstable; urgency=low
+
+  * New upstream version
+    - Fixed a bug that prevented per-slot settings of the STARTD_ATTRS
+      configuration variable from being set correctly for partitionable slots
+      named with a SLOTX_ prefix. (Ticket #3726).
+    - Fixed a bug that caused condor_status -submitters to report twice as many
+      jobs running as were actually running. This bug appeared in HTCondor
+      versions 7.9.6 and 8.0.0. (Ticket #3713).
+    - Fixed a bug with hierarchical group quotas in the condor_negotiator in
+      which group hierarchies with parent groups that set configuration variable
+      GROUP_ACCEPT_SURPLUS to False would be assigned allocations above their
+      quota. (Ticket #3695).
+    - Fixed a bug in which scheduler universe jobs that have an on_exit_hold
+      expression that evaluates to True could have duplicate hold messages in
+      the user log. (Ticket #3651).
+    - Fixed a bug in which condor_dagman would submit multiple copies of the
+      same job, fail, write a Rescue DAG, and leave the jobs in the queue. This
+      was due to a warning from condor_submit that the submit description file
+      was not using lines containing the string "cluster". As a fix,
+      condor_dagman will search for the string " submitted to cluster ". This
+      will generate fewer false alarms. If the submission succeeds and
+      condor_dagman gets confused, the jobs will be removed when condor_dagman
+      writes a Rescue DAG. (Ticket #3658).
+    - Fixed a bug that caused some communication layer log messages to end with
+      binary characters. (Ticket #3706).
+    - Removed a bug that caused condor_dagman to have problems restarting after
+      an upgrade from HTCondor version 7.8. (Ticket #3707).
+
+ -- Brian Lin <blin@cs.wisc.edu>  Tue, 23 Jul 2013 19:25:55 -0400
+
 condor (7.8.8~dfsg.1-1) experimental; urgency=low
 
   * New upstream bug fix release.
