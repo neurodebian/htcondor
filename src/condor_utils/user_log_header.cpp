@@ -99,10 +99,10 @@ UserLogHeader::ExtractEvent( const ULogEvent *event )
 					" ctime=%d"
 					" id=%255s"
 					" sequence=%d"
-					" size="FILESIZE_T_FORMAT""
-					" events=%"PRId64""
-					" offset="FILESIZE_T_FORMAT""
-					" event_off=%"PRId64""
+					" size=" FILESIZE_T_FORMAT""
+					" events=%" PRId64""
+					" offset=" FILESIZE_T_FORMAT""
+					" event_off=%" PRId64""
 					" max_rotation=%d"
 					" creator_name=<%255[^>]>",
 					&ctime,
@@ -128,7 +128,7 @@ UserLogHeader::ExtractEvent( const ULogEvent *event )
 			m_max_rotation = -1;
 		}
 
-		if ( DebugFlags & D_FULLDEBUG ) {
+		if (IsFulldebug(D_FULLDEBUG)) {
 			dprint( D_FULLDEBUG, "UserLogHeader::ExtractEvent(): parsed ->" );
 		}
 		return ULOG_OK;
@@ -146,13 +146,13 @@ void
 UserLogHeader::sprint_cat( MyString &buf ) const
 {
 	if ( m_valid ) {
-		buf.sprintf_cat( "id=%s"
+		buf.formatstr_cat( "id=%s"
 						 " seq=%d"
 						 " ctime=%lu"
-						 " size="FILESIZE_T_FORMAT
-						 " num=%"PRIi64
-						 " file_offset="FILESIZE_T_FORMAT
-						 " event_offset=%"PRIi64
+						 " size=" FILESIZE_T_FORMAT
+						 " num=%" PRIi64
+						 " file_offset=" FILESIZE_T_FORMAT
+						 " event_offset=%" PRIi64
 						 " max_rotation=%d"
 						 " creator_name=<%s>",
 						 m_id.Value(),
@@ -175,7 +175,7 @@ UserLogHeader::sprint_cat( MyString &buf ) const
 void
 UserLogHeader::dprint( int level, MyString &buf ) const
 {
-	if ( 0 == ( level & DebugFlags ) ) {
+	if ( ! IsDebugCatAndVerbosity(level) ) {
 		return;
 	}
 
@@ -187,7 +187,7 @@ UserLogHeader::dprint( int level, MyString &buf ) const
 void
 UserLogHeader::dprint( int level, const char *label ) const
 {
-	if ( 0 == ( level & DebugFlags ) ) {
+	if ( ! IsDebugCatAndVerbosity(level) ) {
 		return;
 	}
 
@@ -196,7 +196,7 @@ UserLogHeader::dprint( int level, const char *label ) const
 	}
 
 	MyString	buf;
-	buf.sprintf( "%s header:", label );
+	buf.formatstr( "%s header:", label );
 	this->dprint( level, buf );
 }
 
@@ -266,10 +266,10 @@ WriteUserLogHeader::GenerateEvent( GenericEvent &event )
 			  " ctime=%d"
 			  " id=%s"
 			  " sequence=%d"
-			  " size="FILESIZE_T_FORMAT""
-			  " events=%"PRId64""
-			  " offset="FILESIZE_T_FORMAT""
-			  " event_off=%"PRId64""
+			  " size=" FILESIZE_T_FORMAT""
+			  " events=%" PRId64""
+			  " offset=" FILESIZE_T_FORMAT""
+			  " event_off=%" PRId64""
 			  " max_rotation=%d"
 			  " creator_name=<%s>",
 			  (int) getCtime(),

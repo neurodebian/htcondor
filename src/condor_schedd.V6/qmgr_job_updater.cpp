@@ -71,6 +71,7 @@ QmgrJobUpdater::QmgrJobUpdater( ClassAd* job, const char* schedd_address,
 	// finally, clear all the dirty bits on this jobAd, so we only
 	// update the queue with things that have changed after this
 	// point. 
+	job_ad->EnableDirtyTracking();
 	job_ad->ClearAllDirtyFlags();
 }
 
@@ -132,6 +133,9 @@ QmgrJobUpdater::initJobQueueAttrLists( void )
 	common_job_queue_attrs->insert( ATTR_BLOCK_WRITE_KBYTES );
 	common_job_queue_attrs->insert( ATTR_BLOCK_READ_KBYTES );
 	common_job_queue_attrs->insert( ATTR_JOB_VM_CPU_UTILIZATION );
+	common_job_queue_attrs->insert( ATTR_TRANSFERRING_INPUT );
+	common_job_queue_attrs->insert( ATTR_TRANSFERRING_OUTPUT );
+	common_job_queue_attrs->insert( ATTR_TRANSFER_QUEUED );
 
 	hold_job_queue_attrs = new StringList();
 	hold_job_queue_attrs->insert( ATTR_HOLD_REASON );
@@ -209,7 +213,6 @@ QmgrJobUpdater::resetUpdateTimer( void )
 {
 	if ( q_update_tid < 0 ) {
 		startUpdateTimer();
-		return;
 	}
 
 	int q_interval = param_integer( "SHADOW_QUEUE_UPDATE_INTERVAL", 15*60 );
@@ -277,7 +280,7 @@ bool
 QmgrJobUpdater::updateAttr( const char *name, int value, bool updateMaster, bool log )
 {
 	MyString buf;
-    buf.sprintf("%d", value);
+    buf.formatstr("%d", value);
 	return updateAttr(name, buf.Value(), updateMaster, log);
 }
 
@@ -290,6 +293,7 @@ QmgrJobUpdater::updateJob( update_t type, SetAttributeFlags_t commit_flags )
 	bool had_error = false;
 	const char* name;
 	char *value = NULL;
+	std::list< std::string > undirty_attrs;
 	
 	StringList* job_queue_attrs = NULL;
 	switch( type ) {
@@ -314,6 +318,7 @@ QmgrJobUpdater::updateJob( update_t type, SetAttributeFlags_t commit_flags )
 	case U_X509:
 		job_queue_attrs = x509_job_queue_attrs;
 		break;
+	case U_STATUS:
 	case U_PERIODIC:
 			// No special attributes needed...
 		break;
@@ -346,6 +351,7 @@ QmgrJobUpdater::updateJob( update_t type, SetAttributeFlags_t commit_flags )
 			if( ! updateExprTree(name, tree) ) {
 				had_error = true;
 			}
+			undirty_attrs.push_back( name );
 		}
 	}
 	m_pull_attrs->rewind();
@@ -360,6 +366,7 @@ QmgrJobUpdater::updateJob( update_t type, SetAttributeFlags_t commit_flags )
 			had_error = true;
 		} else {
 			job_ad->AssignExpr( name, value );
+			undirty_attrs.push_back( name );
 		}
 		free( value );
 	}
@@ -375,7 +382,12 @@ QmgrJobUpdater::updateJob( update_t type, SetAttributeFlags_t commit_flags )
 	if( had_error ) {
 		return false;
 	}
-	job_ad->ClearAllDirtyFlags();
+	for(std::list< std::string >::iterator itr = undirty_attrs.begin();
+		itr != undirty_attrs.end();
+		++itr)
+	{
+		job_ad->SetDirtyFlag(itr->c_str(),false);
+	}
 	return true;
 }
 
@@ -402,12 +414,12 @@ QmgrJobUpdater::retrieveJobUpdates( void )
 	DisconnectQ( NULL, false );
 
 	dprintf( D_FULLDEBUG, "Retrieved updated attributes from schedd\n" );
-	updates.dPrint( D_JOB );
+	dPrintAd( D_JOB, updates );
 	MergeClassAds( job_ad, &updates, true );
 
 	DCSchedd schedd( schedd_addr );
 	if ( schedd.clearDirtyAttrs( &job_ids, &errstack ) == NULL ) {
-		dprintf( D_ALWAYS, "clearDirtyAttrs() failed: %s\n", errstack.getFullText( ) );
+		dprintf( D_ALWAYS, "clearDirtyAttrs() failed: %s\n", errstack.getFullText().c_str() );
 		return false;
 	}
 	return true;
@@ -497,6 +509,10 @@ QmgrJobUpdater::watchAttribute( const char* attr, update_t type  )
 		break;
 	case U_X509:
 		job_queue_attrs = x509_job_queue_attrs;
+		break;
+	case U_STATUS:
+		EXCEPT( "Programmer error: QmgrJobUpdater::watchAttribute() called "
+				"with U_STATUS" );
 		break;
 	case U_PERIODIC:
 		EXCEPT( "Programmer error: QmgrJobUpdater::watchAttribute() called "

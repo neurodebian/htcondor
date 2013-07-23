@@ -260,7 +260,7 @@ ParallelShadow::getResources( void )
             
 			job_ad = new ClassAd();
 
-			if( !job_ad->initFromStream(*sock)  ) {
+			if( !getClassAd(sock, *job_ad)  ) {
 				EXCEPT( "Failed to get job classad for proc %d", i );
 			}
 
@@ -547,18 +547,24 @@ ParallelShadow::emailTerminateEvent( int exitReason, update_style_t kind )
 
 void 
 ParallelShadow::shutDown( int exitReason )
-{
+{	
 	if (exitReason != JOB_NOT_STARTED) {
 		if (shutdownPolicy == WAIT_FOR_ALL) {
+			
+			unsigned int iResources = ResourceList.length();
+			
 			for ( int i=0 ; i<=ResourceList.getlast() ; i++ ) {
 				RemoteResource *r = ResourceList[i];
 				// If the policy is wait for all nodes to exit
 				// see if any are still running.  If so,
 				// just return, and wait for them all to go
-				if (r->getResourceState() != RR_FINISHED) {
-					return;
+				if (r->getResourceState() != RR_FINISHED ) {
+				    dprintf( D_FULLDEBUG, "ParallelShadow::shutDown WAIT_FOR_ALL Not all resources have FINISHED\n");
+				    return;
 				}
 			}
+			
+			dprintf( D_FULLDEBUG, "ParallelShadow::shutDown WAIT_FOR_ALL - All(%d) resources have called exit/shutdown\n",iResources );
 			
 		}
 			// If node0 is still running, don't really shut down
@@ -743,7 +749,7 @@ ParallelShadow::updateFromStarter(int  /*command*/, Stream *s)
 {
 	ClassAd update_ad;
 	s->decode();
-	update_ad.initFromStream(*s);
+	getClassAd(s, update_ad);
 	s->end_of_message();
 	return updateFromStarterClassAd(&update_ad);
 }
@@ -895,6 +901,26 @@ ParallelShadow::bytesReceived( void )
 		total += mpi_res->bytesReceived();
 	}
 	return total;
+}
+
+void
+ParallelShadow::getFileTransferStatus(FileTransferStatus &upload_status,FileTransferStatus &download_status)
+{
+	MpiResource* mpi_res;
+	int i;
+	for( i=0; i<=ResourceList.getlast() ; i++ ) {
+		mpi_res = ResourceList[i];
+		FileTransferStatus this_upload_status = XFER_STATUS_UNKNOWN;
+		FileTransferStatus this_download_status = XFER_STATUS_UNKNOWN;
+		mpi_res->getFileTransferStatus(this_upload_status,this_download_status);
+
+		if( this_upload_status == XFER_STATUS_ACTIVE || upload_status == XFER_STATUS_UNKNOWN ) {
+			upload_status = this_upload_status;
+		}
+		if( this_download_status == XFER_STATUS_ACTIVE || download_status == XFER_STATUS_UNKNOWN ) {
+			download_status = this_download_status;
+		}
+	}
 }
 
 int

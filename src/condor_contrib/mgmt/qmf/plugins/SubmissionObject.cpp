@@ -189,7 +189,7 @@ SubmissionObject::GetJobSummaries ( Variant::List &jobs,
 			NULL
 			};
 
-	constraint.sprintf("%s == \"%s\"",
+	constraint.formatstr("%s == \"%s\"",
 					   ATTR_JOB_SUBMISSION, this->m_name.c_str());
 
 	dprintf(D_FULLDEBUG,"GetJobSummaries for submission: %s\n",constraint.Value());
@@ -199,8 +199,8 @@ SubmissionObject::GetJobSummaries ( Variant::List &jobs,
 	while (NULL != (ad = GetNextJobByConstraint(constraint.Value(), init_scan))) {
 
 		// debug
-//		if (DebugFlags & D_FULLDEBUG) {
-//			ad->dPrint(D_FULLDEBUG|D_NOHEADER);
+//		if (IsFulldebug(D_FULLDEBUG)) {
+//			dPrintAd(D_FULLDEBUG|D_NOHEADER, *ad);
 //		}
 
 		for (int i = 0; NULL != ATTRS[i]; i++) {
@@ -213,7 +213,7 @@ SubmissionObject::GetJobSummaries ( Variant::List &jobs,
 		init_scan = 0;
 
 		// debug
-//		if (DebugFlags & D_FULLDEBUG) {
+//		if (IsFulldebug(D_FULLDEBUG)) {
 //			std::ostringstream oss;
 //			oss << jobs;
 //			dprintf(D_FULLDEBUG|D_NOHEADER, "%s\n",oss.str().c_str());

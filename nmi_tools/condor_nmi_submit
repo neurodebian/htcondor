@@ -34,7 +34,7 @@ my $HAS_NMICONF = $INC{"NmiConf.pm"};
 use vars qw/ $opt_build $opt_test
     $opt_help $opt_debug $opt_notify $opt_notify_fail_only $opt_platforms $opt_nmi_glue 
     $opt_workspace $opt_git
-    $opt_tag $opt_module $opt_nmiconf $opt_desc $opt_append
+    $opt_tag $opt_module $opt_nmiconf $opt_desc $opt_append $opt_importance
     $opt_submit_xtests $opt_configure $opt_src_tag $opt_other_tag
     $opt_nightly $opt_externals $opt_without_tests
     $opt_clear_externals_cache $opt_use_externals_cache
@@ -43,7 +43,7 @@ use vars qw/ $opt_build $opt_test
     $opt_build_args
 	$opt_skip_doc $opt_sha1 $opt_private_build
     $opt_buildid $opt_test_src $opt_test_timeout $opt_test_class
-    $opt_input_platform $opt_tests_at_once
+    $opt_input_platform $opt_tests_at_once $opt_coverity_analysis
     /;
 
 sub TRUE { 1; };
@@ -216,7 +216,7 @@ foreach $tag (sort keys %tags ) {
 
 	# Uses SubmitInfo.pm to get configuration info.
    	getSubmitInfoNew( $tag, $opt_src_tag );
-   	$cmdfile = createSubmitFilesNew( $tag, $opt_src_tag, $opt_other_tag );
+   	$cmdfile = createSubmitFilesNew( $tag, $opt_src_tag, $opt_other_tag, $opt_importance );
    	submitRun( $cmdfile, $tag );
 }
 
@@ -331,6 +331,7 @@ sub parseOptions
            'nmiconf=s'     => \$opt_nmiconf,
            'desc=s'        => \$opt_desc,
            'append=s'      => \$opt_append,
+           'importance=i'  => \$opt_importance,
            'submit-xtests!' => \$opt_submit_xtests,
 		   # This next option is poorly used and should be removed/redone.
 		   # It is used in build/platform_post to pass stuff to the test
@@ -357,6 +358,7 @@ sub parseOptions
 		   'skip-doc' => \$opt_skip_doc,
 		   'sha1=s' => \$opt_sha1,
 		   'private-build:s' => \$opt_private_build,
+		   'coverity-analysis' => \$opt_coverity_analysis,
 # test-specific options
            'buildid=i'     => \$opt_buildid,
            'test-src=s'    => \$opt_test_src,
@@ -848,7 +850,7 @@ sub removeDuplicates
 
 sub createSubmitFilesNew
 {
-    my ( $tag, $srctag, $othertag ) = @_;
+    my ( $tag, $srctag, $othertag, $importance ) = @_;
     my $module;
     my @fetch_files;
     my $cmdfile = "cmdfile";
@@ -930,7 +932,9 @@ sub createSubmitFilesNew
 	# newer ones first.  Setting the user job prio to the Qdate should
 	# help with this.
 
-	print CMDFILE "+priority = ", time, "\n";
+	my $job_prio = time;
+	if (defined($importance)) { $job_prio = $job_prio + ($importance * 3600); }
+	print CMDFILE "+priority = $job_prio\n";
 
 	close CMDFILE;
     return $cmdfile;
@@ -1342,6 +1346,10 @@ EOF
     print $fh "platform_post = nmi_tools/glue/build/platform_post\n";
 
 	print $fh "post_all = nmi_tools/glue/build/post_all\n";
+
+    if( defined($opt_coverity_analysis)) {
+    	print $fh "remote_declare_args = --coverity-analysis\n";
+    }
 
     if( defined($opt_use_externals_cache) ) {
 		$common_pre_args .= ' --use-externals-cache';

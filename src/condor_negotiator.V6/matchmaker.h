@@ -33,8 +33,6 @@
 #include <map>
 #include <algorithm>
 
-using namespace std;
-
 /* FILESQL include */
 #include "file_sql.h"
 
@@ -70,12 +68,17 @@ struct GroupEntry {
     double quota;
     // slots requested: jobs submitted against this group
     double requested;
+    // slots requested, not mutated
+    double currently_requested;
     // slots allocated to this group by HGQ
     double allocated;
     // sum of slot quotas in this subtree
     double subtree_quota;
     // all slots requested by this group and its subtree
     double subtree_requested;
+
+	// sum of usage of this node and all children
+	double subtree_usage;
     // true if this group got served by most recent round robin
     bool rr;
     // timestamp of most recent allocation from round robin
@@ -155,6 +158,7 @@ class Matchmaker : public Service
 		// auxillary functions
 		bool obtainAdsFromCollector (ClassAdList&, ClassAdListDoesNotDeleteAds&, ClassAdListDoesNotDeleteAds&, ClaimIdHash& );	
 		char * compute_significant_attrs(ClassAdListDoesNotDeleteAds & startdAds);
+		bool consolidate_globaljobprio_submitter_ads(ClassAdListDoesNotDeleteAds & scheddAds);
 		
 		/** Negotiate w/ one schedd for one user, for one 'pie spin'.
             @param groupName name of group negotiating under (or NULL)
@@ -179,7 +183,7 @@ class Matchmaker : public Service
 		   double priority,
            double submitterLimit, double submitterLimitUnclaimed,
 		   ClassAdListDoesNotDeleteAds &startdAds, ClaimIdHash &claimIds, 
-		   bool ignore_schedd_limit, time_t startTime, 
+		   bool ignore_schedd_limit, time_t deadline,
            int& numMatched, double &pieLeft);
 
 		int negotiateWithGroup ( int untrimmed_num_startds,
@@ -304,8 +308,10 @@ class Matchmaker : public Service
 		bool preemption_rank_unstable;
 		ExprTree *NegotiatorPreJobRank;  // rank applied before job rank
 		ExprTree *NegotiatorPostJobRank; // rank applied after job rank
+		bool want_globaljobprio;	// cached value of config knob USE_GLOBAL_JOB_PRIOS
 		bool want_matchlist_caching;	// should we cache matches per autocluster?
 		bool ConsiderPreemption; // if false, negotiation is faster (default=true)
+		bool ConsiderEarlyPreemption; // if false, do not preempt slots that still have retirement time
 		/// Should the negotiator inform startds of matches?
 		bool want_inform_startd;	
 		/// Should the negotiator use non-blocking connect to contact startds?
@@ -491,6 +497,8 @@ class Matchmaker : public Service
 
 		void StartNewNegotiationCycleStat();
 		void publishNegotiationCycleStats( ClassAd *ad );
+
+		double calculate_subtree_usage(GroupEntry *group);
 };
 GCC_DIAG_ON(float-equal)
 

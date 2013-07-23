@@ -127,10 +127,10 @@ change_monolithicSparse_snapshot_vmdk_file(const char* file, bool use_fullpath, 
 			// parentfilename is not fullpath
 			if(	dirpath[0] == '/' ) {
 				// submitted from Linux machine
-				final_parentfilename.sprintf("%s/%s", dirpath, parentfilename.Value());
+				final_parentfilename.formatstr("%s/%s", dirpath, parentfilename.Value());
 			}else {
 				// submitted from Windows machine
-				final_parentfilename.sprintf("%s\\%s", dirpath, parentfilename.Value());
+				final_parentfilename.formatstr("%s\\%s", dirpath, parentfilename.Value());
 			}
 			is_modified = true;
 		}
@@ -252,20 +252,20 @@ change_snapshot_vmdk_file(const char* file, bool use_fullpath, const char* dirpa
 			
 					if(	dirpath[0] == '/' ) {
 						// submitted from Linux machine
-						tmp_fullname.sprintf("%s/%s", dirpath, value.Value());
+						tmp_fullname.formatstr("%s/%s", dirpath, value.Value());
 					}else {
 						// submitted from Windows machine
-						tmp_fullname.sprintf("%s\\%s", dirpath, value.Value());
+						tmp_fullname.formatstr("%s\\%s", dirpath, value.Value());
 					}
 
-					tmp_line.sprintf("%s=\"%s\"\n", name.Value(), tmp_fullname.Value());
+					tmp_line.formatstr("%s=\"%s\"\n", name.Value(), tmp_fullname.Value());
 					filelines.append(tmp_line.Value());
 					is_modified = true;
 					continue;
 				}
 			}else {
 				if( fullpath(value.Value()) ) {
-					tmp_line.sprintf("%s=\"%s\"\n", name.Value(), condor_basename(value.Value()));
+					tmp_line.formatstr("%s=\"%s\"\n", name.Value(), condor_basename(value.Value()));
 					filelines.append(tmp_line.Value());
 					is_modified = true;
 					continue;
@@ -359,13 +359,13 @@ static void change_snapshot_vmsd_file(const char *file, StringList *parent_filen
 
 						if(	dirpath[0] == '/' ) {
 							// submitted from Linux machine
-							tmp_fullname.sprintf("%s/%s", dirpath, value.Value());
+							tmp_fullname.formatstr("%s/%s", dirpath, value.Value());
 						}else {
 							// submitted from Windows machine
-							tmp_fullname.sprintf("%s\\%s", dirpath, value.Value());
+							tmp_fullname.formatstr("%s\\%s", dirpath, value.Value());
 						}
 
-						tmp_line.sprintf("%s = \"%s\"\n", name.Value(), 
+						tmp_line.formatstr("%s = \"%s\"\n", name.Value(), 
 								tmp_fullname.Value());
 						filelines.append(tmp_line.Value());
 						is_modified = true;
@@ -373,7 +373,7 @@ static void change_snapshot_vmsd_file(const char *file, StringList *parent_filen
 					}
 				}else {
 					if( fullpath(value.Value()) ) {
-						tmp_line.sprintf("%s = \"%s\"\n", name.Value(), 
+						tmp_line.formatstr("%s = \"%s\"\n", name.Value(), 
 								condor_basename(value.Value()));
 						filelines.append(tmp_line.Value());
 						is_modified = true;
@@ -532,11 +532,11 @@ VMwareType::deleteLockFiles()
 	while( (tmp_file = m_initial_working_files.next()) != NULL ) {
 		if( has_suffix(tmp_file, VMWARE_WRITELOCK_SUFFIX) ||
 			has_suffix(tmp_file, VMWARE_READLOCK_SUFFIX)) {
-			unlink(tmp_file);
+			IGNORE_RETURN unlink(tmp_file);
 			m_initial_working_files.deleteCurrent();
 		}else if( has_suffix(tmp_file, ".vmdk") ) {
 			// modify permission for vmdk files
-			chmod(tmp_file, VMWARE_VMDK_FILE_PERM);
+			IGNORE_RETURN chmod(tmp_file, VMWARE_VMDK_FILE_PERM);
 		}
 	}
 
@@ -648,7 +648,7 @@ VMwareType::adjustCkptConfig(const char* vmconfig)
 				tmp_string2 = m_vm_networking_type;
 				tmp_string2.upper_case();
 
-				tmp_string.sprintf("VMWARE_%s_NETWORKING_TYPE", tmp_string2.Value());
+				tmp_string.formatstr("VMWARE_%s_NETWORKING_TYPE", tmp_string2.Value());
 
 				char *net_type = param(tmp_string.Value());
 				if( net_type ) {
@@ -665,7 +665,7 @@ VMwareType::adjustCkptConfig(const char* vmconfig)
 					}
 				}
 
-				tmp_line.sprintf("ethernet0.connectionType = \"%s\"", 
+				tmp_line.formatstr("ethernet0.connectionType = \"%s\"", 
 						networking_type.Value());
 				configVars.append(tmp_line.Value());
 				continue;
@@ -834,7 +834,7 @@ VMwareType::readVMXfile(const char *filename, const char *dirpath)
 					// file is transferred 
 					if( fullpath(value.Value()) ) {
 						// we use basename instead of fullname
-						tmp_line.sprintf("%s = \"%s\"", name.Value(), 
+						tmp_line.formatstr("%s = \"%s\"", name.Value(), 
 								tmp_base_name );
 						m_configVars.append(tmp_line.Value());
 					}else {
@@ -854,10 +854,10 @@ VMwareType::readVMXfile(const char *filename, const char *dirpath)
 					}else {
 						// we create fullname with given dirpath
 						MyString tmp_fullname;
-						tmp_fullname.sprintf("%s%c%s", dirpath, 
+						tmp_fullname.formatstr("%s%c%s", dirpath, 
 								DIR_DELIM_CHAR, tmp_base_name);
 
-						tmp_line.sprintf("%s = \"%s\"", name.Value(), 
+						tmp_line.formatstr("%s = \"%s\"", name.Value(), 
 								tmp_fullname.Value());
 
 						if( !(*dirpath) || check_vm_read_access_file(tmp_fullname.Value()) 
@@ -876,7 +876,7 @@ VMwareType::readVMXfile(const char *filename, const char *dirpath)
 				pos = tmp_name.FindChar('.', 0);
 				if( pos > 0 ) {
 					tmp_name.setChar(pos, '\0');
-					tmp_line.sprintf("%s.writeThrough = \"TRUE\"", tmp_name.Value());
+					tmp_line.formatstr("%s.writeThrough = \"TRUE\"", tmp_name.Value());
 					m_configVars.append(tmp_line.Value());
 				}
 
@@ -1774,22 +1774,22 @@ VMwareType::CreateConfigFile()
 
 	// Read transferred vmx file
 	MyString ori_vmx_file;
-	ori_vmx_file.sprintf("%s%c%s",m_workingpath.Value(), 
+	ori_vmx_file.formatstr("%s%c%s",m_workingpath.Value(), 
 			DIR_DELIM_CHAR, m_vmware_vmx.Value());
 
 	if( readVMXfile(ori_vmx_file.Value(), m_vmware_dir.Value()) 
 			== false ) {
-		unlink(tmp_config_name.Value());
+		IGNORE_RETURN unlink(tmp_config_name.Value());
 		return false;
 	}
 
 	// Add memsize to m_configVars
 	MyString tmp_line;
-	tmp_line.sprintf("memsize = \"%d\"", m_vm_mem);
+	tmp_line.formatstr("memsize = \"%d\"", m_vm_mem);
 	m_configVars.append(tmp_line.Value());
 
 	// Add displyName to m_configVars
-	tmp_line.sprintf("displayName = \"%s\"", m_vm_name.Value());
+	tmp_line.formatstr("displayName = \"%s\"", m_vm_name.Value());
 	m_configVars.append(tmp_line.Value());
 
 	// Add networking parameters to m_configVars
@@ -1801,7 +1801,7 @@ VMwareType::CreateConfigFile()
 		tmp_string2 = m_vm_networking_type;
 		tmp_string2.upper_case();
 
-		tmp_string.sprintf("VMWARE_%s_NETWORKING_TYPE", tmp_string2.Value());
+		tmp_string.formatstr("VMWARE_%s_NETWORKING_TYPE", tmp_string2.Value());
 
 		char *net_type = param(tmp_string.Value());
 		if( net_type ) {
@@ -1819,14 +1819,14 @@ VMwareType::CreateConfigFile()
 		}
 
 		m_configVars.append("ethernet0.present = \"TRUE\"");
-		tmp_line.sprintf("ethernet0.connectionType = \"%s\"", 
+		tmp_line.formatstr("ethernet0.connectionType = \"%s\"", 
 				networking_type.Value());
 		m_configVars.append(tmp_line.Value());
         if (!m_vm_job_mac.IsEmpty())
         {
             vmprintf(D_FULLDEBUG, "mac address is %s\n", m_vm_job_mac.Value());
             m_configVars.append("ethernet0.addressType = \"static\"");
-            tmp_line.sprintf("ethernet0.address = \"%s\"", m_vm_job_mac.Value());
+            tmp_line.formatstr("ethernet0.address = \"%s\"", m_vm_job_mac.Value());
             m_configVars.append(tmp_line.Value());
             //**********************************************************************
             // LIMITATION: the mac address has to be in the range
@@ -1850,7 +1850,7 @@ VMwareType::CreateConfigFile()
 				"with write mode: safe_fopen_wrapper_follow(%s) returns %s\n", 
 				tmp_config_name.Value(), strerror(errno));
 
-		unlink(tmp_config_name.Value());
+		IGNORE_RETURN unlink(tmp_config_name.Value());
 		m_result_msg = VMGAHP_ERR_INTERNAL;
 		return false;
 	}
@@ -1864,7 +1864,7 @@ VMwareType::CreateConfigFile()
 					tmp_config_name.Value(), strerror(errno));
 
 			fclose(config_fp);
-			unlink(tmp_config_name.Value());
+			IGNORE_RETURN unlink(tmp_config_name.Value());
 			m_result_msg = VMGAHP_ERR_INTERNAL;
 			return false;
 		}
@@ -1878,7 +1878,7 @@ VMwareType::CreateConfigFile()
 		vmprintf(D_ALWAYS,
 		         "failed to add local settings in CreateConfigFile\n");
 		fclose(config_fp);
-		unlink(tmp_config_name.Value());
+		IGNORE_RETURN unlink(tmp_config_name.Value());
 		m_result_msg = VMGAHP_ERR_INTERNAL;
 		return false;
 	}
@@ -1891,7 +1891,7 @@ VMwareType::CreateConfigFile()
 		// to create a configuration file for VM
 
 		if( createConfigUsingScript(tmp_config_name.Value()) == false ) {
-			unlink(tmp_config_name.Value());
+			IGNORE_RETURN unlink(tmp_config_name.Value());
 			m_result_msg = VMGAHP_ERR_CRITICAL;
 			return false;
 		}

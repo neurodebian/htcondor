@@ -122,7 +122,7 @@ submit_try( ArgList &args, CondorID &condorID, Job::job_type_t type,
   parse_submit_fnc parseFnc = NULL;
 
   if ( type == Job::TYPE_CONDOR ) {
-    marker = "cluster";
+    marker = " submitted to cluster ";
 
 	  // Note: we *could* check how many jobs got submitted here, and
 	  // correlate that with how many submit events we see later on.
@@ -160,7 +160,9 @@ submit_try( ArgList &args, CondorID &condorID, Job::job_type_t type,
 	}
   }
 
-  {
+  { // Relocated this curly bracket to its previous position to hopefully
+    // fix Coverity warning.  Not sure why these curly brackets are here
+	// at all...  wenger 2013-06-12
     int status = my_pclose(fp) & 0xff;
 
     if (keyLine == "") {
@@ -181,7 +183,19 @@ submit_try( ArgList &args, CondorID &condorID, Job::job_type_t type,
 
   int	jobProcCount;
   if ( !parseFnc( keyLine.Value(), jobProcCount, condorID._cluster) ) {
-	  return false;
+		// We are going forward (do not return false here)
+		// Expectation is that higher levels will catch that we
+		// did not get a cluster initialized properly here, fail,
+		// and write a rescue DAG. gt3658 2013-06-03
+		//
+		// This is better than the old failure that would submit
+		// DAGMAN_MAX_SUBMIT_ATTEMPT copies of the same job.
+      debug_printf( DEBUG_NORMAL, "WARNING: submit returned 0, but "
+        "parsing submit output failed!\n" );
+		// Returning here so we don't try to process invalid values
+		// below.  (This should really return something like "submit failed
+		// don't retry" -- see gittrac #3685.)
+  	  return true;
   }
 
   // Stork job specs have only 1 dimension.  The Stork user log forces the proc
@@ -228,10 +242,10 @@ do_submit( ArgList &args, CondorID &condorID, Job::job_type_t jobType,
 //-------------------------------------------------------------------------
 bool
 condor_submit( const Dagman &dm, const char* cmdFile, CondorID& condorID,
-			   const char* DAGNodeName, MyString DAGParentNodeNames,
-			   List<MyString>* names, List<MyString>* vals,
-			   const char* directory, const char *logFile,
-			   bool prohibitMultiJobs, bool hold_claim )
+			   const char* DAGNodeName, MyString &DAGParentNodeNames,
+			   List<Job::NodeVar> *vars,
+			   const char* directory, const char *defaultLog, bool appendDefaultLog,
+			   const char *logFile, bool prohibitMultiJobs, bool hold_claim )
 {
 	TmpDir		tmpDir;
 	MyString	errMsg;
@@ -307,11 +321,70 @@ condor_submit( const Dagman &dm, const char* cmdFile, CondorID& condorID,
 				"submit_event_notes = DAG Node: " ) + DAGNodeName;
 	args.AppendArg( submitEventNotes.Value() );
 
-	if ( logFile ) {
+		// logFile is null here if there was a log specified
+		// in the submit file
+	if ( !logFile ) {
+		if( appendDefaultLog ) {
+				// We need to append the DAGman default log file to
+				// the log file list
+			args.AppendArg( "-a" );
+			std::string dlog("dagman_log = ");
+			dlog += defaultLog;
+			args.AppendArg(dlog.c_str());
+			debug_printf( DEBUG_VERBOSE, "Adding a DAGMan auxiliary log %s\n", defaultLog );
+				// Now append the mask
+			args.AppendArg( "-a" );
+			std::string dmask("+");
+			dmask += ATTR_DAGMAN_WORKFLOW_MASK;
+			dmask += " = \"";
+			debug_printf( DEBUG_VERBOSE, "Masking the events recorded in the DAGMAN auxiliary log\n" );
+			std::stringstream dmaskstrm;
+			//
+			// IMPORTANT NOTE:  see all events that we deal with in
+			// Dag::ProcessOneEvent() -- all of those need to be in the
+			// event mask!! (wenger 2012-11-16)
+			//
+			int mask[] = {
+				ULOG_SUBMIT,
+				ULOG_EXECUTE,
+				ULOG_EXECUTABLE_ERROR,
+				ULOG_JOB_EVICTED,
+				ULOG_JOB_TERMINATED,
+				ULOG_SHADOW_EXCEPTION,
+				ULOG_JOB_ABORTED,
+				ULOG_JOB_SUSPENDED,
+				ULOG_JOB_UNSUSPENDED,
+				ULOG_JOB_HELD,
+				ULOG_JOB_RELEASED,
+				ULOG_POST_SCRIPT_TERMINATED,
+				ULOG_GLOBUS_SUBMIT,			// For Pegasus
+				ULOG_JOB_RECONNECT_FAILED,
+				ULOG_GRID_SUBMIT,			// For Pegasus
+				-1
+			};
+			for(const int*p = &mask[0]; *p != -1; ++p) {
+				if(p != &mask[0]) {
+					dmaskstrm << ",";
+				}
+				dmaskstrm << *p;
+			}
+			dmask += dmaskstrm.str();
+			debug_printf( DEBUG_VERBOSE, "Mask for auxiliary log is %s\n", dmaskstrm.str().c_str() );
+			dmask += "\"";
+			args.AppendArg(dmask.c_str());
+		}
+	} else {
+			// Log was not specified in the submit file
+			// There is a single user log file for this job;
+			// That is, the default
 		args.AppendArg( "-a" );
-		MyString logFileArg = MyString(
-					"log = " ) + logFile;
-		args.AppendArg( logFileArg.Value() );
+		std::string dlog("log = ");
+		dlog += logFile;
+		args.AppendArg(dlog.c_str());
+			// We are using the default log
+			// Never let it be XML
+		args.AppendArg( "-a" );
+		args.AppendArg( "log_xml = False");
 	}
 
 	ArgList parentNameArgs;
@@ -322,13 +395,12 @@ condor_submit( const Dagman &dm, const char* cmdFile, CondorID& condorID,
 
 		// set any VARS specified in the DAG file
 	MyString anotherLine;
-	ListIterator<MyString> nameIter(*names);
-	ListIterator<MyString> valIter(*vals);
-	MyString name, val;
-	while(nameIter.Next(name) && valIter.Next(val)) {
+	ListIterator<Job::NodeVar> varsIter(*vars);
+	Job::NodeVar nodeVar;
+	while ( varsIter.Next(nodeVar) ) {
 		args.AppendArg( "-a" );
-		MyString var = name + " = " + val;
-		args.AppendArg( var.Value() );
+		MyString varStr = nodeVar._name + " = " + nodeVar._value;
+		args.AppendArg( varStr.Value() );
 	}
 
 		// Set the special DAG_STATUS variable (mainly for use by
@@ -375,6 +447,12 @@ condor_submit( const Dagman &dm, const char* cmdFile, CondorID& condorID,
 		MyString holdit = MyString("+") + MyString(ATTR_JOB_KEEP_CLAIM_IDLE) + " = "
 			+ dm._claim_hold_time;
 		args.AppendArg( holdit.Value() );	
+	}
+	
+	if (dm._submitDagDeepOpts.suppress_notification) {
+		args.AppendArg( "-a" );
+		MyString notify = MyString("notification = never");
+		args.AppendArg( notify.Value() );
 	}
 
 	args.AppendArg( cmdFile );
@@ -440,9 +518,14 @@ set_fake_condorID( int subprocID )
 	_subprocID = subprocID;
 }
 
+int
+get_fake_condorID()
+{
+	return _subprocID;
+}
 //-------------------------------------------------------------------------
 bool
-fake_condor_submit( CondorID& condorID, const char* DAGNodeName, 
+fake_condor_submit( CondorID& condorID, Job* job, const char* DAGNodeName, 
 			   const char* directory, const char *logFile, bool logIsXml )
 {
 	TmpDir		tmpDir;
@@ -461,13 +544,16 @@ fake_condor_submit( CondorID& condorID, const char* DAGNodeName,
 	condorID._proc = Job::NOOP_NODE_PROCID;
 	condorID._subproc = _subprocID;
 
+		// Make sure that this job gets marked as a NOOP 
+	if( job ) {
+		job->SetCondorID( condorID );
+	}
 
 	WriteUserLog ulog;
 	ulog.setEnableGlobalLog( false );
 	ulog.setUseXML( logIsXml );
-	ulog.initialize( logFile, condorID._cluster, condorID._proc,
-				condorID._subproc, NULL );
-
+	ulog.initialize( std::vector<const char*>(1,logFile), condorID._cluster,
+		condorID._proc, condorID._subproc, NULL );
 
 	SubmitEvent subEvent;
 	subEvent.cluster = condorID._cluster;
@@ -502,5 +588,53 @@ fake_condor_submit( CondorID& condorID, const char* DAGNodeName,
 		return false;
 	}
 
+	return true;
+}
+
+bool writePreSkipEvent( CondorID& condorID, Job* job, const char* DAGNodeName, 
+			   const char* directory, const char *logFile, bool logIsXml )
+{
+	TmpDir tmpDir;
+	MyString	errMsg;
+	if ( !tmpDir.Cd2TmpDir( directory, errMsg ) ) {
+		debug_printf( DEBUG_QUIET,
+				"Could not change to node directory %s: %s\n",
+				directory, errMsg.Value() );
+		return false;
+	}
+
+		// Special CondorID for NOOP jobs -- actually indexed by
+		// otherwise-unused subprocID.
+	condorID._cluster = 0;
+	condorID._proc = Job::NOOP_NODE_PROCID;
+
+	condorID._subproc = 1+get_fake_condorID();
+		// Increment this value
+	set_fake_condorID(condorID._subproc);
+
+	if( job ) {
+		job->SetCondorID( condorID );
+	}
+
+	WriteUserLog ulog;
+	ulog.setEnableGlobalLog( false );
+	ulog.setUseXML( logIsXml );
+	ulog.initialize( std::vector<const char*>(1,logFile), condorID._cluster,
+		condorID._proc, condorID._subproc, NULL );
+
+	PreSkipEvent pEvent;
+	pEvent.cluster = condorID._cluster;
+	pEvent.proc = condorID._proc;
+	pEvent.subproc = condorID._subproc;
+
+	MyString pEventNotes("DAG Node: " );
+	pEventNotes += DAGNodeName;
+		// skipEventLogNotes gets deleted in PreSkipEvent destructor.
+	pEvent.skipEventLogNotes = strnewp( pEventNotes.Value() );
+
+	if ( !ulog.writeEvent( &pEvent ) ) {
+		EXCEPT( "Error: writing PRESKIP event failed!\n" );
+		return false;
+	}
 	return true;
 }

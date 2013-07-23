@@ -28,10 +28,6 @@
 /* XXX fix me */
 #include "../condor_sysapi/sysapi.h"
 
-#ifndef max
-#define max(x,y) (((x) < (y)) ? (y) : (x))
-#endif
-
 extern "C" int tcp_accept_timeout( int, struct sockaddr*, int*, int );
 
 static int deactivate_claim(Stream *stream, Resource *rip, bool graceful);
@@ -89,7 +85,7 @@ deactivate_claim(Stream *stream, Resource *rip, bool graceful)
 
 	ClassAd response_ad;
 	response_ad.Assign(ATTR_START,!claim_is_closing);
-	if( !response_ad.put(*stream) || !stream->end_of_message() ) {
+	if( !putClassAd(stream, response_ad) || !stream->end_of_message() ) {
 		dprintf(D_FULLDEBUG,"Failed to send response ClassAd in deactivate_claim.\n");
 			// Prior to 7.0.5, no response ClassAd was expected.
 			// Anyway, failure to send it is not (currently) critical
@@ -267,7 +263,7 @@ command_give_totals_classad( Service*, int, Stream* stream )
 	dprintf( D_FULLDEBUG, "command_give_totals_classad() called.\n" );
 	stream->encode();
 	if( resmgr->totals_classad ) {
-		resmgr->totals_classad->put( *stream );
+		putClassAd( stream, *resmgr->totals_classad );
 		rval = TRUE;
 	}
 	stream->end_of_message();
@@ -635,7 +631,7 @@ command_query_ads( Service*, int, Stream* stream)
 
 	stream->decode();
     stream->timeout(15);
-	if( !queryAd.initFromStream(*stream) || !stream->end_of_message()) {
+	if( !getClassAd(stream, queryAd) || !stream->end_of_message()) {
         dprintf( D_ALWAYS, "Failed to receive query on TCP: aborting\n" );
 		return FALSE;
 	}
@@ -666,7 +662,7 @@ command_query_ads( Service*, int, Stream* stream)
 	ads.Open();
 	while( (ad = ads.Next()) ) {
 		if( IsAHalfMatch( &queryAd, ad ) ) {
-			if( !stream->code(more) || !ad->put(*stream) ) {
+			if( !stream->code(more) || !putClassAd(stream, *ad) ) {
 				dprintf (D_ALWAYS, 
 						 "Error sending query result to client -- aborting\n");
 				return FALSE;
@@ -1079,7 +1075,7 @@ request_claim( Resource* rip, Claim *claim, char* id, Stream* stream )
 	claim->cancel_match_timer();
 
 		// Get the classad of the request.
-	if( !req_classad->initFromStream(*stream) ) {
+	if( !getClassAd(stream, *req_classad) ) {
 		rip->dprintf( D_ALWAYS, "Can't receive classad from schedd\n" );
 		ABORT;
 	}
@@ -1370,7 +1366,7 @@ accept_request_claim( Resource* rip, Claim* leftover_claim )
 		dprintf(D_FULLDEBUG,"Will send partitionable slot leftovers to schedd\n");
 		MyString claimId(leftover_claim->id());
 		if ( !stream->put(claimId) ||
-			 !leftover_claim->rip()->r_classad->put(*stream) )
+			 !putClassAd(stream, *leftover_claim->rip()->r_classad) )
 		{
 			rip->dprintf( D_ALWAYS, 
 				"Can't send partitionable slot leftovers to schedd.\n" );
@@ -1517,7 +1513,7 @@ activate_claim( Resource* rip, Stream* stream )
 
 		// Grab request class ad 
 	req_classad = new ClassAd;
-	if( !req_classad->initFromStream(*stream) ) {
+	if( !getClassAd(stream, *req_classad) ) {
 		rip->dprintf( D_ALWAYS, "Can't receive request classad from shadow.\n" );
 		ABORT;
 	}
@@ -1540,13 +1536,13 @@ activate_claim( Resource* rip, Stream* stream )
 
 		// Possibly print out the ads we just got to the logs.
 	rip->dprintf( D_JOB, "REQ_CLASSAD:\n" );
-	if( DebugFlags & D_JOB ) {
-		req_classad->dPrint( D_JOB );
+	if( IsDebugLevel( D_JOB ) ) {
+		dPrintAd( D_JOB, *req_classad );
 	}
 	  
 	rip->dprintf( D_MACHINE, "MACHINE_CLASSAD:\n" );
-	if( DebugFlags & D_MACHINE ) {
-		mach_classad->dPrint( D_MACHINE );
+	if( IsDebugLevel( D_MACHINE ) ) {
+		dPrintAd( D_MACHINE, *mach_classad );
 	}
 
 		// See if machine and job meet each other's requirements, if
@@ -2025,7 +2021,7 @@ caLocateStarter( Stream *s, char* cmd_str, ClassAd* req_ad )
 		 strcasecmp( startd_sends_alives.c_str(), "false" ) )
 	{
 		MyString err_msg;
-		err_msg.sprintf("Required %s, not found in request",
+		err_msg.formatstr("Required %s, not found in request",
 						ATTR_SCHEDD_IP_ADDR);
 		sendErrorReply( s, cmd_str, CA_FAILURE, err_msg.Value() );
 		rval = FALSE;
@@ -2232,7 +2228,7 @@ command_drain_jobs( Service*, int /*dc_cmd*/, Stream* s )
 	ClassAd ad;
 
 	s->decode();
-	if( !ad.initFromStream(*s) ) {
+	if( !getClassAd(s, ad) ) {
 		dprintf(D_ALWAYS,"command_drain_jobs: failed to read classad from %s\n",s->peer_description());
 		return FALSE;
 	}
@@ -2242,7 +2238,7 @@ command_drain_jobs( Service*, int /*dc_cmd*/, Stream* s )
 	}
 
 	dprintf(D_ALWAYS,"Processing drain request from %s\n",s->peer_description());
-	ad.dPrint(D_ALWAYS);
+	dPrintAd(D_ALWAYS, ad);
 
 	int how_fast = DRAIN_GRACEFUL;
 	ad.LookupInteger(ATTR_HOW_FAST,how_fast);
@@ -2267,7 +2263,7 @@ command_drain_jobs( Service*, int /*dc_cmd*/, Stream* s )
 		response_ad.Assign(ATTR_ERROR_CODE,error_code);
 	}
 	s->encode();
-	if( !response_ad.put(*s) || !s->end_of_message() ) {
+	if( !putClassAd(s, response_ad) || !s->end_of_message() ) {
 		dprintf(D_ALWAYS,"command_drain_jobs: failed to send response to %s\n",s->peer_description());
 		return FALSE;
 	}
@@ -2281,7 +2277,7 @@ command_cancel_drain_jobs( Service*, int /*dc_cmd*/, Stream* s )
 	ClassAd ad;
 
 	s->decode();
-	if( !ad.initFromStream(*s) ) {
+	if( !getClassAd(s, ad) ) {
 		dprintf(D_ALWAYS,"command_cancel_drain_jobs: failed to read classad from %s\n",s->peer_description());
 		return FALSE;
 	}
@@ -2291,7 +2287,7 @@ command_cancel_drain_jobs( Service*, int /*dc_cmd*/, Stream* s )
 	}
 
 	dprintf(D_ALWAYS,"Processing cancel drain request from %s\n",s->peer_description());
-	ad.dPrint(D_ALWAYS);
+	dPrintAd(D_ALWAYS, ad);
 
 	std::string request_id;
 	ad.LookupString(ATTR_REQUEST_ID,request_id);
@@ -2310,7 +2306,7 @@ command_cancel_drain_jobs( Service*, int /*dc_cmd*/, Stream* s )
 		response_ad.Assign(ATTR_ERROR_CODE,error_code);
 	}
 	s->encode();
-	if( !response_ad.put(*s) || !s->end_of_message() ) {
+	if( !putClassAd(s, response_ad) || !s->end_of_message() ) {
 		dprintf(D_ALWAYS,"command_cancel_drain_jobs: failed to send response to %s\n",s->peer_description());
 		return FALSE;
 	}

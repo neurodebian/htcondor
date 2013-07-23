@@ -23,6 +23,7 @@
 
 #include "classad/common.h"
 #include "classad/util.h"
+#include "classad/classad_stl.h"
 
 
 namespace classad {
@@ -47,7 +48,8 @@ class Value
 		/** An absolute time value */ 			ABSOLUTE_TIME_VALUE = 1<<6,
 		/** A string value */ 					STRING_VALUE        = 1<<7,
 		/** A classad value */ 					CLASSAD_VALUE       = 1<<8,
-		/** An expression list value */     	LIST_VALUE 			= 1<<9
+		/** A list value (not owned here)*/	            LIST_VALUE 			= 1<<9,
+		/** A list value (owned via shared_ptr)*/     	SLIST_VALUE 		= 1<<10
 		};
 
 			/// Number factors
@@ -97,7 +99,7 @@ class Value
 		/** Sets an integer value; previous value discarded.
 			@param i The integer value.
 		*/
-		void SetIntegerValue(int i);
+		void SetIntegerValue(long long i);
 
 		/** Sets the undefined value; previous value discarded.
 		*/
@@ -107,8 +109,17 @@ class Value
 		*/
 		void SetErrorValue(void);
 
-		/** Sets an expression list value; previous value discarded. You still own the ExprList:: it 
-            is not owned by the Value class, so it is your responsibility to delete it. 
+		/** Sets an expression list value; previous value discarded. Unlike the
+			version of this function that takes a raw ExprList pointer, this one
+			takes (shared) ownership over the list.  This list will be deleted
+			when the last copy of this shared_ptr goes away.
+			@param l The list value.
+		*/
+		void SetListValue(classad_shared_ptr<ExprList> l);
+
+		/** Sets an expression list value; previous value discarded. Unlike the
+			version of this function that takes a shared_ptr, you still own the ExprList:: it 
+			is not owned by the Value class, so it is your responsibility to delete it. 
 			@param l The list value.
 		*/
 		void SetListValue(ExprList* l);
@@ -169,11 +180,14 @@ class Value
 
 		/** Checks if the value is integral.
 			@param i The integer value if the value is integer.
+			If the type of i is smaller than a long long, the value
+			may be truncated.
 			@return true iff the value is an integer.
 		*/
 		inline bool IsIntegerValue(int &i) const;
+		inline bool IsIntegerValue(long &i) const;
+		inline bool IsIntegerValue(long long &i) const;
 		/** Checks if the value is integral.
-			@param i The integer value if the value is integer.
 			@return true iff the value is an integer.
 		*/
 		inline bool IsIntegerValue() const;
@@ -220,15 +234,23 @@ class Value
 		*/
 		inline bool IsListValue(const ExprList*& l) const;
 		/** Checks if the value is an expression list. The ExprList returned is 
-            the original list put into the ClassAd, so you only own it if you own 
-            the original.
+			the original list put into the Value, so you only own it if you own 
+			the original.  If the original was put into this Value as a shared_ptr,
+			the shared_ptr still owns it (i.e. don't delete this pointer or
+			make a new shared_ptr for it).  Consider using IsSListValue() instead.
 			@param l The expression list if the value is an expression list. 
 			@return true iff the value is an expression list.
 		*/
 		inline bool IsListValue(ExprList*& l);
-		/** Checks if the value is an expression list. The ExprList returned is 
-            the original list put into the ClassAd, so you only own it if you own 
-            the original.
+		/** Checks if the value is an expression list.
+			@param l A shared_ptr to the expression list if the value is an expression list.
+			         Note that if the list was not set via a shared_ptr, a copy of the
+			         list will be made and this Value will convert from type LIST_VALUE
+			         to SLIST_VALUE as a side-effect.
+			@return true iff the value is an expression list
+		*/
+		bool IsSListValue(classad_shared_ptr<ExprList>& l);
+		/** Checks if the value is an expression list.
 			@return true iff the value is an expression list.
 		*/
 		inline bool IsListValue() const;
@@ -260,18 +282,27 @@ class Value
 			@return true iff the value is either undefined or error.
 		*/
 		inline bool IsExceptional() const;
-		/** Checks if the value is numerical. 
+		/** Checks if the value is numerical.
+			This includes booleans, which can be used in arithmetic.
 			@return true iff the value is a number
 		*/
 		bool IsNumber () const;
 		/** Checks if the value is numerical. If the value is a real, it is 
 				converted to an integer through truncation.
+				If the value is a boolean, it is converted to 0 (for False)
+				or 1 (for True).
 			@param i The integer value of the value if the value is a number.
+			If the type of i is smaller than a long long, the value
+			may be truncated.
 			@return true iff the value is a number
 		*/
 		bool IsNumber (int &i) const;
+		bool IsNumber (long &i) const;
+		bool IsNumber (long long &i) const;
 		/** Checks if the value is numerical. If the value is an integer, it 
 				is promoted to a real.
+				If the value is a bollean, it is converted to 0.0 (for False)
+				or 1.0 (for True).
 			@param r The real value of the value if the value is a number.
 			@return true iff the value is a number
 		*/
@@ -303,6 +334,8 @@ class Value
 		friend std::ostream& operator<<(std::ostream &stream, Value &value);
 
 	private:
+		void _Clear();
+
 		friend class Literal;
 		friend class ClassAd;
 		friend class ExprTree;
@@ -312,15 +345,15 @@ class Value
 
 		union {
 			bool			booleanValue;
-			int				integerValue;
+			long long		integerValue;
 			double 			realValue;
 			ExprList        *listValue;
+			classad_shared_ptr<ExprList> *slistValue;
 			ClassAd			*classadValue;
 			double			relTimeValueSecs;
-			abstime_t absTimeValueSecs;
-		  
+			abstime_t		*absTimeValueSecs;
+			std::string		*strValue;
 		};
-		std::string			strValue;		// has ctor/dtor cannot be in the union
 };
 
 bool convertValueToRealValue(const Value value, Value &realValue);
@@ -343,6 +376,20 @@ IsBooleanValue() const
 
 inline bool Value::
 IsIntegerValue (int &i) const
+{
+    i = (int)integerValue;
+    return (valueType == INTEGER_VALUE);
+}  
+
+inline bool Value::
+IsIntegerValue (long &i) const
+{
+    i = (long)integerValue;
+    return (valueType == INTEGER_VALUE);
+}  
+
+inline bool Value::
+IsIntegerValue (long long &i) const
 {
     i = integerValue;
     return (valueType == INTEGER_VALUE);
@@ -373,6 +420,9 @@ IsListValue( const ExprList *&l) const
     if (valueType == LIST_VALUE) {
         l = listValue;
         return true;
+    } else if (valueType == SLIST_VALUE) {
+        l = slistValue->get();
+        return true;
     } else {
         return false;
     }
@@ -384,6 +434,9 @@ IsListValue( ExprList *&l)
     if (valueType == LIST_VALUE) {
         l = listValue;
         return true;
+    } else if (valueType == SLIST_VALUE) {
+        l = slistValue->get();
+        return true;
     } else {
         return false;
     }
@@ -392,7 +445,7 @@ IsListValue( ExprList *&l)
 inline bool Value::
 IsListValue () const
 {
-	return (valueType == LIST_VALUE);
+	return (valueType == LIST_VALUE || valueType == SLIST_VALUE);
 }
 
 
@@ -411,7 +464,7 @@ IsStringValue( const char *&s ) const
 	// So it best to only touch it if it exists.
 	// (Example: the strcat classad function)
 	if (valueType == STRING_VALUE) {
-		s = strValue.c_str( );
+		s = strValue->c_str( );
 		return true;
 	} else {
 		return false;
@@ -422,7 +475,7 @@ inline bool Value::
 IsStringValue( char *s, int len ) const
 {
 	if( valueType == STRING_VALUE ) {
-		strncpy( s, strValue.c_str( ), len );
+		strncpy( s, strValue->c_str( ), len );
 		return( true );
 	}
 	return( false );
@@ -432,7 +485,7 @@ inline bool Value::
 IsStringValue( std::string &s ) const
 {
 	if ( valueType == STRING_VALUE ) {
-		s = strValue;
+		s = *strValue;
 		return true;
 	} else {
 		return false;
@@ -443,7 +496,7 @@ inline bool Value::
 IsStringValue( int &size ) const
 {
     if (valueType == STRING_VALUE) {
-        size = strValue.size();
+        size = strValue->size();
         return true;
     } else {
         size = -1;
@@ -506,8 +559,12 @@ IsAbsoluteTimeValue( ) const
 inline bool Value::
 IsAbsoluteTimeValue( abstime_t &secs ) const
 {
-	secs = absTimeValueSecs;
-	return( valueType == ABSOLUTE_TIME_VALUE );
+	if ( valueType == ABSOLUTE_TIME_VALUE ) {
+		secs = *absTimeValueSecs;
+		return true;
+	} else {
+		return false;
+	}
 }
 
 inline bool Value::

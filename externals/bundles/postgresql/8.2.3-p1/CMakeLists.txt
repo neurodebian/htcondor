@@ -47,17 +47,16 @@ if (WITH_POSTGRESQL)
 
 		ExternalProject_Add(postgresql
 							#-- Download Step ----------
-							DOWNLOAD_COMMAND wget -N http://parrot.cs.wisc.edu/externals/${POSTGRESQL_VER}.tar.gz ${CMD_TERM}
 							DOWNLOAD_DIR ${POSTGRESQL_STAGE}/dl
 							URL http://parrot.cs.wisc.edu/externals/${POSTGRESQL_VER}.tar.gz
 							#--Configure step ----------
-							CONFIGURE_COMMAND cd ${POSTGRESQL_VER} ${CMD_TERM} ${POSTGRESQL_CONFIGURE}
+							CONFIGURE_COMMAND ${POSTGRESQL_CONFIGURE}
 							#--Build Step ----------
-							BUILD_COMMAND cd ${POSTGRESQL_VER} ${CMD_TERM} ${POSTGRESQL_MAKE}
+							BUILD_COMMAND ${POSTGRESQL_MAKE}
 							BUILD_IN_SOURCE 1
 							#--install Step ----------
 							INSTALL_DIR ${POSTGRESQL_INSTALL_LOC}
-							INSTALL_COMMAND cd ${POSTGRESQL_VER} ${CMD_TERM} ${POSTGRESQL_INSTALL} )
+							INSTALL_COMMAND ${POSTGRESQL_INSTALL} )
 
 		# Set the target dependencies which the rest of condor depends on.
 		if (WINDOWS)

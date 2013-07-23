@@ -827,7 +827,7 @@ int daemon::RealStart( )
 	}
 
 	const char	*proc_type = command_port ? "DaemonCore " : "";
-	if ( DebugFlags & D_FULLDEBUG ) {
+	if ( IsFulldebug(D_FULLDEBUG) ) {
 		MyString	 args_string, tmp;
 		args.GetArgsStringForDisplay( &tmp, 1 );
 		if( tmp.Length() ) {
@@ -837,12 +837,12 @@ int daemon::RealStart( )
 		else {
 			args_string = tmp;
 		}
-		dprintf( D_FAILURE|D_ALWAYS,
+		dprintf( D_ALWAYS,
 				 "Started %sprocess \"%s%s\", pid and pgroup = %d\n",
 				 proc_type, process_name, args_string.Value(), pid );
 	}
 	else {
-		dprintf( D_FAILURE|D_ALWAYS,
+		dprintf( D_ALWAYS,
 				 "Started %sprocess \"%s\", pid and pgroup = %d\n",
 				 proc_type, process_name, pid );
 	}
@@ -1078,7 +1078,7 @@ void
 daemon::Exited( int status )
 {
 	MyString msg;
-	msg.sprintf( "The %s (pid %d) ", name_in_config_file, pid );
+	msg.formatstr( "The %s (pid %d) ", name_in_config_file, pid );
 	bool had_failure = true;
 	if (daemonCore->Was_Not_Responding(pid)) {
 		msg += "was killed because it was no longer responding";
@@ -1192,16 +1192,16 @@ daemon::Obituary( int status )
     char buf[1000];
 
 	MyString email_subject;
-	email_subject.sprintf("Problem %s: %s ", get_local_fqdn().Value(), 
+	email_subject.formatstr("Problem %s: %s ", get_local_fqdn().Value(), 
 						  condor_basename(process_name));
 	if ( was_not_responding ) {
 		email_subject += "killed (unresponsive)";
 	} else {
 		MyString fmt;
 		if( WIFSIGNALED(status) ) {
-			fmt.sprintf("died (%d)", WTERMSIG(status));
+			fmt.formatstr("died (%d)", WTERMSIG(status));
 		} else {
-			fmt.sprintf("exited (%d)", WEXITSTATUS(status));
+			fmt.formatstr("exited (%d)", WEXITSTATUS(status));
 		}
 		email_subject += fmt;
 	}
@@ -1425,7 +1425,7 @@ daemon::SetupHighAvailability( void )
 	MyString	name;
 
 	// Get the URL
-	name.sprintf("HA_%s_LOCK_URL", name_in_config_file );
+	name.formatstr("HA_%s_LOCK_URL", name_in_config_file );
 	tmp = param( name.Value() );
 	if ( ! tmp ) {
 		tmp = param( "HA_LOCK_URL" );
@@ -1440,7 +1440,7 @@ daemon::SetupHighAvailability( void )
 
 	// Get the length of the lock
 	time_t		lock_hold_time = 60 * 60;	// One hour
-	name.sprintf( "HA_%s_LOCK_HOLD_TIME", name_in_config_file );
+	name.formatstr( "HA_%s_LOCK_HOLD_TIME", name_in_config_file );
 	tmp = param( name.Value( ) );
 	if ( ! tmp ) {
 		tmp = param( "HA_LOCK_HOLD_TIME" );
@@ -1458,7 +1458,7 @@ daemon::SetupHighAvailability( void )
 
 	// Get the lock poll time
 	time_t		poll_period = 5 * 60;		// Five minutes
-	name.sprintf( "HA_%s_POLL_PERIOD", name_in_config_file );
+	name.formatstr( "HA_%s_POLL_PERIOD", name_in_config_file );
 	tmp = param( name.Value() );
 	if ( ! tmp ) {
 		tmp = param( "HA_POLL_PERIOD" );
@@ -1730,16 +1730,18 @@ Daemons::CheckForNewExecutable()
 			// do here.
 		return;
 	}
+	time_t tspOld = master->timeStamp;
 	if( NewExecutable( master->watch_name, &master->timeStamp ) ) {
 		master->newExec = TRUE;
 		if (NONE == new_bin_restart_mode) {
-			dprintf( D_ALWAYS,"%s was modified, but master restart mode is NEVER\n", 
-					 master->watch_name);
+			dprintf( D_ALWAYS,"%s was modified (%lld != %lld), but master restart mode is NEVER\n",
+					 master->watch_name, (long long)master->timeStamp, (long long)tspOld);
 			//don't want to do this in case the user later reconfigs the restart mode.
 			//CancelNewExecTimer();
 		} else {
-			dprintf( D_ALWAYS,"%s was modified, restarting %s %s.\n", 
-					 master->watch_name, 
+			dprintf( D_ALWAYS,"%s was modified (%lld != %lld), restarting %s %s.\n", 
+					 master->watch_name,
+					 (long long)master->timeStamp, (long long)tspOld,
 					 master->process_name,
 					 (new_bin_restart_mode == PEACEFUL) ? "Peacefully" : "Gracefully");
 			// Begin the master restart procedure.
@@ -2168,6 +2170,13 @@ Daemons::InitMaster()
 	master->timeStamp = GetTimeStamp(master->watch_name);
 	master->startTime = time(0);
 	master->pid = daemonCore->getpid();
+
+	// to aid in debugging unwanted daylight savings time restarts, log the restart mode and timestamp.
+	if (new_bin_restart_mode != NONE) {
+		dprintf(D_ALWAYS, "Master restart (%s) is watching %s (mtime:%lld)\n", 
+				StopStateToString(new_bin_restart_mode),
+				master->watch_name, (long long)master->timeStamp);
+	}
 }
 
 
@@ -2290,7 +2299,7 @@ Daemons::ExecMaster()
 				runfor = 1; // minimum 1
 			}
 			MyString runfor_str;
-			runfor_str.sprintf("%d",runfor);
+			runfor_str.formatstr("%d",runfor);
 			argv[i++] = strdup(runfor_str.Value());
 		}
 	}
@@ -2330,7 +2339,7 @@ Daemons::FinalRestartMaster()
 			::GetSystemDirectory(systemshell,MAX_PATH);
 			strcat(systemshell,"\\cmd.exe");
 			MyString command;
-			command.sprintf("net stop %s & net start %s", 
+			command.formatstr("net stop %s & net start %s", 
 				_condor_myServiceName, _condor_myServiceName);
 			dprintf( D_ALWAYS, "Doing exec( \"%s /Q /C %s\" )\n", 
 				 systemshell,command.Value());
@@ -2447,6 +2456,8 @@ Daemons::AllReaper(int pid, int status)
 			AllStartdsGone();
 		}
 		return TRUE;
+	} else {
+		dprintf( D_ALWAYS, "AllReaper unexpectedly called on pid %i, status %i.\n", pid, status);
 	}
 
 	for( iter = daemon_ptr.begin(); iter != daemon_ptr.end(); iter++ ) {
@@ -2477,6 +2488,8 @@ Daemons::DefaultReaper(int pid, int status)
  		delete valid_iter->second;
 		exit_allowed.erase(valid_iter);
 		return TRUE;
+	} else {
+		dprintf( D_ALWAYS, "DefaultReaper unexpectedly called on pid %i, status %i.\n", pid, status);
 	}
 
 	for( iter = daemon_ptr.begin(); iter != daemon_ptr.end(); iter++ ) {

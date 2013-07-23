@@ -37,7 +37,7 @@ static bool
 not_root_squashed( char const *exec_path )
 {
 	MyString test_dir;
-	test_dir.sprintf("%s/.root_squash_test", exec_path);
+	test_dir.formatstr("%s/.root_squash_test", exec_path);
 
 	if (rmdir(test_dir.Value()) == -1) {
 		if (errno != ENOENT) {
@@ -190,7 +190,7 @@ check_recovery_file( const char *execute_dir )
 		return;
 	}
 
-	recovery_file.sprintf( "%s.recover", execute_dir );
+	recovery_file.formatstr( "%s.recover", execute_dir );
 
 	StatInfo si( recovery_file.Value() );
 
@@ -273,6 +273,9 @@ cleanup_execute_dirs( StringList &list )
 		pair_strings_vector root_dirs = root_dir_list();
 		for (pair_strings_vector::const_iterator it=root_dirs.begin(); it != root_dirs.end(); ++it) {
 			const char * exec_path_full = dirscat(it->second.c_str(), exec_path);
+			if(exec_path_full) {
+				dprintf(D_FULLDEBUG, "Looking at %s\n",exec_path_full);
+			}
 			Directory execute_dir( exec_path_full, PRIV_ROOT );
 
 			execute_dir.Rewind();
@@ -283,6 +286,7 @@ cleanup_execute_dirs( StringList &list )
 			if (privsep_enabled()) {
 				execute_dir.Rewind();
 				while (execute_dir.Next()) {
+					dprintf(D_FULLDEBUG, "Attempting to remove %s\n",execute_dir.GetFullPath());
 					privsep_remove_dir(execute_dir.GetFullPath());
 				}
 			}
@@ -309,7 +313,7 @@ cleanup_execute_dir(int pid, char const *exec_path)
 	// with this starter pid.  this account might have been left around
 	// if the starter did not clean up completely.
 	//sprintf(buf,"condor-run-dir_%d",pid);
-		buf.sprintf("condor-run-%d",pid);
+		buf.formatstr("condor-run-%d",pid);
 		if ( nobody_login.deleteuser(buf.Value()) ) {
 			dprintf(D_FULLDEBUG,"Removed account %s left by starter\n",buf.Value());
 		}
@@ -320,7 +324,7 @@ cleanup_execute_dir(int pid, char const *exec_path)
 	// existence of the subdirectory persistantly tells us that the
 	// account may still exist [in case the startd blows up as well].
 
-	buf.sprintf( "%s\\dir_%d", exec_path, pid );
+	buf.formatstr( "%s\\dir_%d", exec_path, pid );
  
 	check_recovery_file( buf.Value() );
 
@@ -337,8 +341,8 @@ cleanup_execute_dir(int pid, char const *exec_path)
 		// We're trying to delete a specific subdirectory, either
 		// b/c a starter just exited and we might need to clean up
 		// after it, or because we're in a recursive call.
-	pid_dir.sprintf( "dir_%d", pid );
-	pid_dir_path.sprintf( "%s/%s", exec_path, pid_dir.Value() );
+	pid_dir.formatstr( "dir_%d", pid );
+	pid_dir_path.formatstr( "%s/%s", exec_path, pid_dir.Value() );
 
 	check_recovery_file( pid_dir_path.Value() );
 
@@ -438,9 +442,10 @@ caInsert( ClassAd* target, ClassAd* source, const char* attr,
 		target->Delete(new_attr.Value());
 		return false;
 	}
-	if ( !target->Insert(new_attr.Value(), tree->Copy()) ) {
-		dprintf( D_ALWAYS, "caInsert: Can't insert %s into target classad.\n",
-				 attr );
+	tree = tree->Copy();
+	if ( !target->Insert(new_attr.Value(), tree, false) ) {
+		dprintf( D_ALWAYS, "caInsert: Can't insert %s into target classad.\n", attr );
+		delete tree;
 		return false;
 	}
 	return true;

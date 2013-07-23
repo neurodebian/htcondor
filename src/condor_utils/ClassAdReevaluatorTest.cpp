@@ -42,8 +42,7 @@ main(int argc, char **argv)
 	myDistro->Init(argc, argv);
 	config();
 
-	Termlog = true;
-	dprintf_config("TEST", get_param_functions());
+	dprintf_set_tool_debug("TEST", 0);
 
 	ad.Assign("REEVALUATE_ATTRIBUTES", "INTEGER, FLOAT, STRING, BOOL, REF");
 	ad.AssignExpr("REEVALUATE_INTEGER_EXPR", "MY.INTEGER + 1");
@@ -61,16 +60,16 @@ main(int argc, char **argv)
 	context.Assign("REF", 2);
 
 	dprintf(D_FULLDEBUG, "context ad:\n");
-	context.dPrint(D_FULLDEBUG);
+	dPrintAd(D_FULLDEBUG, context);
 	dprintf(D_FULLDEBUG, "ad to update:\n");
-	ad.dPrint(D_FULLDEBUG);
+	dPrintAd(D_FULLDEBUG, ad);
 
 	if (!classad_reevaluate(&ad, &context)) {
 		return 1;
 	}
 
 	dprintf(D_FULLDEBUG, "updated ad:\n");
-	ad.dPrint(D_FULLDEBUG);
+	dPrintAd(D_FULLDEBUG, ad);
 
 	if (ad.LookupInteger("INTEGER", i)) {
 		if (2 != i) {

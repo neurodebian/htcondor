@@ -165,7 +165,7 @@ do_REMOTE_syscall()
 	int condor_sysnum;
 	int	rval = -1, result = -1, fd = -1, mode = -1, uid = -1, gid = -1;
 	int length = -1;
-	condor_errno_t terrno;
+	condor_errno_t terrno = (condor_errno_t)0;
 	char *path = NULL, *buffer = NULL;
 	void *buf = NULL;
 
@@ -229,7 +229,7 @@ do_REMOTE_syscall()
 	case CONDOR_register_starter_info:
 	{
 		ClassAd ad;
-		result = ( ad.initFromStream(*syscall_sock) );
+		result = ( getClassAd(syscall_sock, ad) );
 		ASSERT( result );
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -254,7 +254,7 @@ do_REMOTE_syscall()
 	case CONDOR_register_job_info:
 	{
 		ClassAd ad;
-		result = ( ad.initFromStream(*syscall_sock) );
+		result = ( getClassAd(syscall_sock, ad) );
 		ASSERT( result );
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -296,7 +296,7 @@ do_REMOTE_syscall()
 			result = ( syscall_sock->code( terrno ) );
 			ASSERT( result );
 		} else {
-			result = ( ad->put(*syscall_sock) );
+			result = ( putClassAd(syscall_sock, *ad) );
 			ASSERT( result );
 		}
 		result = ( syscall_sock->end_of_message() );
@@ -327,7 +327,7 @@ do_REMOTE_syscall()
 			result = ( syscall_sock->code( terrno ) );
 			ASSERT( result );
 		} else {
-			result = ( ad->put(*syscall_sock) );
+			result = ( putClassAd(syscall_sock, *ad) );
 			ASSERT( result );
 		}
 		result = ( syscall_sock->end_of_message() );
@@ -346,7 +346,7 @@ do_REMOTE_syscall()
 		ASSERT( result );
 		result = ( syscall_sock->code(reason) );
 		ASSERT( result );
-		result = ( ad.initFromStream(*syscall_sock) );
+		result = ( getClassAd(syscall_sock, ad) );
 		ASSERT( result );
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -371,7 +371,7 @@ do_REMOTE_syscall()
 	case CONDOR_job_termination:
 	{
 		ClassAd ad;
-		result = ( ad.initFromStream(*syscall_sock) );
+		result = ( getClassAd(syscall_sock, ad) );
 		ASSERT( result );
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -677,7 +677,7 @@ do_REMOTE_syscall()
 	case CONDOR_register_mpi_master_info:
 	{
 		ClassAd ad;
-		result = ( ad.initFromStream(*syscall_sock) );
+		result = ( getClassAd(syscall_sock, ad) );
 		ASSERT( result );
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -823,7 +823,7 @@ do_REMOTE_syscall()
 	{
 		ClassAd ad;
 
-		result = ( ad.initFromStream(*syscall_sock) );
+		result = ( getClassAd(syscall_sock, ad) );
 		ASSERT( result );
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -1298,6 +1298,9 @@ case CONDOR_putfile:
 		}
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
+		free((char*)path);
+
+        if (length <= 0) return 0;
 		
 		int num = -1;
 		if(fd >= 0) {
@@ -1323,7 +1326,6 @@ case CONDOR_putfile:
 			result = ( syscall_sock->code( terrno ) );
 			ASSERT( result );
 		}
-		free((char*)path);
 		free((char*)buffer);
 		result = ( syscall_sock->end_of_message() );
 		ASSERT( result );
@@ -1348,8 +1350,8 @@ case CONDOR_getlongdir:
 		// Get directory's contents
 		while((next = directory.Next())) {
 			dprintf(D_ALWAYS, "next: %s\n", next);
-			msg.sprintf_cat("%s\n", next);
-			check.sprintf("%s%c%s", path, DIR_DELIM_CHAR, next);
+			msg.formatstr_cat("%s\n", next);
+			check.formatstr("%s%c%s", path, DIR_DELIM_CHAR, next);
 			rval = stat(check.Value(), &stat_buf);
 			terrno = (condor_errno_t)errno;
 			if(rval == -1) {
@@ -1359,11 +1361,11 @@ case CONDOR_getlongdir:
 				rval = -1;
 				break;
 			}
-			msg.sprintf_cat("%s", line);
+			msg.formatstr_cat("%s", line);
 		}
 		terrno = (condor_errno_t)errno;
 		if(msg.Length() > 0) {
-			msg.sprintf_cat("\n");	// Needed to signify end of data
+			msg.formatstr_cat("\n");	// Needed to signify end of data
 			rval = msg.Length();
 		}
 		dprintf( D_SYSCALLS, "\trval = %d, errno = %d\n", rval, terrno );
@@ -1400,12 +1402,12 @@ case CONDOR_getdir:
 
 		// Get directory's contents
 		while((next = directory.Next())) {
-			msg.sprintf_cat("%s", next);
-			msg.sprintf_cat("\n");
+			msg.formatstr_cat("%s", next);
+			msg.formatstr_cat("\n");
 		}
 		terrno = (condor_errno_t)errno;
 		if(msg.Length() > 0) {
-			msg.sprintf_cat("\n");	// Needed to signify end of data
+			msg.formatstr_cat("\n");	// Needed to signify end of data
 			rval = msg.Length();
 		}
 		dprintf( D_SYSCALLS, "\trval = %d, errno = %d\n", rval, terrno );

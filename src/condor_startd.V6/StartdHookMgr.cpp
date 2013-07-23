@@ -109,7 +109,7 @@ StartdHookMgr::getHookPath(HookType hook_type, Resource* rip)
 	char* path = hook_paths[(int)hook_type];
 	if (!path) {
 		MyString _param;
-		_param.sprintf("%s_HOOK_%s", keyword, getHookTypeString(hook_type));
+		_param.formatstr("%s_HOOK_%s", keyword, getHookTypeString(hook_type));
 		bool hperr = !validateHookPath(_param.Value(), path);
         // Here the distinction between undefined hook and a hook path error 
         // is being collapsed
@@ -206,12 +206,11 @@ StartdHookMgr::handleHookFetchWork(FetchClient* fetch_client)
 
 		// Make sure that the job classad defines ATTR_HOOK_KEYWORD,
 		// and if not, insert this slot's keyword.
-	char buf[1];	// We don't care what it is, just if it's there.
-	if (!job_ad->LookupString(ATTR_HOOK_KEYWORD, buf, 1)) {
+	if (!job_ad->LookupString(ATTR_HOOK_KEYWORD, NULL, 0)) {
 		char* keyword = rip->getHookKeyword();
 		ASSERT(keyword && keyword != UNDEFINED);
 		MyString keyword_attr;
-		keyword_attr.sprintf("%s = \"%s\"", ATTR_HOOK_KEYWORD, keyword);
+		keyword_attr.formatstr("%s = \"%s\"", ATTR_HOOK_KEYWORD, keyword);
 		job_ad->Insert(keyword_attr.Value());
 	}
 
@@ -288,9 +287,9 @@ StartdHookMgr::hookReplyFetch(bool accepted, ClassAd* job_ad, Resource* rip)
 
 		// Construct the output to write to STDIN.
 	MyString hook_stdin;
-	job_ad->sPrint(hook_stdin);
+	sPrintAd(hook_stdin, *job_ad);
 	hook_stdin += "-----\n";  // TODO-fetch: better delimiter?
-	rip->r_classad->sPrint(hook_stdin);
+	sPrintAd(hook_stdin, *rip->r_classad);
 	if (accepted) {
 			// Also include the claim id in the slot classad.
 		hook_stdin += ATTR_CLAIM_ID;
@@ -320,9 +319,9 @@ StartdHookMgr::hookEvictClaim(Resource* rip)
 
 		// Construct the output to write to STDIN.
 	MyString hook_stdin;
-	rip->r_cur->ad()->sPrint(hook_stdin);
+	sPrintAd(hook_stdin, *rip->r_cur->ad());
 	hook_stdin += "-----\n";  // TODO-fetch: better delimiter?
-	rip->r_classad->sPrint(hook_stdin);
+	sPrintAd(hook_stdin, *rip->r_classad);
 		// Also include the claim id in the slot classad.
 	hook_stdin += ATTR_CLAIM_ID;
 	hook_stdin += " = \"";
@@ -361,7 +360,7 @@ FetchClient::startFetch()
 	ClassAd slot_ad;
 	m_rip->publish(&slot_ad, A_ALL_PUB);
 	MyString slot_ad_txt;
-	slot_ad.sPrint(slot_ad_txt);
+	sPrintAd(slot_ad_txt, slot_ad);
 	resmgr->m_hook_mgr->spawn(this, NULL, &slot_ad_txt);
 	m_rip->startedFetch();
 	return true;

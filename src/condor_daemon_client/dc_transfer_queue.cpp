@@ -22,12 +22,14 @@
 #include "dc_transfer_queue.h"
 #include "condor_attributes.h"
 #include "selector.h"
+#include "dc_schedd.h"
 
 TransferQueueContactInfo::TransferQueueContactInfo() {
 	m_unlimited_uploads = true;
 	m_unlimited_downloads = true;
 }
 TransferQueueContactInfo::TransferQueueContactInfo(char const *addr,bool unlimited_uploads,bool unlimited_downloads) {
+	ASSERT(addr);
 	m_addr = addr;
 	m_unlimited_uploads = unlimited_uploads;
 	m_unlimited_downloads = unlimited_downloads;
@@ -43,24 +45,24 @@ TransferQueueContactInfo::TransferQueueContactInfo(char const *str) {
 	m_unlimited_uploads = true;
 	m_unlimited_downloads = true;
 	while(str && *str) {
-		MyString name,value;
+		std::string name,value;
 
 		char const *pos = strchr(str,'=');
 		if( !pos ) {
 			EXCEPT("Invalid transfer queue contact info: %s",str);
 		}
-		name.sprintf("%.*s",(int)(pos-str),str);
+		formatstr(name,"%.*s",(int)(pos-str),str);
 		str = pos+1;
 
 		size_t len = strcspn(str,";");
-		value.sprintf("%.*s",(int)len,str);
+		formatstr(value,"%.*s",(int)len,str);
 		str += len;
 		if( *str == ';' ) {
 			str++;
 		}
 
 		if( name == "limit" ) {
-			StringList limited_queues(value.Value(),",");
+			StringList limited_queues(value.c_str(),",");
 			char const *queue;
 			limited_queues.rewind();
 			while( (queue=limited_queues.next()) ) {
@@ -71,7 +73,7 @@ TransferQueueContactInfo::TransferQueueContactInfo(char const *str) {
 					m_unlimited_downloads = false;
 				}
 				else {
-					EXCEPT("Unexpected value %s=%s",name.Value(),queue);
+					EXCEPT("Unexpected value %s=%s",name.c_str(),queue);
 				}
 			}
 		}
@@ -79,35 +81,38 @@ TransferQueueContactInfo::TransferQueueContactInfo(char const *str) {
 			m_addr = value;
 		}
 		else {
-			EXCEPT("unexpected TransferQueueContactInfo: %s",name.Value());
+			EXCEPT("unexpected TransferQueueContactInfo: %s",name.c_str());
 		}
 	}
 }
 
-char const *
-TransferQueueContactInfo::GetStringRepresentation() {
+bool
+TransferQueueContactInfo::GetStringRepresentation(std::string &str) {
 		// this function must produce the same format that is parsed by
 		// TransferQueueContactInfo(char const *str).
+		// expected format: limit=upload,download,...;addr=<...>
 	char const *delim = ";";
 	if( m_unlimited_uploads && m_unlimited_downloads ) {
-		return NULL;
+		return false;
 	}
 
-	m_str_representation = "";
-
-	MyString limited_queues;
+	StringList limited_queues;
 	if( !m_unlimited_uploads ) {
-		limited_queues.append_to_list("upload",",");
+		limited_queues.append("upload");
 	}
 	if( !m_unlimited_downloads ) {
-		limited_queues.append_to_list("download",",");
+		limited_queues.append("download");
 	}
-	m_str_representation.append_to_list("limit=",delim);
-	m_str_representation += limited_queues;
+	char *list_str = limited_queues.print_to_delimed_string(",");
+	str = "";
+	str += "limit=";
+	str += list_str;
+	str += delim;
+	str += "addr=";
+	str += m_addr;
+	free(list_str);
 
-	m_str_representation.append_to_list("addr=",delim);
-	m_str_representation += m_addr;
-	return m_str_representation.Value();
+	return true;
 }
 
 DCTransferQueue::DCTransferQueue( TransferQueueContactInfo &contact_info )
@@ -116,10 +121,35 @@ DCTransferQueue::DCTransferQueue( TransferQueueContactInfo &contact_info )
 	m_unlimited_uploads = contact_info.GetUnlimitedUploads();
 	m_unlimited_downloads = contact_info.GetUnlimitedDownloads();
 
+	Init();
+}
+
+DCTransferQueue::DCTransferQueue( const DCSchedd &schedd )
+	: Daemon( schedd )
+{
+	m_unlimited_uploads = false;
+	m_unlimited_downloads = false;
+
+	Init();
+}
+
+void
+DCTransferQueue::Init()
+{
 	m_xfer_downloading = false;
 	m_xfer_queue_sock = NULL;
 	m_xfer_queue_pending = false;
 	m_xfer_queue_go_ahead = false;
+
+	m_last_report = 0;
+	m_next_report = 0;
+	m_report_interval = 0;
+	m_recent_bytes_sent = 0;
+	m_recent_bytes_received = 0;
+	m_recent_usec_file_read = 0;
+	m_recent_usec_file_write = 0;
+	m_recent_usec_net_read = 0;
+	m_recent_usec_net_write = 0;
 }
 
 DCTransferQueue::~DCTransferQueue( void )
@@ -138,8 +168,11 @@ DCTransferQueue::GoAheadAlways( bool downloading ) {
 }
 
 bool
-DCTransferQueue::RequestTransferQueueSlot(bool downloading,char const *fname,char const *jobid,int timeout,MyString &error_desc)
+DCTransferQueue::RequestTransferQueueSlot(bool downloading,char const *fname,char const *jobid,char const *queue_user,int timeout,MyString &error_desc)
 {
+	ASSERT(fname);
+	ASSERT(jobid);
+
 	if( GoAheadAlways( downloading ) ) {
 		m_xfer_downloading = downloading;
 		m_xfer_fname = fname;
@@ -168,12 +201,11 @@ DCTransferQueue::RequestTransferQueueSlot(bool downloading,char const *fname,cha
 	m_xfer_queue_sock = reliSock( timeout, 0, &errstack, false, true );
 
 	if( !m_xfer_queue_sock ) {
-		m_xfer_rejected_reason.sprintf(
+		formatstr(m_xfer_rejected_reason,
 			"Failed to connect to transfer queue manager for job %s (%s): %s.",
-			jobid ? jobid : "",
-			fname ? fname : "", errstack.getFullText() );
+			jobid, fname, errstack.getFullText().c_str() );
 		error_desc = m_xfer_rejected_reason;
-		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.Value());
+		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.c_str());
 		return false;
 	}
 
@@ -191,12 +223,11 @@ DCTransferQueue::RequestTransferQueueSlot(bool downloading,char const *fname,cha
 	{
 		delete m_xfer_queue_sock;
 		m_xfer_queue_sock = NULL;
-		m_xfer_rejected_reason.sprintf(
+		formatstr(m_xfer_rejected_reason,
 			"Failed to initiate transfer queue request for job %s (%s): %s.",
-			jobid ? jobid : "",
-			fname ? fname : "", errstack.getFullText() );
+			jobid, fname, errstack.getFullText().c_str() );
 		error_desc = m_xfer_rejected_reason;
-		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.Value());
+		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.c_str());
 		return false;
 	}
 
@@ -208,18 +239,19 @@ DCTransferQueue::RequestTransferQueueSlot(bool downloading,char const *fname,cha
 	msg.Assign(ATTR_DOWNLOADING,downloading);
 	msg.Assign(ATTR_FILE_NAME,fname);
 	msg.Assign(ATTR_JOB_ID,jobid);
+	msg.Assign(ATTR_USER,queue_user);
 
 	m_xfer_queue_sock->encode();
 
-	if( !msg.put(*m_xfer_queue_sock) || !m_xfer_queue_sock->end_of_message() )
+	if( !putClassAd(m_xfer_queue_sock, msg) || !m_xfer_queue_sock->end_of_message() )
 	{
-		m_xfer_rejected_reason.sprintf(
+		formatstr(m_xfer_rejected_reason,
 			"Failed to write transfer request to %s for job %s "
 			"(initial file %s).",
 			m_xfer_queue_sock->peer_description(),
-			m_xfer_jobid.Value(), m_xfer_fname.Value());
+			m_xfer_jobid.c_str(), m_xfer_fname.c_str());
 		error_desc = m_xfer_rejected_reason;
-		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.Value());
+		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.c_str());
 		return false;
 	}
 
@@ -267,28 +299,28 @@ DCTransferQueue::PollForTransferQueueSlot(int timeout,bool &pending,MyString &er
 
 	m_xfer_queue_sock->decode();
 	ClassAd msg;
-	if( !msg.initFromStream(*m_xfer_queue_sock) ||
+	if( !getClassAd(m_xfer_queue_sock, msg) ||
 		!m_xfer_queue_sock->end_of_message() )
 	{
-		m_xfer_rejected_reason.sprintf(
+		formatstr(m_xfer_rejected_reason,
 			"Failed to receive transfer queue response from %s for job %s "
 			"(initial file %s).",
 			m_xfer_queue_sock->peer_description(),
-			m_xfer_jobid.Value(),
-			m_xfer_fname.Value());
+			m_xfer_jobid.c_str(),
+			m_xfer_fname.c_str());
 		goto request_failed;
 	}
 
 	int result; // this should be one of the values in XFER_QUEUE_ENUM
 	if( !msg.LookupInteger(ATTR_RESULT,result) ) {
-		MyString msg_str;
-		msg.sPrint(msg_str);
-		m_xfer_rejected_reason.sprintf(
+		std::string msg_str;
+		sPrintAd(msg_str, msg);
+		formatstr(m_xfer_rejected_reason,
 			"Invalid transfer queue response from %s for job %s (%s): %s",
 			m_xfer_queue_sock->peer_description(),
-			m_xfer_jobid.Value(),
-			m_xfer_fname.Value(),
-			msg_str.Value());
+			m_xfer_jobid.c_str(),
+			m_xfer_fname.c_str(),
+			msg_str.c_str());
 		goto request_failed;
 	}
 
@@ -297,15 +329,24 @@ DCTransferQueue::PollForTransferQueueSlot(int timeout,bool &pending,MyString &er
 	}
 	else {
 		m_xfer_queue_go_ahead = false;
-		MyString reason;
+		std::string reason;
 		msg.LookupString(ATTR_ERROR_STRING,reason);
-		m_xfer_rejected_reason.sprintf(
+		formatstr(m_xfer_rejected_reason,
 			"Request to transfer files for %s (%s) was rejected by %s: %s",
-			m_xfer_jobid.Value(), m_xfer_fname.Value(),
+			m_xfer_jobid.c_str(), m_xfer_fname.c_str(),
 			m_xfer_queue_sock->peer_description(),
-			reason.Value());
+			reason.c_str());
 
 		goto request_failed;
+	}
+
+	{
+		int report_interval = 0;
+		if( msg.LookupInteger(ATTR_REPORT_INTERVAL,report_interval) ) {
+			m_report_interval = (unsigned)report_interval;
+			m_last_report.getTime();
+			m_next_report = m_last_report.seconds() + m_report_interval;
+		}
 	}
 
 	m_xfer_queue_pending = false;
@@ -314,7 +355,7 @@ DCTransferQueue::PollForTransferQueueSlot(int timeout,bool &pending,MyString &er
 
  request_failed:
 	error_desc = m_xfer_rejected_reason;
-	dprintf(D_ALWAYS, "%s\n", m_xfer_rejected_reason.Value());
+	dprintf(D_ALWAYS, "%s\n", m_xfer_rejected_reason.c_str());
 	m_xfer_queue_pending = false;
 	m_xfer_queue_go_ahead = false;
 	pending = m_xfer_queue_pending;
@@ -325,6 +366,9 @@ void
 DCTransferQueue::ReleaseTransferQueueSlot()
 {
 	if( m_xfer_queue_sock ) {
+		if( m_report_interval ) {
+			SendReport(time(NULL),true);
+		}
 		delete m_xfer_queue_sock;
 		m_xfer_queue_sock = NULL;
 	}
@@ -356,10 +400,10 @@ DCTransferQueue::CheckTransferQueueSlot()
 			// transfer queue manager has either died or taken away our
 			// transfer slot.
 
-		m_xfer_rejected_reason.sprintf(
+		formatstr(m_xfer_rejected_reason,
 			"Connection to transfer queue manager %s for %s has gone bad.",
-			m_xfer_queue_sock->peer_description(), m_xfer_fname.Value());
-		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.Value());
+			m_xfer_queue_sock->peer_description(), m_xfer_fname.c_str());
+		dprintf(D_ALWAYS,"%s\n",m_xfer_rejected_reason.c_str());
 
 		m_xfer_queue_go_ahead = false;
 		return false;
@@ -369,3 +413,47 @@ DCTransferQueue::CheckTransferQueueSlot()
 	return true;
 }
 
+void
+DCTransferQueue::SendReport(time_t now,bool disconnect)
+{
+	std::string report;
+	UtcTime now_usec;
+	now_usec.getTime();
+	long interval = now_usec.difference_usec(m_last_report);
+	if( interval < 0 ) {
+		interval = 0;
+	}
+	formatstr(report,"%u %u %u %u %u %u %u %u",
+			  (unsigned)now,
+			  (unsigned)interval,
+			  m_recent_bytes_sent,
+			  m_recent_bytes_received,
+			  m_recent_usec_file_read,
+			  m_recent_usec_file_write,
+			  m_recent_usec_net_read,
+			  m_recent_usec_net_write);
+
+	if( m_xfer_queue_sock ) {
+		m_xfer_queue_sock->encode();
+		if ( !m_xfer_queue_sock->put(report.c_str()) ||
+			 !m_xfer_queue_sock->end_of_message() )
+		{
+			dprintf(D_FULLDEBUG,"Failed to send transfer queue i/o report.\n");
+		}
+		if( disconnect ) {
+				// Tell the server we are done.
+			m_xfer_queue_sock->put("");
+			m_xfer_queue_sock->end_of_message();
+		}
+	}
+
+	m_recent_bytes_sent = 0;
+	m_recent_bytes_received = 0;
+	m_recent_usec_file_read = 0;
+	m_recent_usec_file_write = 0;
+	m_recent_usec_net_read = 0;
+	m_recent_usec_net_write = 0;
+
+	m_last_report = now_usec;
+	m_next_report = now + m_report_interval;
+}

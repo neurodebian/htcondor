@@ -178,7 +178,7 @@ printOutput( ClassAd* reply, DCStartd* startd )
 	}
 
 	if( CA_PATH ) {
-		reply->fPrint( CA_PATH );
+		fPrintAd( CA_PATH, *reply );
 		fclose( CA_PATH );
 		printf( "Successfully sent %s to startd at %s\n",
 				getCommandString(cmd), startd->addr() ); 
@@ -195,7 +195,7 @@ printOutput( ClassAd* reply, DCStartd* startd )
 				 getCommandString(cmd), startd->addr() ); 
 		fprintf( stderr, "WARNING: You did not specify "
 				 "-classad, printing to STDOUT\n" );
-		reply->fPrint( stdout );
+		fPrintAd( stdout, *reply );
 		fprintf( stderr, "ID of new claim is: \"%s\"\n", claimid );
 		free( claimid );
 		return;
@@ -622,7 +622,6 @@ void
 parseArgv( int  /*argc*/, char* argv[] )
 {
 	char** tmp = argv;
-	param_functions *p_funcs = NULL;
 
 	for( tmp++; *tmp; tmp++ ) {
 		if( (*tmp)[0] != '-' ) {
@@ -653,9 +652,7 @@ parseArgv( int  /*argc*/, char* argv[] )
 			if( strncmp("-debug", *tmp, strlen(*tmp)) ) {
 				invalid( *tmp );
 			} 
-			Termlog = 1;
-			p_funcs = get_param_functions();
-			dprintf_config ("TOOL", p_funcs);
+			dprintf_set_tool_debug("TOOL", 0);
 			break;
 
 		case 'a':

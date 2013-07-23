@@ -34,6 +34,7 @@
 #if HAVE_CLONE
 #include <sched.h>
 #include <sys/syscall.h>
+#include <sys/mount.h>
 #endif
 
 #if HAVE_RESOLV_H && HAVE_DECL_RES_INIT
@@ -113,6 +114,10 @@ CRITICAL_SECTION Big_fat_mutex; // coarse grained mutex for debugging purposes
 #include <sched.h>
 #endif
 
+#if !defined(CLONE_NEWPID)
+#define CLONE_NEWPID 0x20000000
+#endif
+
 static const char* EMPTY_DESCRIP = "<NULL>";
 
 // special errno values that may be returned from Create_Process
@@ -120,6 +125,8 @@ const int DaemonCore::ERRNO_EXEC_AS_ROOT = 666666;
 const int DaemonCore::ERRNO_PID_COLLISION = 666667;
 const int DaemonCore::ERRNO_REGISTRATION_FAILED = 666668;
 const int DaemonCore::ERRNO_EXIT = 666669;
+
+#define CREATE_PROCESS_FAILED_CHDIR 1
 
 // Make this the last include to fix assert problems on Win32 -- see
 // the comments about assert at the end of condor_debug.h to understand
@@ -323,6 +330,7 @@ DaemonCore::DaemonCore(int PidSize, int ComSize,int SigSize,
 		maxSocket = DEFAULT_MAXSOCKETS;
 
 	sec_man = new SecMan();
+	audit_log_callback_fn = 0;
 
 	sockTable = new ExtArray<SockEnt>(maxSocket);
 	if(sockTable == NULL)
@@ -378,6 +386,7 @@ DaemonCore::DaemonCore(int PidSize, int ComSize,int SigSize,
 	send_child_alive_timer = -1;
 	m_want_send_child_alive = true;
 
+	max_hang_time_raw = 3600;
 #ifdef WIN32
 	dcmainThreadId = ::GetCurrentThreadId();
 #endif
@@ -404,7 +413,7 @@ DaemonCore::DaemonCore(int PidSize, int ComSize,int SigSize,
 	dc_ssock = NULL;
     m_iMaxAcceptsPerCycle = param_integer("MAX_ACCEPTS_PER_CYCLE", 8);
     if( m_iMaxAcceptsPerCycle != 1 ) {
-        dprintf(D_ALWAYS,"Setting maximum accepts per cycle %d.\n", m_iMaxAcceptsPerCycle);
+        dprintf(D_TEST | D_VERBOSE,"Setting maximum accepts per cycle %d.\n", m_iMaxAcceptsPerCycle);
     }
 
 	inheritedSocks[0] = NULL;
@@ -773,7 +782,7 @@ bool DaemonCore::TooManyRegisteredSockets(int fd,MyString *msg,int num_fds)
 			return false;
 		}
 		if(msg) {
-			msg->sprintf( "file descriptor safety level exceeded: "
+			msg->formatstr( "file descriptor safety level exceeded: "
 			              " limit %d, "
 			              " registered socket count %d, "
 			              " fd %d",
@@ -1557,8 +1566,12 @@ int DaemonCore::Register_Socket(Stream *iosock, const char* iosock_descrip,
 	else
 		(*sockTable)[i].iosock_descrip = strdup(EMPTY_DESCRIP);
 	free((*sockTable)[i].handler_descrip);
-	if ( handler_descrip )
+	if ( handler_descrip ) {
 		(*sockTable)[i].handler_descrip = strdup(handler_descrip);
+		if ( strcmp(handler_descrip,DaemonCommandProtocol::WaitForSocketDataString.c_str()) == 0 ) {
+			(*sockTable)[i].waiting_for_data = true;
+		}
+	}
 	else
 		(*sockTable)[i].handler_descrip = strdup(EMPTY_DESCRIP);
 
@@ -1715,7 +1728,7 @@ int DaemonCore::Create_Pipe( int *pipe_ends,
 #ifdef WIN32
 	static unsigned pipe_counter = 0;
 	MyString pipe_name;
-	pipe_name.sprintf("\\\\.\\pipe\\condor_pipe_%u_%u", GetCurrentProcessId(), pipe_counter++);
+	pipe_name.formatstr("\\\\.\\pipe\\condor_pipe_%u_%u", GetCurrentProcessId(), pipe_counter++);
 	return Create_Named_Pipe(pipe_ends,
 		can_register_read,
 		can_register_write,
@@ -1800,9 +1813,9 @@ int DaemonCore::Create_Named_Pipe( int *pipe_ends,
 
 	// Shut the compiler up
 	// These parameters are needed on Windows
-	can_register_read = can_register_read;
-	can_register_write = can_register_write;
-	psize = psize;
+	(void)can_register_read;
+	(void)can_register_write;
+	(void)psize;
 
 	bool failed = false;
 	int filedes[2];
@@ -1870,10 +1883,10 @@ int DaemonCore::Inherit_Pipe(int fd, bool is_write, bool can_register, bool nonb
 #else
 		// Shut the compiler up
 		// These parameters are needed on Windows
-	is_write = is_write;
-	can_register = can_register;
-	nonblocking = nonblocking;
-	psize = psize;
+	(void)is_write;
+	(void)can_register;
+	(void)nonblocking;
+	(void)psize;
 
 	pipe_handle = fd;
 #endif
@@ -2264,7 +2277,7 @@ DaemonCore::Write_Stdin_Pipe(int pid, const void* buffer, int /* len */ ) {
 		return -1;
 	}
 	pidinfo->pipe_buf[0] = new MyString;
-	*pidinfo->pipe_buf[0] = (char*)buffer;
+	*pidinfo->pipe_buf[0] = (const char*)buffer;
 	daemonCore->Register_Pipe(pidinfo->std_pipes[0], "DC stdin pipe", static_cast<PipeHandlercpp>(&DaemonCore::PidEntry::pipeFullWrite), "Guarantee all data written to pipe", pidinfo, HANDLE_WRITE);
 	return 0;
 }
@@ -2429,7 +2442,7 @@ void DaemonCore::DumpCommandTable(int flag, const char* indent)
 	// in the condor_config.  this is a little different than
 	// what dprintf does by itself ( which is just
 	// flag & DebugFlags > 0 ), so our own check here:
-	if ( (flag & DebugFlags) != flag )
+	if ( ! IsDebugCatAndVerbosity(flag) )
 		return;
 
 	if ( indent == NULL)
@@ -2468,7 +2481,7 @@ MyString DaemonCore::GetCommandsInAuthLevel(DCpermission perm,bool is_authentica
 				(!comTable[i].force_authentication || is_authenticated))
 			{
 				char const *comma = res.Length() ? "," : "";
-				res.sprintf_cat( "%s%i", comma, comTable[i].num );
+				res.formatstr_cat( "%s%i", comma, comTable[i].num );
 			}
 		}
 	}
@@ -2487,7 +2500,7 @@ void DaemonCore::DumpReapTable(int flag, const char* indent)
 	// in the condor_config.  this is a little different than
 	// what dprintf does by itself ( which is just
 	// flag & DebugFlags > 0 ), so our own check here:
-	if ( (flag & DebugFlags) != flag )
+	if ( ! IsDebugCatAndVerbosity(flag) )
 		return;
 
 	if ( indent == NULL)
@@ -2522,7 +2535,7 @@ void DaemonCore::DumpSigTable(int flag, const char* indent)
 	// in the condor_config.  this is a little different than
 	// what dprintf does by itself ( which is just
 	// flag & DebugFlags > 0 ), so our own check here:
-	if ( (flag & DebugFlags) != flag )
+	if ( ! IsDebugCatAndVerbosity(flag) )
 		return;
 
 	if ( indent == NULL)
@@ -2558,7 +2571,7 @@ void DaemonCore::DumpSocketTable(int flag, const char* indent)
 	// in the condor_config.  this is a little different than
 	// what dprintf does by itself ( which is just
 	// flag & DebugFlags > 0 ), so our own check here:
-	if ( (flag & DebugFlags) != flag )
+	if ( ! IsDebugCatAndVerbosity(flag) )
 		return;
 
 	if ( indent == NULL)
@@ -2705,7 +2718,7 @@ DaemonCore::reconfig(void) {
 
     m_iMaxAcceptsPerCycle = param_integer("MAX_ACCEPTS_PER_CYCLE", 8);
     if( m_iMaxAcceptsPerCycle != 1 ) {
-        dprintf(D_ALWAYS,"Setting maximum accepts per cycle %d.\n", m_iMaxAcceptsPerCycle);
+        dprintf(D_FULLDEBUG,"Setting maximum accepts per cycle %d.\n", m_iMaxAcceptsPerCycle);
     }
 
 		// Initialize the collector list for ClassAd updates
@@ -2717,13 +2730,7 @@ DaemonCore::reconfig(void) {
 	InitSettableAttrsLists();
 
 #if HAVE_CLONE
-    if (param_boolean("NET_REMAP_ENABLE", false, false)) {
-		m_use_clone_to_create_processes = false;
-		dprintf(D_CONFIG, "NET_REMAP_ENABLE is TRUE, forcing USE_CLONE_TO_CREATE_PROCESSES to FALSE.\n");
-	}
-	else {
-		m_use_clone_to_create_processes = param_boolean("USE_CLONE_TO_CREATE_PROCESSES", true);
-	}
+	m_use_clone_to_create_processes = param_boolean("USE_CLONE_TO_CREATE_PROCESSES", true);
 	if (RUNNING_ON_VALGRIND) {
 		dprintf(D_ALWAYS, "Looks like we are under valgrind, forcing USE_CLONE_TO_CREATE_PROCESSES to FALSE.\n");
 		m_use_clone_to_create_processes = false;
@@ -2806,13 +2813,14 @@ DaemonCore::reconfig(void) {
 	// a daemon core parent.
 	if ( ppid && m_want_send_child_alive ) {
 		MyString buf;
-		buf.sprintf("%s_NOT_RESPONDING_TIMEOUT",get_mySubSystem()->getName());
-		max_hang_time = param_integer(buf.Value(),-1);
-		if( max_hang_time == (unsigned int)-1 ) {
-			max_hang_time = param_integer("NOT_RESPONDING_TIMEOUT",0);
-		}
-		if ( !max_hang_time ) {
-			max_hang_time = 60 * 60;	// default to 1 hour
+		int old_max_hang_time_raw = max_hang_time_raw;
+		buf.formatstr("%s_NOT_RESPONDING_TIMEOUT",get_mySubSystem()->getName());
+		max_hang_time_raw = param_integer(buf.Value(),param_integer("NOT_RESPONDING_TIMEOUT",3600,1),1);
+
+		if( max_hang_time_raw != old_max_hang_time_raw || send_child_alive_timer == -1 ) {
+			max_hang_time = max_hang_time_raw + timer_fuzz(max_hang_time_raw);
+				// timer_fuzz() should never make it <= 0
+			ASSERT( max_hang_time > 0 );
 		}
 		int old_child_alive_period = m_child_alive_period;
 		m_child_alive_period = (max_hang_time / 3) - 30;
@@ -2918,7 +2926,7 @@ DaemonCore::InitSharedPort(bool in_init_dc_command_socket)
 			InitDCCommandSocket(1);
 		}
 	}
-	else if( DebugFlags & D_FULLDEBUG ) {
+	else if( IsFulldebug(D_FULLDEBUG) ) {
 		dprintf(D_FULLDEBUG,"Not using shared port because %s\n",why_not.Value());
 	}
 }
@@ -2945,7 +2953,7 @@ DaemonCore::Verify(char const *command_descrip,DCpermission perm, const condor_s
 	MyString deny_reason; // always get 'deny' reason, if there is one
 	MyString *allow_reason = NULL;
 	MyString allow_reason_buf;
-	if( (DebugFlags & D_SECURITY) ) {
+	if( IsDebugLevel( D_SECURITY ) ) {
 			// only get 'allow' reason if doing verbose debugging
 		allow_reason = &allow_reason_buf;
 	}
@@ -3295,7 +3303,7 @@ void DaemonCore::Driver()
 			// Performance around select is of high importance for all
 			// daemons that are single threaded (all of them). If you
 			// have questions ask matt.
-		if (DebugFlags & D_PERF_TRACE) {
+		if (IsDebugLevel(D_PERF_TRACE)) {
 			dprintf(D_ALWAYS, "PERF: entering select\n");
 		}
 
@@ -3366,7 +3374,7 @@ void DaemonCore::Driver()
 			// Performance around select is of high importance for all
 			// daemons that are single threaded (all of them). If you
 			// have questions ask matt.
-		if (DebugFlags & D_PERF_TRACE) {
+		if (IsDebugLevel(D_PERF_TRACE)) {
 			dprintf(D_ALWAYS, "PERF: leaving select\n");
 			selector.display();
 		}
@@ -4075,6 +4083,18 @@ DaemonCore::CheckPrivState( void )
 
 int DaemonCore::ServiceCommandSocket()
 {
+	int ServiceCommandSocketMaxSocketIndex = 
+		param_integer("SERVICE_COMMAND_SOCKET_MAX_SOCKET_INDEX", 0);
+		// A value of <-1 will make ServiceCommandSocket never service
+		// A value of -1 will make ServiceCommandSocket only service
+		// the initial command socket. 
+		// A value of 0 will cause the correct behavior
+		// Any other positive integer will restrict how many sockets get serviced
+		// The larger the number, the more sockets get serviced.
+	if( ServiceCommandSocketMaxSocketIndex < -1 ) {
+		return 0;
+	}
+
 	Selector selector;
 	int commands_served = 0;
 
@@ -4090,37 +4110,86 @@ int DaemonCore::ServiceCommandSocket()
 	if ( !( (*sockTable)[initial_command_sock].iosock) )
 		return 0;
 
-	// Setting timeout to 0 means do not block, i.e. just poll the socket
-	selector.set_timeout( 0 );
-	selector.add_fd( (*sockTable)[initial_command_sock].iosock->get_file_desc(),
-					 Selector::IO_READ );
-
+		// CallSocketHandler called inside the loop can change nSock 
+		// and nRegisteredSock. We want a variable that won't change during the loop.
+	int local_nSock;
+	if ( ServiceCommandSocketMaxSocketIndex == -1) {
+		local_nSock = 0;
+	}
+	else if ( ServiceCommandSocketMaxSocketIndex != 0) {
+		local_nSock = ServiceCommandSocketMaxSocketIndex;
+	}
+	else {
+		local_nSock = nSock;
+	}
+	
 	inServiceCommandSocket_flag = TRUE;
-	do {
+	for( int i = -1; i < local_nSock; i++) {
+		bool use_loop = true;
+			// We iterate through each socket in sockTable. We do this instead of selecting
+			// over a bunch of different file descriptors because we can have them be removed
+			// while we're still in the process of examining all the sockets.
+			// We could do it the other way using selector.has_ready, selector.fd_ready,
+			// and selector.delete_fd. We also then need to keep track in a separate table
+			// the list of indices we plan on using.
 
-		errno = 0;
-		selector.execute();
+			// We start with i = -1 so that we always start with the initial command socket.
+		if( i == -1 ) {
+			selector.add_fd( (*sockTable)[initial_command_sock].iosock->get_file_desc(), Selector::IO_READ );
+		}
+			// If (*sockTable)[i].iosock is a valid socket
+			// and that we don't use the initial command socket (could substitute i != initial_command_socket)
+			// and that the handler description is DaemonCommandProtocol::WaitForSocketData
+			// and that the socket is not waiting for an outgoing connection.
+		else if( ((*sockTable)[i].iosock) && 
+				 (i != initial_command_sock) && 
+				 ((*sockTable)[i].waiting_for_data) &&
+				 ((*sockTable)[i].is_connect_pending == false)) {
+			selector.add_fd( (*sockTable)[i].iosock->get_file_desc(), Selector::IO_READ );
+		}
+		else {
+			use_loop = false;
+		}
+			
+		if(use_loop) {
+				// Setting timeout to 0 means do not block, i.e. just poll the socket
+			selector.set_timeout( 0 );
+			
+			do {
+				
+				errno = 0;
+				selector.execute();
 #ifndef WIN32
-		// Unix
-		if ( selector.failed() ) {
-				// not just interrupted by a signal...
-				EXCEPT("select, error # = %d", errno);
-		}
+				// Unix
+				if ( selector.failed() ) {
+						// not just interrupted by a signal...
+					EXCEPT("select, error # = %d", errno);
+				}
 #else
-		// Win32
-		if ( selector.select_retval() == SOCKET_ERROR ) {
-			EXCEPT("select, error # = %d",WSAGetLastError());
-		}
+				// Win32
+				if ( selector.select_retval() == SOCKET_ERROR ) {
+					EXCEPT("select, error # = %d",WSAGetLastError());
+				}
 #endif
+				if ( selector.has_ready() ) {
+						// CallSocketHandler_worker called by CallSocketHandler
+						// also calls CheckPrivState in order to
+						// Make sure we didn't leak our priv state.
+					CallSocketHandler(i, true);
+					commands_served++;
+						// If the slot in sockTable just got removed, make sure we exit the loop
+					if ( ((*sockTable)[i].iosock == NULL) ||  // slot is empty
+						 ((*sockTable)[i].remove_asap &&           // slot available
+						  (*sockTable)[i].servicing_tid==0 ) ) {
+						break;
+					}
+				} 
+			} while ( selector.has_ready() ); // loop ​until ​no ​more ​commands ​waiting ​on socket
+			
+			selector.reset();  // Reset selector for next socket
+		} // if(use_loop)
+	} // for( int i = -1; i < local_nSock; i++)
 
-		if ( selector.has_ready() ) {
-			HandleReq( initial_command_sock );
-			commands_served++;
-				// Make sure we didn't leak our priv state
-			CheckPrivState();
-		}
-
-	} while ( selector.has_ready() );	// loop until no more commands waiting on socket
 
 	inServiceCommandSocket_flag = FALSE;
 	return commands_served;
@@ -4200,7 +4269,7 @@ int DaemonCore::HandleReq(Stream *insock, Stream* asock)
 int DaemonCore::HandleSigCommand(int command, Stream* stream) {
 	int sig = 0;
 
-	assert( command == DC_RAISESIGNAL );
+	ASSERT( command == DC_RAISESIGNAL );
 
 	// We have been sent a DC_RAISESIGNAL command
 
@@ -4647,7 +4716,7 @@ int DaemonCore::Shutdown_Fast(pid_t pid, bool want_core )
 		pidHandle = pidinfo->hProcess;
 	}
 
-	if( (DebugFlags & D_PROCFAMILY) && (DebugFlags & D_FULLDEBUG) ) {
+	if( IsDebugVerbose(D_PROCFAMILY) ) {
 			char check_name[MAX_PATH];
 			CSysinfo sysinfo;
 			sysinfo.GetProcessName(pid,check_name, sizeof(check_name));
@@ -4982,7 +5051,7 @@ exitCreateProcessChild() {
 }
 
 void
-writeExecError(CreateProcessForkit *forkit,int exec_errno);
+writeExecError(CreateProcessForkit *forkit,int exec_errno,int failed_op=0);
 
 #endif
 
@@ -5235,6 +5304,7 @@ public:
 		int the_want_command_port,
 		const sigset_t *the_sigmask,
 		size_t *core_hard_limit,
+		long    as_hard_limit,
 		int		*affinity_mask,
 		FilesystemRemap *fs_remap
 	): m_errorpipe(the_errorpipe), m_args(the_args),
@@ -5251,10 +5321,13 @@ public:
 	   m_priv(the_priv), m_want_command_port(the_want_command_port),
 	   m_sigmask(the_sigmask), m_unix_args(0), m_unix_env(0),
 	   m_core_hard_limit(core_hard_limit),
+	   m_as_hard_limit(as_hard_limit),
 	   m_affinity_mask(affinity_mask),
  	   m_fs_remap(fs_remap),
 	   m_wrote_tracking_gid(false),
-	   m_no_dprintf_allowed(false)
+	   m_no_dprintf_allowed(false),
+	   m_clone_newpid_pid(-1),
+	   m_clone_newpid_ppid(-1)
 	{
 	}
 
@@ -5273,7 +5346,7 @@ public:
 	pid_t clone_safe_getppid();
 
 	void writeTrackingGid(gid_t tracking_gid);
-	void writeExecError(int exec_errno);
+	void writeExecError(int exec_errno,int failed_op=0);
 
 private:
 		// Data passed to us from the parent:
@@ -5309,18 +5382,25 @@ private:
 	char **m_unix_args;
 	char **m_unix_env;
 	size_t *m_core_hard_limit;
+	long m_as_hard_limit;
 	const int    *m_affinity_mask;
 	Env m_envobject;
     FilesystemRemap *m_fs_remap;
 	bool m_wrote_tracking_gid;
 	bool m_no_dprintf_allowed;
 	priv_state m_priv_state;
+	pid_t m_clone_newpid_pid;
+	pid_t m_clone_newpid_ppid;
+
+	pid_t fork(int);
 };
 
 enum {
         STACK_GROWS_UP,
         STACK_GROWS_DOWN
 };
+
+#if HAVE_CLONE
 static int stack_direction(volatile int *ptr=NULL) {
     volatile int location;
     if(!ptr) return stack_direction(&location);
@@ -5330,6 +5410,7 @@ static int stack_direction(volatile int *ptr=NULL) {
 
     return STACK_GROWS_DOWN;
 }
+#endif
 
 pid_t CreateProcessForkit::clone_safe_getpid() {
 #if HAVE_CLONE
@@ -5338,7 +5419,19 @@ pid_t CreateProcessForkit::clone_safe_getpid() {
 		// the pid of the parent process (presumably due to internal
 		// caching in libc).  Therefore, use the syscall to get
 		// the answer directly.
-	return syscall(SYS_getpid);
+
+	int retval = syscall(SYS_getpid);
+
+		// If we were fork'd with CLONE_NEWPID, we think our PID is 1.
+		// In this case, ask the parent!
+	if (retval == 1) {
+		if (m_clone_newpid_pid == -1) {
+			EXCEPT("getpid is 1!");
+		}
+		retval = m_clone_newpid_pid;
+	}
+
+	return retval;
 #else
 	return ::getpid();
 #endif
@@ -5347,10 +5440,113 @@ pid_t CreateProcessForkit::clone_safe_getppid() {
 #if HAVE_CLONE
 		// See above comment for clone_safe_getpid() for explanation of
 		// why we need to do this.
-	return syscall(SYS_getppid);
+	
+	int retval = syscall(SYS_getppid);
+
+		// If ppid is 0, then either Condor is init (DEAR GOD) or we
+		// were created with CLONE_NEWPID; ask the parent!
+	if (retval == 0) {
+		if (m_clone_newpid_ppid == -1) {
+			EXCEPT("getppid is 0!");
+		}
+		retval = m_clone_newpid_ppid;
+	}
+
+	return retval;
 #else
 	return ::getppid();
 #endif
+}
+
+/**
+ * fork allows one to use certain clone syscall flags, but provides more
+ * familiar POSIX fork semantics.
+ * NOTES:
+ *   - We whitelist the flags you are allowed to pass.  Currently supported:
+ *     - CLONE_NEWPID.  Implies CLONE_NEWNS.
+ *       If the clone succeeds but the remount fails, the child calls _exit(1),
+ *       but the parent will return successfully.
+ *       It would be a simple fix to have the parent return the failure, if
+ *       someone desired.
+ *     Flags are whitelisted to help us adhere to the fork-like semantics (no
+ *     shared memory between parent and child, for example).  If you give other
+ *     flags, they are silently ignored.
+ *   - man pages indicate that clone on i386 is only fully functional when used
+ *     via ASM, not the vsyscall interface.  This doesn't appear to be relevant
+ *     to this particular use case.
+ *   - To avoid linking with pthreads (or copy/pasting lots of glibc code), I 
+ *     don't include integration with threads.  This means various threading
+ *     calls in the child may not function correctly (pre-exec; post-exec
+ *     should be fine), and pthreads might not notice when the child exits.
+ *     Traditional POSIX calls like wait will still function because the 
+ *     parent will receive the SIGCHLD.
+ *     This is simple to fix if someone desired, but I'd mostly rather not link
+ *     with pthreads.
+ */
+
+#define ALLOWED_FLAGS (SIGCHLD | CLONE_NEWPID | CLONE_NEWNS )
+
+pid_t CreateProcessForkit::fork(int flags) {
+
+    // If you don't need any fancy flags, just do the old boring POSIX call
+    if (flags == 0) {
+        return ::fork();
+    }
+
+#if HAVE_CLONE
+
+    int rw[2]; // Communication pipes for the CLONE_NEWPID case.
+
+    flags |= SIGCHLD; // The only necessary flag.
+    if (flags & CLONE_NEWPID) {
+        flags |= CLONE_NEWNS;
+	if (pipe(rw)) {
+		EXCEPT("UNABLE TO CREATE PIPE.");
+	}
+    }
+
+	// fork as root if we have our fancy flags.
+    priv_state orig_state = set_priv(PRIV_ROOT);
+    int retval = syscall(SYS_clone, ALLOWED_FLAGS & flags, 0, NULL, NULL);
+
+	// Child
+    if ((retval == 0) && (flags & CLONE_NEWPID)) {
+
+            // If we should have forked as non-root, make things in life final.
+        set_priv(orig_state);
+
+        if (full_read(rw[0], &m_clone_newpid_ppid, sizeof(pid_t)) != sizeof(pid_t)) {
+            EXCEPT("Unable to write into pipe.");
+        }
+        if (full_read(rw[0], &m_clone_newpid_pid, sizeof(pid_t)) != sizeof(pid_t)) {
+            EXCEPT("Unable to write into pipe.");
+        }
+
+	// Parent
+    } else if (retval > 0) {
+        set_priv(orig_state);
+	pid_t ppid = getpid(); // We are parent, so don't need clone_safe_pid.
+        if (full_write(rw[1], &ppid, sizeof(ppid)) != sizeof(ppid)) {
+            EXCEPT("Unable to write into pipe.");
+        }
+        if (full_write(rw[1], &retval, sizeof(ppid)) != sizeof(ppid)) {
+            EXCEPT("Unable to write into pipe.");
+        }
+    }
+	// retval=-1 falls through here.
+    if (flags & CLONE_NEWPID) {
+        close(rw[0]);
+        close(rw[1]);
+    }
+    return retval;
+
+#else
+
+    // Note we silently ignore flags if there's no clone on the platform.
+    return ::fork();
+
+#endif
+
 }
 
 pid_t CreateProcessForkit::fork_exec() {
@@ -5424,7 +5620,11 @@ pid_t CreateProcessForkit::fork_exec() {
 	}
 #endif /* HAVE_CLONE */
 
-	newpid = fork();
+	int fork_flags = 0;
+	if (m_family_info) {
+		fork_flags |= m_family_info->want_pid_namespace ? CLONE_NEWPID : 0;
+	}
+	newpid = this->fork(fork_flags);
 	if( newpid == 0 ) {
 			// in child
 		enterCreateProcessChild(this);
@@ -5456,7 +5656,7 @@ void CreateProcessForkit::writeTrackingGid(gid_t tracking_gid)
 	}
 }
 
-void CreateProcessForkit::writeExecError(int child_errno)
+void CreateProcessForkit::writeExecError(int child_errno,int failed_op)
 {
 	if( !m_wrote_tracking_gid ) {
 			// Tracking gid must come before errno on the pipe,
@@ -5471,11 +5671,17 @@ void CreateProcessForkit::writeExecError(int child_errno)
 			dprintf(D_ALWAYS,"Create_Process: Failed to write error to error pipe: rc=%d, errno=%d\n",rc,errno);
 		}
 	}
+	rc = full_write(m_errorpipe[1], &failed_op, sizeof(failed_op));
+	if( rc != sizeof(failed_op) ) {
+		if( !m_no_dprintf_allowed ) {
+			dprintf(D_ALWAYS,"Create_Process: Failed to write failed_op to error pipe: rc=%d, errno=%d\n",rc,errno);
+		}
+	}
 }
 
-void writeExecError(CreateProcessForkit *forkit,int exec_errno)
+void writeExecError(CreateProcessForkit *forkit,int exec_errno,int failed_op)
 {
-	forkit->writeExecError(exec_errno);
+	forkit->writeExecError(exec_errno,failed_op);
 }
 
 void CreateProcessForkit::exec() {
@@ -5690,7 +5896,7 @@ void CreateProcessForkit::exec() {
 		m_unix_args = tmpargs.GetStringArray();
 	}
 	else {
-		if(DebugFlags & D_DAEMONCORE) {
+		if(IsDebugLevel(D_DAEMONCORE)) {
 			MyString arg_string;
 			m_args.GetArgsStringForDisplay(&arg_string);
 			dprintf(D_DAEMONCORE, "Create_Process: Arg: %s\n", arg_string.Value());
@@ -5864,51 +6070,73 @@ void CreateProcessForkit::exec() {
 	// Now remount filesystems with fs_bind option, to give this
 	// process per-process tree mount table
 
-	// This requires rootly power
-	if (m_fs_remap) {
-		int ret = 0;
-		if (can_switch_ids()) {
-			m_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
+	bool bOkToReMap=false;
 #ifdef HAVE_UNSHARE
-			int rc = ::unshare(CLONE_NEWNS|CLONE_FS);
-			if (rc) {
-				dprintf(D_ALWAYS, "Failed to unshare the mount namespace\n");
-				ret = write(m_errorpipe[1], &errno, sizeof(errno));
-				if (ret < 1) {
-					_exit(errno);
-				} else {
-					_exit(errno);
-				}
-			}
-#else
-			dprintf(D_ALWAYS, "Can not remount filesystems because this system does not have unshare(2)\n");
-			errno = ENOSYS;
-			ret = write(m_errorpipe[1], &errno, sizeof(errno));
-			if (ret < 1) {
-				_exit(errno);
-			} else {
-				_exit(errno);
-			}
-#endif
-		} else {
-			dprintf(D_ALWAYS, "Not remapping FS as requested, due to lack of privileges.\n");
-			m_fs_remap = NULL;
-		}
-	}
+      /////////////////////////////////////////////////
+      // Ticket #3601 - Current theory is that nfs-automounter fails 
+      // when a process has been unshared, so allow for a knob.
+      /////////////////////////////////////////////////
+      bool want_namespace = param_boolean( "PER_JOB_NAMESPACES", true );
 
-	if (m_fs_remap && m_fs_remap->PerformMappings()) {
-		int ret = write(m_errorpipe[1], &errno, sizeof(errno));
-		if (ret < 1) {
-			_exit(errno);
-		} else {
-			_exit(errno);
-		}
+      if ( m_fs_remap && can_switch_ids() && want_namespace ) {
+        m_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
+            
+        int rc =0;
+        
+        // unshare to create new PID namespace.
+        if ( ( rc = ::unshare(CLONE_NEWNS|CLONE_FS) ) ) {
+            dprintf(D_ALWAYS, "Failed to unshare the mount namespace errno\n");
+        }
+#if defined(HAVE_MS_SLAVE) && defined(HAVE_MS_REC)
+        else {
+            ////////////////////////////////////////////////////////
+            // slave mount hide the per-process hide the namespace
+            // @ see http://timothysc.github.com/blog/2013/02/22/perprocess/
+            ////////////////////////////////////////////////////////
+            if ( ( rc = ::mount("", "/", "dontcare", MS_REC|MS_SLAVE, "") ) ) {
+                dprintf(D_ALWAYS, "Failed to unshare the mount namespace\n");
+            }
+        }
+#endif
+        
+        // common error handling
+        if (rc) 
+        {
+            rc = errno;
+            if (write(m_errorpipe[1], &errno, sizeof(errno))){
+                dprintf(D_ALWAYS, "Failed in writing to m_errorpipe\n");
+            }
+            _exit(rc); // b/c errno could have been overridden by write
+        }
+        
+        bOkToReMap = true;
+    }
+#endif
+
+    // This requires rootly power
+    if (m_fs_remap && !bOkToReMap) {
+        dprintf(D_ALWAYS, "Can not remount filesystems because this system does can not have/allow unshare(2)\n");
+        int rc = errno = ENOSYS;
+        if (write(m_errorpipe[1], &errno, sizeof(errno))) {
+            dprintf(D_ALWAYS, "Failed in writing to m_errorpipe\n");
+        }
+        _exit(rc);
+    }
+
+    // finally perform an extra mappings.
+	if (m_fs_remap && m_fs_remap->PerformMappings()) 
+    {
+        int rc = errno;
+        if (write(m_errorpipe[1], &errno, sizeof(errno))) {
+            dprintf(D_ALWAYS, "Failed in writing to m_errorpipe\n");
+        }
+        _exit(rc);
 	}
 
 	// And back to normal userness
-	if (m_fs_remap) {
-		set_priv_no_memory_changes( m_priv_state );
-	}
+	if (bOkToReMap) {
+        set_priv_no_memory_changes( m_priv_state );
+    }
 
 
 		/* Re-nice ourself */
@@ -5951,7 +6179,7 @@ void CreateProcessForkit::exec() {
 	}
 #endif
 
-	if( DebugFlags & D_DAEMONCORE ) {
+	if( IsDebugLevel( D_DAEMONCORE ) ) {
 			// This MyString is scoped to free itself before the call to
 			// exec().  Otherwise, it would be a leak.
 		MyString msg = "Printing fds to inherit: ";
@@ -5970,6 +6198,11 @@ void CreateProcessForkit::exec() {
 	if (m_core_hard_limit != NULL) {
 		limit(RLIMIT_CORE, *m_core_hard_limit, CONDOR_HARD_LIMIT, "max core size");
 	}
+
+	if (m_as_hard_limit != 0L) {
+		limit(RLIMIT_AS, m_as_hard_limit, CONDOR_HARD_LIMIT, "max virtual adddress space");
+	}
+
 
 	dprintf ( D_DAEMONCORE, "About to exec \"%s\"\n", m_executable_fullpath );
 
@@ -6045,7 +6278,7 @@ void CreateProcessForkit::exec() {
 		if( chdir(m_cwd) == -1 ) {
 				// before we exit, make sure our parent knows something
 				// went wrong before the exec...
-			writeExecError(errno);
+			writeExecError(errno,CREATE_PROCESS_FAILED_CHDIR);
 			_exit(errno);
 		}
 	}
@@ -6112,7 +6345,8 @@ int DaemonCore::Create_Process(
 			int			  *affinity_mask,
 			char const    *daemon_sock,
 			MyString      *err_return_msg,
-			FilesystemRemap *remap
+			FilesystemRemap *remap,
+			long		  as_hard_limit
             )
 {
 	int i, j;
@@ -6203,7 +6437,7 @@ int DaemonCore::Create_Process(
 		goto wrapup;
 	}
 
-	inheritbuf.sprintf("%lu ",(unsigned long)mypid);
+	inheritbuf.formatstr("%lu ",(unsigned long)mypid);
 
 		// true = Give me a real local address, circumventing
 		//  CCB's trickery if present.  As this address is
@@ -6649,7 +6883,7 @@ int DaemonCore::Create_Process(
 		/** surround the executable name with quotes or you'll 
 			have problems when the execute directory contains 
 			spaces! */
-		strArgs.sprintf ( 
+		strArgs.formatstr ( 
 			"\"%s\"",
 			executable );
 		
@@ -6682,7 +6916,7 @@ int DaemonCore::Create_Process(
 		
 		/** next, stuff the extra cmd.exe args in with 
 			the arguments */
-		strArgs.sprintf ( 
+		strArgs.formatstr ( 
 			"\"%s\" /Q /C \"%s\"",
 			systemshell,
 			executable );
@@ -6756,7 +6990,7 @@ int DaemonCore::Create_Process(
 
 				/** add the script to the command-line. The 
 					executable is actually the script. */
-				strArgs.sprintf (
+				strArgs.formatstr (
 					"\"%s\" \"%s\"",
 					interpreter, 
 					executable );
@@ -7038,24 +7272,6 @@ int DaemonCore::Create_Process(
 		goto wrapup;
 	}
 
-	// Next, check to see that the cwd exists.
-	struct stat stat_struct;
-	if( cwd && (cwd[0] != '\0') ) {
-		if( stat(cwd, &stat_struct) == -1 ) {
-			return_errno = errno;
-            if (NULL != err_return_msg) {
-                err_return_msg->sprintf("Cannot access specified iwd \"%s\"", cwd);
-            }
-			dprintf( D_ALWAYS, "Create_Process: "
-					 "Cannot access specified iwd \"%s\": "
-					 "errno = %d (%s)\n", cwd, errno, strerror(errno) );
-			if ( priv != PRIV_UNKNOWN ) {
-				set_priv( current_priv );
-			}
-			goto wrapup;
-		}
-	}
-
 		// Change back to the priv we came from:
 	if ( priv != PRIV_UNKNOWN ) {
 		set_priv( current_priv );
@@ -7074,7 +7290,7 @@ int DaemonCore::Create_Process(
 				goto wrapup;
 			}
 
-			executable_fullpath_buf.sprintf("%s/%s", currwd.Value(), executable);
+			executable_fullpath_buf.formatstr("%s/%s", currwd.Value(), executable);
 			executable_fullpath = executable_fullpath_buf.Value();
 
 				// Finally, log it
@@ -7164,6 +7380,7 @@ int DaemonCore::Create_Process(
 			want_command_port,
 			sigmask,
 			core_hard_limit,
+			as_hard_limit,
 			affinity_mask,
 			remap);
 
@@ -7213,6 +7430,11 @@ int DaemonCore::Create_Process(
 				// errorpipe before it was closed, then we know the
 				// error happened before the exec.  We need to reap
 				// the child and return FALSE.
+			int child_failed_op = 0;
+			if (full_read(errorpipe[0], &child_failed_op, sizeof(int)) != sizeof(int)) {
+				child_failed_op = -1;
+				dprintf(D_ALWAYS, "Warning: Create_Process: failed to read child process failure code\n");
+			}
 			int child_status;
 			waitpid(newpid, &child_status, 0);
 			errno = child_errno;
@@ -7292,11 +7514,28 @@ int DaemonCore::Create_Process(
 				break;
 
 			default:
-				dprintf( D_ALWAYS, "Create_Process(%s): child "
-						 "failed with errno %d (%s) before exec()\n",
-						 executable,
-						 errno,
-						 strerror(errno) );
+				if( child_failed_op == CREATE_PROCESS_FAILED_CHDIR && cwd) {
+					std::string remap_description;
+					if( alt_cwd.length() && alt_cwd.compare(cwd) ) {
+						formatstr(remap_description," remapped to \"%s\"",alt_cwd.c_str());
+					}
+					if (NULL != err_return_msg) {
+						err_return_msg->formatstr("Cannot access initial working directory \"%s\"%s",
+												  cwd, remap_description.c_str());
+					}
+					dprintf( D_ALWAYS, "Create_Process: "
+							 "Cannot access initial working directory \"%s\"%s: "
+							 "errno = %d (%s)\n",
+							 cwd, remap_description.c_str(),
+							 return_errno, strerror(return_errno) );
+				}
+				else {
+					dprintf( D_ALWAYS, "Create_Process(%s): child "
+							 "failed with errno %d (%s) before exec()\n",
+							 executable,
+							 errno,
+							 strerror(errno));
+				}
 				break;
 
 			}
@@ -7459,7 +7698,7 @@ int DaemonCore::Create_Process(
 	/* add it to the pid table */
 	{
 	   int insert_result = pidTable->insert(newpid,pidtmp);
-	   assert( insert_result == 0);
+	   ASSERT( insert_result == 0);
 	}
 
 #if !defined(WIN32)
@@ -7791,7 +8030,7 @@ DaemonCore::Create_Thread(ThreadStartFunc start_func, void *arg, Stream *sock,
 	pidtmp->pid = tid;
 #endif
 	int insert_result = pidTable->insert(tid,pidtmp);
-	assert( insert_result == 0 );
+	ASSERT( insert_result == 0 );
 #ifdef WIN32
 	WatchPid(pidtmp);
 #endif
@@ -7964,7 +8203,7 @@ DaemonCore::Inherit( void )
 		pidtmp->deallocate = 0L;
 #endif
 		int insert_result = pidTable->insert(ppid,pidtmp);
-		assert( insert_result == 0 );
+		ASSERT( insert_result == 0 );
 #ifdef WIN32
 		if ( watch_ppid ) {
 			assert(pidtmp->hProcess);
@@ -8083,7 +8322,7 @@ DaemonCore::Inherit( void )
 			}
 			IpVerify* ipv = getSecMan()->getIpVerify();
 			MyString id;
-			id.sprintf("%s", CONDOR_PARENT_FQU);
+			id.formatstr("%s", CONDOR_PARENT_FQU);
 			ipv->PunchHole(DAEMON, id);
 		}
 	}
@@ -8252,7 +8491,7 @@ DaemonCore::HandleDC_SIGCHLD(int sig)
 	bool first_time = true;
 
 
-	assert( sig == SIGCHLD );
+	ASSERT( sig == SIGCHLD );
 
 	for(;;) {
 		errno = 0;
@@ -8903,7 +9142,7 @@ int DaemonCore::HandleChildAliveCommand(int, Stream* stream)
 		 */
 
 	if( dprintf_lock_delay > 0.01 ) {
-		dprintf(D_ALWAYS,"WARNING: child process %d reports that it has spent %.1f%% of its time waiting for a lock to its debug file.  This could indicate a scalability limit that could cause system stability problems.\n",child_pid,dprintf_lock_delay*100);
+		dprintf(D_ALWAYS,"WARNING: child process %d reports that it has spent %.1f%% of its time waiting for a lock to its log file.  This could indicate a scalability limit that could cause system stability problems.\n",child_pid,dprintf_lock_delay*100);
 	}
 	if( dprintf_lock_delay > 0.1 ) {
 			// things are looking serious, so let's send mail
@@ -8912,13 +9151,13 @@ int DaemonCore::HandleChildAliveCommand(int, Stream* stream)
 			last_email = time(NULL);
 
 			std::string subject;
-			sprintf(subject,"Condor process reports long locking delays!");
+			formatstr(subject,"Condor process reports long locking delays!");
 
 			FILE *mailer = email_admin_open(subject.c_str());
 			if( mailer ) {
 				fprintf(mailer,
 						"\n\nThe %s's child process with pid %d has spent %.1f%% of its time waiting\n"
-						"for a lock to its debug file.  This could indicate a scalability limit\n"
+						"for a lock to its log file.  This could indicate a scalability limit\n"
 						"that could cause system stability problems.\n",
 						get_mySubSystem()->getName(),
 						child_pid,
@@ -9521,7 +9760,7 @@ DaemonCore::CheckConfigAttrSecurity( const char* name, Sock* sock )
 			// level.
 
 		MyString command_desc;
-		command_desc.sprintf("remote config %s",name);
+		command_desc.formatstr("remote config %s",name);
 
 		if( Verify(command_desc.Value(),(DCpermission)i, sock->peer_addr(), sock->getFullyQualifiedUser())) {
 				// now we can see if the specific attribute they're
@@ -9850,9 +10089,9 @@ DaemonCore::UpdateLocalAd(ClassAd *daemonAd,char const *fname)
 
     if( fname ) {
 		MyString newLocalAdFile;
-		newLocalAdFile.sprintf("%s.new",fname);
+		newLocalAdFile.formatstr("%s.new",fname);
         if( (AD_FILE = safe_fopen_wrapper_follow(newLocalAdFile.Value(), "w")) ) {
-            daemonAd->fPrint(AD_FILE);
+            fPrintAd(AD_FILE, *daemonAd);
             fclose( AD_FILE );
 			if( rotate_file(newLocalAdFile.Value(),fname)!=0 ) {
 					// Under windows, rotate_file() sometimes failes with
@@ -10078,7 +10317,7 @@ DaemonCore::PidEntry::pipeHandler(int pipe_fd) {
 	bytes = daemonCore->Read_Pipe(pipe_fd, buf, max_read_bytes);
 	if (bytes > 0) {
 		// Actually read some data, so append it to our MyString.
-		// First, null-terminate the buffer so that sprintf_cat()
+		// First, null-terminate the buffer so that formatstr_cat()
 		// doesn't go berserk. This is always safe since buf was
 		// created on the stack with 1 extra byte, just in case.
 		buf[bytes] = '\0';
@@ -10109,12 +10348,11 @@ int
 DaemonCore::PidEntry::pipeFullWrite(int fd)
 {
 	int bytes_written = 0;
-	void* data_left = NULL;
 	int total_len = 0;
 
 	if (pipe_buf[0] != NULL)
 	{
-		data_left = (void*)(((const char*) pipe_buf[0]->Value()) + stdin_offset);
+		const void* data_left = (const void*)(((const char*) pipe_buf[0]->Value()) + stdin_offset);
 		total_len = pipe_buf[0]->Length();
 		bytes_written = daemonCore->Write_Pipe(fd, data_left, total_len - stdin_offset);
 		dprintf(D_DAEMONCORE, "DaemonCore::PidEntry::pipeFullWrite: Total bytes to write = %d, bytes written this pass = %d\n", total_len, bytes_written);

@@ -101,9 +101,9 @@ Script::BackgroundRun( int reaperId, int dagStatus, int failedCount )
 				check_warning_strictness( DAG_STRICT_1 );
 				arg += token;
 			} else {
-            	arg += _node->_CondorID._cluster;
+            	arg += _node->GetCluster();
             	arg += '.';
-            	arg += _node->_CondorID._proc;
+            	arg += _node->GetProc();
 			}
 
         } else if (!strcasecmp(token, "$RETURN")) {
@@ -116,7 +116,7 @@ Script::BackgroundRun( int reaperId, int dagStatus, int failedCount )
 
 		} else if (!strcasecmp( token, "$PRE_SCRIPT_RETURN" ) ) {
 			if ( !_post ) {
-				debug_printf( DEBUG_QUIET, "Warning: $RETURN macro should "
+				debug_printf( DEBUG_QUIET, "Warning: $PRE_SCRIPT_RETURN macro should "
 						"not be used as a PRE script argument!\n" );
 				check_warning_strictness( DAG_STRICT_1 );
 			}

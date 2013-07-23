@@ -125,7 +125,8 @@ Dag::Dag( /* const */ StringList &dagFiles,
 	_maxJobHolds		  (0),
 	_reject			  (false),
 	_alwaysRunPost		  (true),
-	_defaultPriority	  (0)
+	_defaultPriority	  (0),
+	_use_default_node_log  (true)
 {
 
 	// If this dag is a splice, then it may have been specified with a DIR
@@ -197,7 +198,9 @@ Dag::Dag( /* const */ StringList &dagFiles,
 	_dagFiles.rewind();
 	_haltFile = HaltFileName( _dagFiles.next() );
 	_dagStatus = DAG_STATUS_OK;
-
+	if( submitDagDeepOpts ) {
+		_use_default_node_log = submitDagDeepOpts->always_use_node_log;
+	}
 	_nfsLogIsError = param_boolean( "DAGMAN_LOG_ON_NFS_IS_ERROR", true );
 	if(_nfsLogIsError) {
 		bool userlog_locking = param_boolean( "ENABLE_USERLOG_LOCKING", true );
@@ -283,7 +286,7 @@ bool Dag::Bootstrap (bool recovery)
    		while( jobs.Next( job ) ) {
 			if ( job->CanSubmit() ) {
 				if ( !job->MonitorLogFile( _condorLogRdr, _storkLogRdr,
-							_nfsLogIsError, recovery, _defaultNodeLog ) ) {
+							_nfsLogIsError, recovery, _defaultNodeLog, _use_default_node_log ) ) {
 					debug_cache_stop_caching();
 					_jobstateLog.WriteRecoveryFailure();
 					return false;
@@ -633,7 +636,19 @@ bool Dag::ProcessOneEvent (int logsource, ULogEventOutcome outcome,
 				break;
 
 			case ULOG_JOB_RELEASED:
-				ProcessReleasedEvent(job);
+				ProcessReleasedEvent(job, event);
+				break;
+
+			case ULOG_PRESKIP:
+				TerminateJob( job, recovery );
+				job->UnmonitorLogFile( _condorLogRdr, _storkLogRdr );
+				if(!recovery) {
+					--_preRunNodeCount;
+				}
+					// TEMP -- we probably need to write something to the
+					// jobstate.log file here, but JOB_SUCCESS is not the
+					// right thing.  wenger 2011-09-01
+				// _jobstateLog.WriteJobSuccessOrFailure( job );
 				break;
 
 			case ULOG_CHECKPOINTED:
@@ -678,9 +693,8 @@ Dag::ProcessAbortEvent(const ULogEvent *event, Job *job,
 			// don't get a released event for that job.  This may not
 			// work exactly right if some procs of a cluster are held
 			// and some are not.  wenger 2010-08-26
-		if ( job->_jobProcsOnHold > 0 ) {
+		if ( job->_jobProcsOnHold > 0 && job->Release( event->proc ) ) {
 			_numHeldJobProcs--;
-			job->_jobProcsOnHold--;
 		}
 
 			// Only change the node status, error info,
@@ -712,6 +726,7 @@ void
 Dag::ProcessTerminatedEvent(const ULogEvent *event, Job *job,
 		bool recovery) {
 	if( job ) {
+
 		DecrementJobCounts( job );
 
 		const JobTerminatedEvent * termEvent =
@@ -779,6 +794,11 @@ Dag::ProcessTerminatedEvent(const ULogEvent *event, Job *job,
 						// let the script know the job's exit status
 					job->_scriptPost->_retValJob = job->retval;
 				}
+			} else {
+				debug_printf( DEBUG_NORMAL, "Node %s job proc (%d.%d.%d) "
+					"completed successfully, but status is STATUS_ERROR\n",
+					job->GetJobName(), termEvent->cluster, termEvent->proc,
+					termEvent->subproc );
 			}
 			debug_printf( DEBUG_NORMAL,
 							"Node %s job proc (%d.%d.%d) completed "
@@ -818,15 +838,15 @@ Dag::RemoveBatchJob(Job *node) {
 			// Adding this DAGMan's cluster ID as a constraint to
 			// be extra-careful to avoid removing someone else's
 			// job.
-		constraint.sprintf( "%s == %d && %s == %d",
+		constraint.formatstr( "%s == %d && %s == %d",
 					ATTR_DAGMAN_JOB_ID, _DAGManJobId->_cluster,
-					ATTR_CLUSTER_ID, node->_CondorID._cluster);
+					ATTR_CLUSTER_ID, node->GetCluster() );
 		args.AppendArg( constraint.Value() );
 		break;
 
 	case Job::TYPE_STORK:
 		args.AppendArg( _storkRmExe );
-		args.AppendArg( node->_CondorID._cluster );
+		args.AppendArg( node->GetCluster() );
 		break;
 
 	default:
@@ -901,7 +921,7 @@ Dag::ProcessJobProcEnd(Job *job, bool recovery, bool failed) {
 				job->SetStatus( Job::STATUS_POSTRUN );
 				_postRunNodeCount++;
 				(void)job->MonitorLogFile( _condorLogRdr, _storkLogRdr,
-						_nfsLogIsError, _recovery, _defaultNodeLog );
+						_nfsLogIsError, _recovery, _defaultNodeLog, _use_default_node_log );
 			} else {
 				(void)RunPostScript( job, _alwaysRunPost, 0 );
 			}
@@ -997,30 +1017,30 @@ Dag::ProcessPostTermEvent(const ULogEvent *event, Job *job,
 				MyString	errMsg;
 
 				if( mainJobRetval > 0 ) {
-					errMsg.sprintf( "Job exited with status %d and ",
+					errMsg.formatstr( "Job exited with status %d and ",
 								mainJobRetval);
 				}
 				else if( mainJobRetval < 0  &&
 							mainJobRetval >= -MAX_SIGNAL ) {
-					errMsg.sprintf( "Job died on signal %d and ",
+					errMsg.formatstr( "Job died on signal %d and ",
 								0 - mainJobRetval);
 				}
 				else {
-					errMsg.sprintf( "Job failed due to DAGMAN error %d and ",
+					errMsg.formatstr( "Job failed due to DAGMAN error %d and ",
 								mainJobRetval);
 				}
 
 				if ( termEvent->normal ) {
-					errMsg.sprintf_cat( "POST Script failed with status %d",
+					errMsg.formatstr_cat( "POST Script failed with status %d",
 								termEvent->returnValue );
 				} else {
-					errMsg.sprintf_cat( "POST Script died on signal %d",
+					errMsg.formatstr_cat( "POST Script died on signal %d",
 								termEvent->signalNumber );
 				}
 
 				if( job->GetRetryMax() > 0 ) {
 						// add # of retries to error_text
-					errMsg.sprintf_cat( " (after %d node retries)",
+					errMsg.formatstr_cat( " (after %d node retries)",
 							job->GetRetries() );
 				}
 
@@ -1062,9 +1082,9 @@ Dag::ProcessSubmitEvent(Job *job, bool recovery, bool &submitEventIsSane) {
 		// maximum subprocID for NOOP jobs, so we can start out at
 		// the next value instead of zero.
 	if ( recovery ) {
-		if ( JobIsNoop( job->_CondorID ) ) {
+		if ( JobIsNoop( job->GetID() ) ) {
 			_recoveryMaxfakeID = MAX( _recoveryMaxfakeID,
-						GetIndexID( job->_CondorID ) );
+						GetIndexID( job->GetID() ) );
 		}
 	}
 
@@ -1200,31 +1220,31 @@ Dag::ProcessHeldEvent(Job *job, const ULogEvent *event) {
 	if ( !job ) {
 		return;
 	}
+	ASSERT( event );
 
-	_numHeldJobProcs++;
-
-	job->_timesHeld++;
-	job->_jobProcsOnHold++;
-	if ( _maxJobHolds > 0 && job->_timesHeld >= _maxJobHolds ) {
-		debug_printf( DEBUG_VERBOSE, "Total hold count for job %d (node %s) "
-					"has reached DAGMAN_MAX_JOB_HOLDS (%d); all job "
-					"proc(s) for this node will now be removed\n",
-					event->cluster, job->GetJobName(), _maxJobHolds );
-		RemoveBatchJob( job );
+	if( job->Hold( event->proc ) ) {
+		_numHeldJobProcs++;
+		if ( _maxJobHolds > 0 && job->_timesHeld >= _maxJobHolds ) {
+			debug_printf( DEBUG_VERBOSE, "Total hold count for job %d (node %s) "
+						"has reached DAGMAN_MAX_JOB_HOLDS (%d); all job "
+						"proc(s) for this node will now be removed\n",
+						event->cluster, job->GetJobName(), _maxJobHolds );
+			RemoveBatchJob( job );
+		}
 	}
 }
 
 //---------------------------------------------------------------------------
 void
-Dag::ProcessReleasedEvent(Job *job) {
+Dag::ProcessReleasedEvent(Job *job,const ULogEvent* event) {
 
+	ASSERT( event );
 	if ( !job ) {
 		return;
 	}
-
-	_numHeldJobProcs--;
-
-	job->_jobProcsOnHold--;
+	if( job->Release( event->proc ) ) {
+		_numHeldJobProcs--;
+	}
 }
 
 //---------------------------------------------------------------------------
@@ -1275,7 +1295,7 @@ Dag::NodeExists( const char* nodeName ) const
 }
 
 //---------------------------------------------------------------------------
-Job * Dag::FindNodeByEventID (int logsource, const CondorID condorID) const {
+Job * Dag::FindNodeByEventID ( int logsource, const CondorID condorID ) const {
 	if ( condorID._cluster == -1 ) {
 		return NULL;
 	}
@@ -1296,11 +1316,11 @@ Job * Dag::FindNodeByEventID (int logsource, const CondorID condorID) const {
 	}
 
 	if ( node ) {
-		if ( condorID._cluster != node->_CondorID._cluster ) {
-			if ( node->_CondorID._cluster != _defaultCondorId._cluster ) {
+		if ( condorID._cluster != node->GetCluster() ) {
+			if ( node->GetCluster() != _defaultCondorId._cluster ) {
 			 	EXCEPT( "Searched for node for cluster %d; got %d!!",
 						 	condorID._cluster,
-						 	node->_CondorID._cluster );
+						 	node->GetCluster() );
 			} else {
 					// Note: we can get here if we get an aborted event
 					// after a terminated event for the same job (see
@@ -1308,7 +1328,7 @@ Job * Dag::FindNodeByEventID (int logsource, const CondorID condorID) const {
 					// job_dagman_abnormal_term_recovery_retries test).
 				debug_printf( DEBUG_QUIET, "Warning: searched for node for "
 							"cluster %d; got %d!!\n", condorID._cluster,
-							node->_CondorID._cluster );
+							node->GetCluster() );
 				check_warning_strictness( DAG_STRICT_3 );
 			}
 		}
@@ -1371,8 +1391,10 @@ Dag::StartNode( Job *node, bool isRetry )
 		_readyQ->Prepend( node, -node->_nodePriority );
 	} else {
 		if(node->_hasNodePriority){
-			node->varNamesFromDag->Append(new MyString("priority"));
-			node->varValsFromDag->Append(new MyString(node->_nodePriority));
+			Job::NodeVar *var = new Job::NodeVar();
+			var->_name = "priority";
+			var->_value = node->_nodePriority;
+			node->varsFromDag->Append( var );
 		}
 		if ( _submitDepthFirst ) {
 			_readyQ->Prepend( node, -node->_nodePriority );
@@ -1524,7 +1546,12 @@ Dag::SubmitReadyJobs(const Dagman &dm)
 				// we could be smarter and move this test somewhere else,
 				// but I'm not going to deal with that right now.
 				// wenger 2009-05-27
-			if( dm.submit_delay == 0 && !didLogSleep ) {
+
+				// Okay, we're just going to skip the sleep if we're
+				// using the single workflow log file.  I think we
+				// shouldn't worry about being smart in any other cases.
+				// wenger 2013-01-24
+			if( !_use_default_node_log && dm.submit_delay == 0 && !didLogSleep ) {
 					// if we don't already have a submit_delay, sleep for one
 					// second here, so we can be sure that this job's submit
 					// event will be unambiguously later than the termination
@@ -1553,13 +1580,9 @@ Dag::SubmitReadyJobs(const Dagman &dm)
 				ProcessSuccessfulSubmit( job, condorID );
     			numSubmitsThisCycle++;
 
-			} else if ( submit_result == SUBMIT_RESULT_FAILED ) {
+			} else if ( submit_result == SUBMIT_RESULT_FAILED || submit_result == SUBMIT_RESULT_NO_SUBMIT ) {
 				ProcessFailedSubmit( job, dm.max_submit_attempts );
 				break; // break out of while loop
-
-			} else if ( submit_result == SUBMIT_RESULT_NO_SUBMIT ) {
-				// No op.
-
 			} else {
 				EXCEPT( "Illegal submit_result_t value: %d\n", submit_result );
 			}
@@ -1624,7 +1647,6 @@ Dag::PreScriptReaper( const char* nodeName, int status )
 	_jobstateLog.WriteScriptSuccessOrFailure( job, false );
 
 	if ( preScriptFailed ) {
-		job->TerminateFailure();
 
 			// Check for PRE_SKIP.
 		if ( job->HasPreSkip() && job->GetPreSkip() == job->retval ) {
@@ -1635,12 +1657,29 @@ Dag::PreScriptReaper( const char* nodeName, int status )
 			debug_printf( DEBUG_NORMAL, "PRE_SKIP return "
 					"value %d indicates we are done (successfully) with node %s\n",
 					job->retval, job->GetJobName() );
+
+				// Mark the node as a skipped node.
+			CondorID id;
+				// This might be the first time we watch the file, so we
+				// monitor it.
+			if ( !job->MonitorLogFile( _condorLogRdr, _storkLogRdr, _nfsLogIsError,
+					_recovery, _defaultNodeLog, _use_default_node_log ) ) {
+				return 0;
+			}
+				
+			if(!writePreSkipEvent( id, job, job->GetJobName(),
+					job->GetDirectory(), _use_default_node_log ? DefaultNodeLog():
+					job->GetLogFile() , !_use_default_node_log
+					&& job->GetLogFileIsXml() ) ) {
+				debug_printf( DEBUG_NORMAL, "Failed to write PRE_SKIP event for node %s\n",
+					job->GetJobName() );
+				main_shutdown_rescue( EXIT_ERROR, DAG_STATUS_ERROR );
+			}
+			++_preRunNodeCount; // We are not running this again, but we want
+				// to keep the tables correct.  The log reading code will take 
+				// care of this in a moment.
+			job->_scriptPre->_done = TRUE; // So the pre script is not run again.
 			job->retval = 0; // Job _is_ successful!
-				// TEMP -- we probably need to write something to the
-				// jobstate.log file here, but JOB_SUCCESS is not the
-				// right thing.  wenger 2011-09-01
-			// _jobstateLog.WriteJobSuccessOrFailure( job );
-			TerminateJob( job, false, false );
 		}
 
 			// Check for POST script.
@@ -1659,6 +1698,7 @@ Dag::PreScriptReaper( const char* nodeName, int status )
 
 			// None of the above apply -- the node has failed.
 		else {
+			job->TerminateFailure();
 			_numNodesFailed++;
 			if ( _dagStatus == DAG_STATUS_OK ) {
 				_dagStatus = DAG_STATUS_NODE_FAILED;
@@ -1706,7 +1746,7 @@ bool Dag::RunPostScript( Job *job, bool ignore_status, int status,
 	// We are told to ignore the result of the PRE script
 	job->SetStatus( Job::STATUS_POSTRUN );
 	if ( !job->MonitorLogFile( _condorLogRdr, _storkLogRdr,
-			_nfsLogIsError, _recovery, _defaultNodeLog ) ) {
+			_nfsLogIsError, _recovery, _defaultNodeLog, _use_default_node_log ) ) {
 		debug_printf(DEBUG_QUIET, "Unable to monitor user logfile for node %s\n",
 			job->GetJobName() );
 		debug_printf(DEBUG_QUIET, "Not running the POST script\n" );
@@ -1729,13 +1769,20 @@ Dag::PostScriptReaper( const char* nodeName, int status )
 	ASSERT( nodeName != NULL );
 	Job* job = FindNodeByName( nodeName );
 	ASSERT( job != NULL );
+	return PostScriptSubReaper( job, status );
+}
+
+int 
+Dag::PostScriptSubReaper( Job* job, int status )
+{
 	if ( job->GetStatus() != Job::STATUS_POSTRUN ) {
-		EXCEPT( "Node %s is not in POSTRUN state", job->GetJobName() );
+		EXCEPT( "Node %s is not in POSTRUN state",
+			job->GetJobName() );
 	}
 
 	PostScriptTerminatedEvent e;
 	
-	e.dagNodeName = strnewp( nodeName );
+	e.dagNodeName = strnewp( job->GetJobName() );
 
 	if( WIFSIGNALED( status ) ) {
 		debug_printf( DEBUG_QUIET, "POST script died on signal %d\n", status );
@@ -1759,36 +1806,53 @@ Dag::PostScriptReaper( const char* nodeName, int status )
 			// This means that in recovery mode we'll end up running this
 			// POST script again even if we successfully ran it already.
 			// wenger 2005-10-04.
-		e.cluster = job->_CondorID._cluster;
-		e.proc = job->_CondorID._proc;
-		e.subproc = job->_CondorID._subproc;
+		e.cluster = job->GetCluster();
+		e.proc = job->GetProc();
+		e.subproc = job->GetSubProc();
 		ProcessPostTermEvent(&e, job, _recovery);
 	} else {
 
+		e.cluster = job->GetCluster();
+		e.proc = job->GetProc();
+		e.subproc = job->GetSubProc();
 		WriteUserLog ulog;
 			// Disabling the global log (EventLog) fixes the main problem
 			// in gittrac #934 (if you can't write to the global log the
 			// write to the user log also fails, and DAGMan hangs
 			// waiting for the event that wasn't written).
 		ulog.setEnableGlobalLog( false );
-		ulog.setUseXML( job->GetLogFileIsXml() );
+		ulog.setUseXML( !_use_default_node_log && job->GetLogFileIsXml() );
 			// For NOOP jobs, we need the proc and subproc values;
 			// for "real" jobs, they are not significant.
-		int procID = job->GetNoop() ? job->_CondorID._proc : 0;
-		int subprocID = job->GetNoop() ? job->_CondorID._subproc : 0;
-		const char* s = job->GetLogFile();
-		debug_printf(DEBUG_QUIET,"Initializing logfile %s, %d, %d, %d\n",
-			s?s:"(unknown)",job->_CondorID._cluster,procID,subprocID);
-		ulog.initialize( job->GetLogFile(), job->_CondorID._cluster,
-					 	procID, subprocID, NULL );
+		int procID = job->GetNoop() ? job->GetProc() : 0;
+		int subprocID = job->GetNoop() ? job->GetSubProc() : 0;
+		const char* s = _use_default_node_log ? DefaultNodeLog() :
+			job->GetLogFile();
+		if( !s ) { 
+				// User did not specify a log
+				// We specify one for him
+				// Default log is never in XML format
+			s = DefaultNodeLog();
+			ulog.setUseXML( false );
+		}
+		debug_printf( DEBUG_QUIET, "Initializing logfile %s, %d, %d, %d\n",
+			s, job->GetCluster(), procID, subprocID );
+		ulog.initialize( std::vector<const char*>(1,s), job->GetCluster(),
+			procID, subprocID, NULL );
 
-		if( !ulog.writeEvent( &e ) ) {
-			debug_printf( DEBUG_QUIET,
-					  	"Unable to log ULOG_POST_SCRIPT_TERMINATED event\n" );
-			  // Exit here, because otherwise we'll wait forever to see
-			  // the event that we just failed to write (see gittrac #934).
-			  // wenger 2009-11-12.
-			main_shutdown_rescue( EXIT_ERROR, DAG_STATUS_ERROR );
+		for(int write_attempts = 0;;++write_attempts) {
+			if( !ulog.writeEvent( &e ) ) {
+				if( write_attempts >= 2 ) {
+					debug_printf( DEBUG_QUIET,
+							"Unable to log ULOG_POST_SCRIPT_TERMINATED event\n" );
+					// Exit here, because otherwise we'll wait forever to see
+					// the event that we just failed to write (see gittrac #934).
+					// wenger 2009-11-12.
+					main_shutdown_rescue( EXIT_ERROR, DAG_STATUS_ERROR );
+				}
+			} else {
+				break;
+			}
 		}
 	}
 	return true;
@@ -1943,7 +2007,7 @@ void Dag::RemoveRunningJobs ( const Dagman &dm, bool bForce) const {
 		args.AppendArg( _condorRmExe );
 		args.AppendArg( "-const" );
 
-		constraint.sprintf( "%s == %d", ATTR_DAGMAN_JOB_ID,
+		constraint.formatstr( "%s == %d", ATTR_DAGMAN_JOB_ID,
 					dm.DAGManJobId._cluster );
 		args.AppendArg( constraint.Value() );
 		if ( util_popen( args ) != 0 ) {
@@ -1965,7 +2029,7 @@ void Dag::RemoveRunningJobs ( const Dagman &dm, bool bForce) const {
 			job->GetStatus() == Job::STATUS_SUBMITTED ) {
 			args.Clear();
 			args.AppendArg( dm.storkRmExe );
-			args.AppendArg( job->_CondorID._cluster );
+			args.AppendArg( job->GetCluster() );
 			if ( util_popen( args ) != 0 ) {
 				debug_printf( DEBUG_NORMAL, "Error removing Stork job\n");
 			}
@@ -2219,19 +2283,17 @@ Dag::WriteNodeToRescue( FILE *fp, Job *node, bool reset_retries_upon_rescue,
 		}
 
 			// Print the VARS line, if any.
-		if ( !node->varNamesFromDag->IsEmpty() ) {
+		if ( !node->varsFromDag->IsEmpty() ) {
 			fprintf( fp, "VARS %s", node->GetJobName() );
 	
-			ListIterator<MyString> names( *node->varNamesFromDag );
-			ListIterator<MyString> vals( *node->varValsFromDag );
-			names.ToBeforeFirst();
-			vals.ToBeforeFirst();
-			MyString *strName, *strVal;
-			while ( (strName = names.Next() ) && (strVal = vals.Next()) ) {
-				fprintf(fp, " %s=\"", strName->Value());
+			ListIterator<Job::NodeVar> vars( *node->varsFromDag );
+			vars.ToBeforeFirst();
+			Job::NodeVar *nodeVar;
+			while ( ( nodeVar = vars.Next() ) ) {
+				fprintf(fp, " %s=\"", nodeVar->_name.Value());
 					// now we print the value, but we have to re-escape certain characters
-				for( int i = 0; i < strVal->Length(); i++ ) {
-					char c = (*strVal)[i];
+				for( int i = 0; i < nodeVar->_value.Length(); i++ ) {
+					char c = (nodeVar->_value)[i];
 					if ( c == '\"' ) {
 						fprintf( fp, "\\\"" );
 					} else if (c == '\\') {
@@ -2272,6 +2334,8 @@ Dag::WriteNodeToRescue( FILE *fp, Job *node, bool reset_retries_upon_rescue,
 	}
 
 		// Never mark a FINAL node as done.
+		// Also avoid a possible race condition where the job
+		// has been skipped but is not yet marked as DONE.
 	if ( node->GetStatus() == Job::STATUS_DONE && !node->GetFinal() ) {
 		fprintf(fp, "DONE %s\n", node->GetJobName() );
 	}
@@ -2358,7 +2422,7 @@ Dag::TerminateJob( Job* job, bool recovery, bool bootstrap )
 						// We need to monitor the log file for the node that's
 						// newly ready.
 					(void)child->MonitorLogFile( _condorLogRdr, _storkLogRdr,
-								_nfsLogIsError, recovery, _defaultNodeLog );
+								_nfsLogIsError, recovery, _defaultNodeLog, _use_default_node_log);
 				} else {
 						// If child has no more parents in its waiting queue,
 						// submit it.
@@ -2433,10 +2497,10 @@ Dag::RestartNode( Job *node, bool recovery )
 			// here to fix gittrac #1957.
 			// Note: the if checking against the default condor ID
 			// should *always* be true here, but checking just to be safe.
-		if ( !(node->_CondorID == _defaultCondorId) ) {
+		if ( !(node->GetID() == _defaultCondorId) ) {
 			int logsource = node->JobType() == Job::TYPE_CONDOR ? CONDORLOG :
 						DAPLOG;
-			int id = GetIndexID( node->_CondorID );
+			int id = GetIndexID( node->GetID() );
 			if ( GetEventIDHash( node->GetNoop(), logsource )->remove( id )
 						!= 0 ) {
 				EXCEPT( "Event ID hash table error!" );
@@ -2446,9 +2510,9 @@ Dag::RestartNode( Job *node, bool recovery )
 		// Doing this fixes gittrac #481 (recovery fails on a DAG that
 		// has retried nodes).  (See SubmitNodeJob() for where this
 		// gets done during "normal" running.)
-		node->_CondorID = _defaultCondorId;
+		node->SetCondorID( _defaultCondorId );
 		(void)node->MonitorLogFile( _condorLogRdr, _storkLogRdr,
-					_nfsLogIsError, recovery, _defaultNodeLog );
+					_nfsLogIsError, recovery, _defaultNodeLog, _use_default_node_log );
 	}
 }
 
@@ -2632,8 +2696,7 @@ Dag::DumpDotFile(void)
 
 		temp_dot_file_name = current_dot_file_name + ".temp";
 
-		MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-		unlink(temp_dot_file_name.Value());
+		tolerant_unlink(temp_dot_file_name.Value());
 		temp_dot_file = safe_fopen_wrapper_follow(temp_dot_file_name.Value(), "w");
 		if (temp_dot_file == NULL) {
 			debug_dprintf(D_ALWAYS, DEBUG_NORMAL,
@@ -2668,10 +2731,17 @@ Dag::DumpDotFile(void)
 
 			fprintf(temp_dot_file, "}\n");
 			fclose(temp_dot_file);
-			MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-			unlink(current_dot_file_name.Value());
-			MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of rename ignored.
-			rename(temp_dot_file_name.Value(), current_dot_file_name.Value());
+			tolerant_unlink(current_dot_file_name.Value());
+			if ( rename(temp_dot_file_name.Value(),
+						current_dot_file_name.Value()) != 0 ) {
+				debug_printf( DEBUG_NORMAL,
+					  		"Warning: can't rename temporary dot "
+					  		"file (%s) to permanent file (%s): %s\n",
+					  		temp_dot_file_name.Value(),
+							current_dot_file_name.Value(),
+					  		strerror( errno ) );
+				check_warning_strictness( DAG_STRICT_1 );
+			}
 		}
 	}
 	return;
@@ -2700,6 +2770,7 @@ Dag::SetNodeStatusFileName( const char *statusFileName,
 	_minStatusUpdateTime = minUpdateTime;
 }
 
+//-------------------------------------------------------------------------
 /** Dump the node status.
 	@param whether the DAG has just been held
 	@param whether the DAG has just been removed
@@ -2742,8 +2813,7 @@ Dag::DumpNodeStatus( bool held, bool removed )
 	tmpStatusFile += ".tmp";
 		// Note: it's not an error if this fails (file may not
 		// exist).
-	MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-	unlink( tmpStatusFile.Value() );
+	tolerant_unlink( tmpStatusFile.Value() );
 
 	FILE *outfile = safe_fopen_wrapper_follow( tmpStatusFile.Value(), "w" );
 	if ( outfile == NULL ) {
@@ -2795,6 +2865,22 @@ Dag::DumpNodeStatus( bool held, bool removed )
 		fprintf( outfile, "JOB %s %s (%s)\n", node->GetJobName(),
 					statusStr, nodeNote );
 	}
+
+		//
+		// Print node counts.
+		//
+	fprintf( outfile, "\n" );
+	fprintf( outfile, "Nodes total: %d\n", NumNodes( true ) );
+	fprintf( outfile, "Nodes done: %d\n", NumNodesDone( true ) );
+	fprintf( outfile, "Nodes pre: %d\n", PreRunNodeCount() );
+	fprintf( outfile, "Nodes queued: %d\n", NumJobsSubmitted() );
+	fprintf( outfile, "Nodes post: %d\n", PostRunNodeCount() );
+	fprintf( outfile, "Nodes ready: %d\n", NumNodesReady() );
+	int unready = NumNodes( true )  - (NumNodesDone( true ) +
+				PreRunNodeCount() + NumJobsSubmitted() + PostRunNodeCount() +
+				NumNodesReady() + NumNodesFailed()  );
+	fprintf( outfile, "Nodes un-ready: %d\n", unready );
+	fprintf( outfile, "Nodes failed: %d\n", NumNodesFailed() );
 
 		//
 		// Print overall DAG status.
@@ -2996,7 +3082,7 @@ Dag::PrintPendingNodes() const
 		case Job::STATUS_SUBMITTED:
 		case Job::STATUS_POSTRUN:
 			dprintf( D_ALWAYS, "  Node %s, Condor ID %d, status %s\n",
-						node->GetJobName(), node->_CondorID._cluster,
+						node->GetJobName(), node->GetCluster(),
 						node->GetStatusName() );
 			break;
 
@@ -3209,7 +3295,7 @@ Dag::ChooseDotFileName(MyString &dot_file_name)
 		while (!found_unused_file) {
 			FILE *fp;
 
-			dot_file_name.sprintf("%s.%d", _dot_file_name, _dot_file_name_suffix);
+			dot_file_name.formatstr("%s.%d", _dot_file_name, _dot_file_name_suffix);
 			fp = safe_fopen_wrapper_follow(dot_file_name.Value(), "r");
 			if (fp != NULL) {
 				fclose(fp);
@@ -3262,12 +3348,12 @@ Dag::RemoveNode( const char *name, MyString &whynot )
 		return false;
 	}
 	if( node->IsActive() ) {
-		whynot.sprintf( "is active (%s)", node->GetStatusName() );
+		whynot.formatstr( "is active (%s)", node->GetStatusName() );
 		return false;
 	}
 	if( !node->IsEmpty( Job::Q_CHILDREN ) ||
 		!node->IsEmpty( Job::Q_PARENTS ) ) {
-		whynot.sprintf( "dependencies exist" );
+		whynot.formatstr( "dependencies exist" );
 		return false;
 	}
 
@@ -3318,7 +3404,7 @@ Dag::RemoveNode( const char *name, MyString &whynot )
 			// fail to handle it above...
 		debug_printf( DEBUG_QUIET, "ERROR: node %s in unexpected state (%s)\n",
 					  node->GetJobName(), node->GetStatusName() );
-		whynot.sprintf( "node in unexpected state (%s)",
+		whynot.formatstr( "node in unexpected state (%s)",
 						node->GetStatusName() );
 		return false;
 	}
@@ -3410,7 +3496,9 @@ Dag::LogEventNodeLookup( int logsource, const ULogEvent* event,
 		// can simply use the job ID to look up the corresponding DAG
 		// node, and we're done...
 
-	if( event->eventNumber != ULOG_SUBMIT ) {
+	if ( event->eventNumber != ULOG_SUBMIT &&
+				event->eventNumber != ULOG_PRESKIP ) {
+		
 	  node = FindNodeByEventID( logsource, condorID );
 	  if( node ) {
 	    return node;
@@ -3418,7 +3506,7 @@ Dag::LogEventNodeLookup( int logsource, const ULogEvent* event,
 	}
 
 		// if the job ID wasn't familiar and we didn't find a node
-		// above, there are three possibilites:
+		// above, there are at least four possibilites:
 		//	
 		// 1) it's the submit event for a node we just submitted, and
 		// we don't yet know the job ID; in this case, we look up the
@@ -3431,7 +3519,9 @@ Dag::LogEventNodeLookup( int logsource, const ULogEvent* event,
 		//
 		// 3) it's a job submitted by someone outside than this
 		// DAGMan, and can/should be ignored (we return NULL).
-
+		//
+		// 4) it's a pre skip event, which is handled similarly to
+		// a submit event.
 	if( event->eventNumber == ULOG_SUBMIT ) {
 		const SubmitEvent* submit_event = (const SubmitEvent*)event;
 		if ( submit_event->submitEventLogNotes ) {
@@ -3442,7 +3532,7 @@ Dag::LogEventNodeLookup( int logsource, const ULogEvent* event,
 				if( node ) {
 					submitEventIsSane = SanityCheckSubmitEvent( condorID,
 								node );
-					node->_CondorID = condorID;
+					node->SetCondorID( condorID );
 
 						// Insert this node into the CondorID->node hash
 						// table if we don't already have it (e.g., recovery
@@ -3479,7 +3569,41 @@ Dag::LogEventNodeLookup( int logsource, const ULogEvent* event,
 		node = FindNodeByName( pst_event->dagNodeName );
 		return node;
 	}
-
+	
+	if( event->eventNumber == ULOG_PRESKIP ) {
+		const PreSkipEvent* skip_event = (const PreSkipEvent*)event;
+		char nodeName[1024] = "";
+		if( !skip_event->skipEventLogNotes ) { 
+			debug_printf( DEBUG_NORMAL, "No DAG Node indicated in a PRE_SKIP event\n" );	
+			node = NULL;
+		} else if( sscanf( skip_event->skipEventLogNotes, "DAG Node: %1023s",
+				nodeName ) == 1) {
+			node = FindNodeByName( nodeName );
+			if( node ) {
+				node->SetCondorID( condorID );
+					// Insert this node into the CondorID->node hash
+					// table.
+				Job *tmpNode = NULL;
+				bool isNoop = JobIsNoop( condorID );
+				int id = GetIndexID( condorID );
+				HashTable<int, Job *> *ht =
+							GetEventIDHash( isNoop, logsource );
+				if ( ht->lookup(id, tmpNode) != 0 ) {
+						// Node not found.
+					int insertResult = ht->insert( id, node );
+					ASSERT( insertResult == 0 );
+				} else {
+						// Node was found.
+					ASSERT( tmpNode == node );
+				}
+			}
+		} else {
+			debug_printf( DEBUG_QUIET, "ERROR: 'DAG Node:' not found "
+						"in skip event notes: <%s>\n",
+						skip_event->skipEventLogNotes );
+		}
+		return node;
+	}
 	return node;
 }
 
@@ -3571,23 +3695,22 @@ Dag::SanityCheckSubmitEvent( const CondorID condorID, const Job* node )
 		// this is better because if you get two submit events for the
 		// same node you'll still get a warning in recovery mode.
 		// wenger 2007-01-31.
-	if( node->_CondorID == _defaultCondorId ) {
+	if( node->GetID() == _defaultCondorId ) {
 			// we no longer have the submit command stdout to check against
 		return true;
 	}
 
-	if( condorID._cluster == node->_CondorID._cluster ) {
+	if( condorID._cluster == node->GetCluster() ) {
 		return true;
 	}
 
 	MyString message;
-	message.sprintf( "ERROR: node %s: job ID in userlog submit event (%d.%d.%d) "
+	message.formatstr( "ERROR: node %s: job ID in userlog submit event (%d.%d.%d) "
 				"doesn't match ID reported earlier by submit command "
 				"(%d.%d.%d)!", 
 				node->GetJobName(), condorID._cluster, condorID._proc,
-				condorID._subproc,
-				node->_CondorID._cluster, node->_CondorID._proc,
-				node->_CondorID._subproc );
+				condorID._subproc, node->GetCluster(), node->GetProc(),
+				node->GetSubProc() );
 
 	if ( _abortOnScarySubmit ) {
 		debug_printf( DEBUG_QUIET, "%s  Aborting DAG; set "
@@ -3660,13 +3783,33 @@ Dag::GetEventIDHash(bool isNoop, int jobType) const
 // the higher level calling them to get right...
 //---------------------------------------------------------------------------
 
-namespace {
-void swap_priorities(Job* job, SubmitDagDeepOptions* sdo)
+// A RAII class to swap out the priorities below, then restore them
+// when we are done.
+class priority_swapper {
+public:
+	priority_swapper(bool nodepriority, int newprio, int& oldprio);
+	~priority_swapper();
+private:
+	priority_swapper(); // Not implemented
+	bool swapped;
+	int& oldp;
+	int oldp_value;
+};
+
+priority_swapper::priority_swapper(bool nodepriority, int newprio, int& oldprio) :
+	swapped(false), oldp(oldprio), oldp_value(oldprio)
 {
-	int priority = job->_nodePriority;
-	job->_nodePriority = sdo->priority;
-	sdo->priority = priority;
+	if( nodepriority && newprio > oldprio ) {
+		swapped = true;
+		oldp = newprio;
+	}
 }
+
+priority_swapper::~priority_swapper()
+{
+	if( swapped ) {
+		oldp = oldp_value;
+	}
 }
 
 Dag::submit_result_t
@@ -3675,14 +3818,14 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
 	submit_result_t result = SUBMIT_RESULT_NO_SUBMIT;
 
 		// Resetting the Condor ID here fixes PR 799.  wenger 2007-01-24.
-	if ( node->_CondorID._cluster != _defaultCondorId._cluster ) {
+	if ( node->GetCluster() != _defaultCondorId._cluster ) {
 		ASSERT( JobIsNoop( condorID ) == node->GetNoop() );
-		int id = GetIndexID( node->_CondorID );
+		int id = GetIndexID( node->GetID() );
 		int removeResult = GetEventIDHash( node->GetNoop(),
 					node->JobType() )->remove( id );
 		ASSERT( removeResult == 0 );
 	}
-	node->_CondorID = _defaultCondorId;
+	node->SetCondorID( _defaultCondorId );
 
 		// sleep for a specified time before submitting
 	if( dm.submit_delay != 0 ) {
@@ -3698,28 +3841,23 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
    	if ( node->JobType() == Job::TYPE_CONDOR && !node->GetNoop() &&
 				node->GetDagFile() != NULL && _generateSubdagSubmits ) {
 		bool isRetry = node->GetRetries() > 0;
-		if( node->_hasNodePriority && node->_nodePriority > _submitDagDeepOpts->priority ){
-			swap_priorities(node,_submitDagDeepOpts);
-		}
+		priority_swapper ps( node->_hasNodePriority, node->_nodePriority, _submitDagDeepOpts->priority);
 		if ( runSubmitDag( *_submitDagDeepOpts, node->GetDagFile(),
 					node->GetDirectory(), isRetry ) != 0 ) {
+			++node->_submitTries;
 			debug_printf( DEBUG_QUIET,
 						"ERROR: condor_submit_dag -no_submit failed "
 						"for node %s.\n", node->GetJobName() );
 				// Hmm -- should this be a node failure, since it probably
 				// won't work on retry?  wenger 2010-03-26
-			if( node->_hasNodePriority && node->_nodePriority < _submitDagDeepOpts->priority ){
-				swap_priorities(node,_submitDagDeepOpts);
-			}
 			return SUBMIT_RESULT_NO_SUBMIT;
-		}
-		if( node->_hasNodePriority && node->_nodePriority < _submitDagDeepOpts->priority ){
-			swap_priorities(node,_submitDagDeepOpts);
 		}
 	}
 
 	if ( !node->MonitorLogFile( _condorLogRdr, _storkLogRdr, _nfsLogIsError,
-				_recovery, _defaultNodeLog ) ) {
+			_recovery, _defaultNodeLog, _use_default_node_log ) ) {
+		debug_printf( DEBUG_QUIET, "ERROR: Failed to monitor log for node %s.\n",
+			node->GetJobName() );
 		return SUBMIT_RESULT_NO_SUBMIT;
 	}
 
@@ -3732,7 +3870,7 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
 		// jobs because we can't specify the log file on the command
 		// line.  wenger 2009-08-14
 	if ( !_allowLogError && node->JobType() == Job::TYPE_STORK &&
-				!node->CheckForLogFile() ) {
+				!node->CheckForLogFile( _use_default_node_log ) ) {
 		debug_printf( DEBUG_NORMAL, "ERROR: No 'log =' value found in "
 					"submit file %s for node %s\n", node->GetCmdFile(),
 					node->GetJobName() );
@@ -3756,13 +3894,14 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
     	if( node->JobType() == Job::TYPE_CONDOR ) {
 	  		node->_submitTries++;
 			if ( node->GetNoop() ) {
-      			submit_success = fake_condor_submit( condorID,
+      			submit_success = fake_condor_submit( condorID, 0,
 							node->GetJobName(), node->GetDirectory(),
-							node->GetLogFile(), node->GetLogFileIsXml() );
-
+							_use_default_node_log ? DefaultNodeLog():
+								node->GetLogFile() ,
+							!_use_default_node_log && node->GetLogFileIsXml() );
 			} else {
 				const char *logFile = node->UsingDefaultLog() ?
-							node->GetLogFile() : NULL;
+							DefaultNodeLog() : NULL;
 					// Note: assigning the ParentListString() return value
 					// to a variable here, instead of just passing it directly
 					// to condor_submit(), fixes a memory leak(!).
@@ -3770,17 +3909,20 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
 				MyString parents = ParentListString( node );
       			submit_success = condor_submit( dm, cmd_file.Value(), condorID,
 							node->GetJobName(), parents,
-							node->varNamesFromDag, node->varValsFromDag,
-							node->GetDirectory(), logFile,
-							ProhibitMultiJobs(),
+							node->varsFromDag,
+							node->GetDirectory(), DefaultNodeLog(),
+							_use_default_node_log && node->UseDefaultLog(),
+							logFile, ProhibitMultiJobs(),
 							node->NumChildren() > 0 && dm._claim_hold_time > 0);
 			}
     	} else if( node->JobType() == Job::TYPE_STORK ) {
 	  		node->_submitTries++;
 			if ( node->GetNoop() ) {
-      			submit_success = fake_condor_submit( condorID,
+      			submit_success = fake_condor_submit( condorID, 0,
 							node->GetJobName(), node->GetDirectory(),
-							node->GetLogFile(), node->GetLogFileIsXml() );
+							_use_default_node_log ? DefaultNodeLog() :
+								node->GetLogFile(),
+							!_use_default_node_log && node->GetLogFileIsXml() );
 
 			} else {
       			submit_success = stork_submit( dm, cmd_file.Value(), condorID,
@@ -3826,9 +3968,9 @@ Dag::ProcessSuccessfulSubmit( Job *node, const CondorID &condorID )
         // (note: this sanity-check is not possible during recovery,
         // since we won't have seen the submit command stdout...)
 
-	node->_CondorID = condorID;
-	ASSERT( JobIsNoop( node->_CondorID ) == node->GetNoop() );
-	int id = GetIndexID( node->_CondorID );
+	node->SetCondorID( condorID );
+	ASSERT( JobIsNoop( node->GetID() ) == node->GetNoop() );
+	int id = GetIndexID( node->GetID() );
 	int insertResult = GetEventIDHash( node->GetNoop(), node->JobType() )->
 				insert( id, node );
 	ASSERT( insertResult == 0 );

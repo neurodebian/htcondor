@@ -53,11 +53,10 @@
 
 State get_machine_state();
 
-extern void		_condor_set_debug_flags( const char *strflags );
+extern void		_condor_set_debug_flags( const char *strflags, int flags );
 
 // Define this to check for memory leaks
 
-int			MaxCkptInterval;	// max time between ckpts on this machine
 char		*Spool;				// dir for condor job queue
 StringList   ExecuteDirs;		// dirs for execution of condor jobs
 char		*Log;				// dir for condor program logs
@@ -66,7 +65,6 @@ char		*PreenAdmin;		// who to send mail to in case of trouble
 char		*MyName;			// name this program was invoked by
 char        *ValidSpoolFiles;   // well known files in the spool dir
 char        *InvalidLogFiles;   // files we know we want to delete from log
-char		*MailPrg;			// what program to use to send email
 BOOLEAN		MailFlag;			// true if we should send mail about problems
 BOOLEAN		VerboseFlag;		// true if we should produce verbose output
 BOOLEAN		RmFlag;				// true if we should remove extraneous files
@@ -122,9 +120,10 @@ main( int argc, char *argv[] )
 	MyName = argv[0];
 	myDistro->Init( argc, argv );
 	config();
-	init_params();
-	BadFiles = new StringList;
-	param_functions *p_funcs = NULL;
+
+	VerboseFlag = FALSE;
+	MailFlag = FALSE;
+	RmFlag = FALSE;
 
 		// Parse command line arguments
 	for( argv++; *argv; argv++ ) {
@@ -132,7 +131,7 @@ main( int argc, char *argv[] )
 			switch( (*argv)[1] ) {
 			
 			  case 'd':
-                Termlog = 1;
+                dprintf_set_tool_debug("TOOL", 0);
 			  case 'v':
 				VerboseFlag = TRUE;
 				break;
@@ -154,8 +153,9 @@ main( int argc, char *argv[] )
 		}
 	}
 	
-	p_funcs = get_param_functions();
-	dprintf_config("TOOL", p_funcs);
+	init_params();
+	BadFiles = new StringList;
+
 	if (VerboseFlag)
 	{
 		// always append D_FULLDEBUG locally when verbose.
@@ -167,7 +167,7 @@ main( int argc, char *argv[] )
 			szVerbose+=pval;
 			free( pval );
 		}
-		_condor_set_debug_flags( szVerbose.c_str() );
+		_condor_set_debug_flags( szVerbose.c_str(), D_FULLDEBUG );
 		
 	}
 	dprintf( D_ALWAYS, "********************************\n");
@@ -208,7 +208,7 @@ produce_output()
 	char	*str;
 	FILE	*mailer;
 	MyString subject,szTmp;
-	subject.sprintf("condor_preen results %s: %d old file%s found", 
+	subject.formatstr("condor_preen results %s: %d old file%s found", 
 		my_full_hostname(), BadFiles->number(), 
 		(BadFiles->number() > 1)?"s":"");
 
@@ -220,7 +220,7 @@ produce_output()
 		mailer = stdout;
 	}
 
-	szTmp.sprintf("The condor_preen process has found the following stale condor files on <%s>:\n\n",  get_local_hostname().Value());
+	szTmp.formatstr("The condor_preen process has found the following stale condor files on <%s>:\n\n",  get_local_hostname().Value());
 	dprintf(D_ALWAYS, "%s", szTmp.Value()); 
 		
 	if( MailFlag ) {
@@ -229,7 +229,7 @@ produce_output()
 	}
 
 	for( BadFiles->rewind(); (str = BadFiles->next()); ) {
-		szTmp.sprintf("  %s\n", str);
+		szTmp.formatstr("  %s\n", str);
 		dprintf(D_ALWAYS, "%s", szTmp.Value() );
 		fprintf( mailer, "%s", szTmp.Value() );
 	}
@@ -269,7 +269,7 @@ check_job_spool_hierarchy( char const *parent, char const *child, StringList &ba
 	}
 
 	std::string topdir;
-	sprintf(topdir,"%s%c%s",parent,DIR_DELIM_CHAR,child);
+	formatstr(topdir,"%s%c%s",parent,DIR_DELIM_CHAR,child);
 	Directory dir(topdir.c_str(),PRIV_ROOT);
 	char const *f;
 	while( (f=dir.Next()) ) {
@@ -457,7 +457,7 @@ is_valid_shared_exe( const char *name )
 		return FALSE;
 	}
 	MyString path;
-	path.sprintf("%s/%s", Spool, name);
+	path.formatstr("%s/%s", Spool, name);
 	int count = link_count(path.Value());
 	if (count == 1) {
 		return FALSE;
@@ -705,7 +705,7 @@ check_daemon_sock_dir()
 
 	while( (f = dir.Next()) ) {
 		MyString full_path;
-		full_path.sprintf("%s%c%s",DaemonSockDir,DIR_DELIM_CHAR,f);
+		full_path.formatstr("%s%c%s",DaemonSockDir,DIR_DELIM_CHAR,f);
 
 			// daemon sockets are touched periodically to mark them as
 			// still in use
@@ -829,19 +829,17 @@ init_params()
 	}
 	delete params;
 
-    if( (PreenAdmin = param("PREEN_ADMIN")) == NULL ) {
-		if( (PreenAdmin = param("CONDOR_ADMIN")) == NULL ) {
-			EXCEPT( "CONDOR_ADMIN not specified in config file" );
+	if ( MailFlag ) {
+		if( (PreenAdmin = param("PREEN_ADMIN")) == NULL ) {
+			if( (PreenAdmin = param("CONDOR_ADMIN")) == NULL ) {
+				EXCEPT( "CONDOR_ADMIN not specified in config file" );
+			}
 		}
-    }
+	}
 
 	ValidSpoolFiles = param("VALID_SPOOL_FILES");
 
 	InvalidLogFiles = param("INVALID_LOG_FILES");
-
-	if( (MailPrg = param("MAIL")) == NULL ) {
-		EXCEPT ( "MAIL not specified in config file" );
-	}
 }
 
 
@@ -869,7 +867,7 @@ bad_file( const char *dirpath, const char *name, Directory & dir )
 	MyString	buf;
 
 	if( is_relative_to_cwd( name ) ) {
-	pathname.sprintf( "%s%c%s", dirpath, DIR_DELIM_CHAR, name );
+	pathname.formatstr( "%s%c%s", dirpath, DIR_DELIM_CHAR, name );
 	}
 	else {
 		pathname = name;
@@ -892,12 +890,12 @@ bad_file( const char *dirpath, const char *name, Directory & dir )
 			}
 		}
 		if( removed ) {
-			buf.sprintf( "%s - Removed", pathname.Value() );
+			buf.formatstr( "%s - Removed", pathname.Value() );
 		} else {
-			buf.sprintf( "%s - Can't Remove", pathname.Value() );
+			buf.formatstr( "%s - Can't Remove", pathname.Value() );
 		}
 	} else {
-		buf.sprintf( "%s - Not Removed", pathname.Value() );
+		buf.formatstr( "%s - Not Removed", pathname.Value() );
 	}
 	BadFiles->append( buf.Value() );
 }

@@ -35,6 +35,7 @@
 #include "authentication.h"
 #include "condor_sockfunc.h"
 #include "condor_ipv6.h"
+#include "condor_config.h"
 
 #ifdef HAVE_EXT_OPENSSL
 #include "condor_crypt_blowfish.h"
@@ -46,7 +47,17 @@
 #define closesocket close
 #endif
 
+void dprintf ( int flags, Sock & sock, const char *fmt, ... )
+{
+    va_list args;
+    va_start( args, fmt );
+    _condor_dprintf_va( flags, (DPF_IDENT)sock.getUniqueId(), fmt, args );
+    va_end( args );
+}
+
 DaemonCoreSockAdapterClass daemonCoreSockAdapter;
+
+unsigned int Sock::m_nextUniqueId = 1;
 
 Sock::Sock() : Stream() {
 	_sock = INVALID_SOCKET;
@@ -55,6 +66,10 @@ Sock::Sock() : Stream() {
 	_fqu = NULL;
 	_fqu_user_part = NULL;
 	_fqu_domain_part = NULL;
+	_auth_method = NULL;
+	_auth_methods = NULL;
+	_auth_name = NULL;
+	_crypto_method = NULL;
 	_tried_authentication = false;
 	ignore_connect_timeout = FALSE;		// Used by the HA Daemon
 	connect_state.connect_failed = false;
@@ -69,6 +84,7 @@ Sock::Sock() : Stream() {
 	connect_state.port = 0;
 	connect_state.connect_failure_reason = NULL;
 	_who.clear();
+	m_uniqueId = m_nextUniqueId++;
 
     crypto_ = NULL;
     mdMode_ = MD_OFF;
@@ -87,6 +103,10 @@ Sock::Sock(const Sock & orig) : Stream() {
 	_fqu = NULL;
 	_fqu_user_part = NULL;
 	_fqu_domain_part = NULL;
+	_auth_method = NULL;
+	_auth_methods = NULL;
+	_auth_name = NULL;
+	_crypto_method = NULL;
 	_tried_authentication = false;
 	ignore_timeout_multiplier = orig.ignore_timeout_multiplier;
 	connect_state.connect_failed = false;
@@ -101,6 +121,8 @@ Sock::Sock(const Sock & orig) : Stream() {
 	connect_state.port = 0;
 	connect_state.connect_failure_reason = NULL;
 	_who.clear();
+	// TODO Do we want a new unique ID here?
+	m_uniqueId = m_nextUniqueId++;
 
     crypto_ = NULL;
     mdMode_ = MD_OFF;
@@ -153,6 +175,19 @@ Sock::~Sock()
 	if ( connect_state.host ) free(connect_state.host);
 	if ( connect_state.connect_failure_reason) {
 		free(connect_state.connect_failure_reason);
+	}
+	if (_auth_method) {
+		free(_auth_method);
+		_auth_method = NULL;
+	}
+	if (_auth_methods) {
+		free(_auth_methods);
+		_auth_methods = NULL;
+	}
+	free(_auth_name);
+	if (_crypto_method) {
+		free(_crypto_method);
+		_crypto_method = NULL;
 	}
 	if (_fqu) {
 		free(_fqu);
@@ -881,7 +916,7 @@ Sock::do_connect_finish()
 					// We expect to be called back later (e.g. by DaemonCore)
 					// when the connection attempt succeeds/fails/times out
 
-				if( DebugFlags & D_NETWORK ) {
+				if( IsDebugLevel( D_NETWORK ) ) {
 					dprintf( D_NETWORK,
 					         "non-blocking CONNECT started fd=%d dst=%s\n",
 					         _sock, get_sinful_peer() );
@@ -1007,7 +1042,7 @@ Sock::do_connect_finish()
 			_state = sock_connect_pending_retry;
 			connect_state.retry_wait_timeout_time = time(NULL)+1;
 
-			if( DebugFlags & D_NETWORK ) {
+			if( IsDebugLevel( D_NETWORK ) ) {
 				dprintf(D_NETWORK,
 				        "non-blocking CONNECT  waiting for next "
 				        "attempt fd=%d dst=%s\n",
@@ -1030,7 +1065,7 @@ bool
 Sock::enter_connected_state(char const *op)
 {
 	_state = sock_connect;
-	if( DebugFlags & D_NETWORK ) {
+	if( IsDebugLevel( D_NETWORK ) ) {
 		dprintf( D_NETWORK, "%s bound to %s fd=%d peer=%s\n",
 				 op, get_sinful(), _sock, get_sinful_peer() );
 	}
@@ -1311,7 +1346,7 @@ int Sock::close()
 
 	if (_state == sock_virgin) return FALSE;
 
-	if (type() == Stream::reli_sock && (DebugFlags & D_NETWORK)) {
+	if (type() == Stream::reli_sock && IsDebugLevel(D_NETWORK)) {
 		dprintf( D_NETWORK, "CLOSE %s fd=%d\n", 
 						sock_to_string(_sock), _sock );
 	}
@@ -1806,8 +1841,8 @@ Sock::addr_changed()
     // either the peer's address or our address change, zap them all
     _my_ip_buf[0] = '\0';
     _peer_ip_buf[0] = '\0';
-    _sinful_self_buf[0] = '\0';
-    _sinful_public_buf[0] = '\0';
+    _sinful_self_buf.clear();
+    _sinful_public_buf.clear();
     _sinful_peer_buf[0] = '\0';
 }
 
@@ -1983,18 +2018,25 @@ Sock::my_ip_str()
 	return _my_ip_buf;
 }
 
-char *
+char const *
 Sock::get_sinful()
-{       
-    if( !_sinful_self_buf[0] ) {
+{
+    if( _sinful_self_buf.empty() ) {
 		condor_sockaddr addr;
 		int ret = condor_getsockname_ex(_sock, addr);
 		if (ret == 0) {
-			MyString sinful_self = addr.to_sinful();
-			strcpy(_sinful_self_buf, sinful_self.Value());
-    }
+			_sinful_self_buf = addr.to_sinful();
+
+			std::string alias;
+			if( param(alias,"HOST_ALIAS") ) {
+				Sinful s(_sinful_self_buf.c_str());
+				s.setAlias(alias.c_str());
+				_sinful_self_buf = s.getSinful();
+			}
+
+		}
 	}
-	return _sinful_self_buf;
+	return _sinful_self_buf.c_str();
 }
 
 char *
@@ -2194,6 +2236,52 @@ int Sock::set_async_handler( CedarHandler *handler )
 #endif  /* of ifndef WIN32 for the async support */
 
 
+void Sock :: setAuthenticationMethodUsed(char const *auth_method)
+{
+	if( _auth_method ) {
+		free (_auth_method);
+	}
+	_auth_method = strdup(auth_method);
+}
+
+const char* Sock :: getAuthenticationMethodUsed() {
+	return _auth_method;
+}
+
+void Sock :: setAuthenticationMethodsTried(char const *auth_methods)
+{
+	free(_auth_methods);
+	_auth_methods = strdup(auth_methods);
+}
+
+const char* Sock :: getAuthenticationMethodsTried() {
+	return _auth_methods;
+}
+
+void Sock :: setAuthenticatedName(char const *auth_name)
+{
+	free(_auth_name);
+	_auth_name = strdup(auth_name);
+}
+
+const char* Sock :: getAuthenticatedName() {
+	return _auth_name;
+}
+
+void Sock :: setCryptoMethodUsed(char const *crypto_method)
+{
+	if( _crypto_method ) {
+		free (_crypto_method);
+	}
+	_crypto_method = strdup(crypto_method);
+}
+
+const char* Sock :: getCryptoMethodUsed() {
+	return _crypto_method;
+}
+
+
+
 void Sock :: setFullyQualifiedUser(char const *fqu)
 {
 	if( fqu == _fqu ) { // special case
@@ -2366,9 +2454,11 @@ Sock::initialize_crypto(KeyInfo * key)
         {
 #ifdef HAVE_EXT_OPENSSL
         case CONDOR_BLOWFISH :
+			setCryptoMethodUsed("BLOWFISH");
             crypto_ = new Condor_Crypt_Blowfish(*key);
             break;
         case CONDOR_3DES:
+			setCryptoMethodUsed("3DES");
             crypto_ = new Condor_Crypt_3des(*key);
             break;
 #endif

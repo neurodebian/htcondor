@@ -44,15 +44,14 @@ CheckArgs(int argc, const char **argv, Options &opts);
 int
 main(int argc, const char **argv)
 {
-	DebugFlags = D_ALWAYS;
+	set_debug_flags(NULL, D_ALWAYS);
 
 		// initialize to read from config file
 	myDistro->Init( argc, argv );
 	config();
 
 		// Set up the dprintf stuff...
-	Termlog = true;
-	dprintf_config("TEST_HIBERNATION", get_param_functions());
+	dprintf_set_tool_debug("TEST_NETWORK_ADAPTOR", 0);
 
 	const char	*tmp;
 	int			 result = 0;
@@ -71,7 +70,7 @@ main(int argc, const char **argv)
 	}
 	else {
 		MyString	sinful;
-		sinful.sprintf( "<%s:1234>", opts.m_address );
+		sinful.formatstr( "<%s:1234>", opts.m_address );
 		printf( "Creating network adapter object for %s\n", sinful.Value() );
 		net = NetworkAdapterBase::createNetworkAdapter( sinful.Value() );
 	}
@@ -114,7 +113,7 @@ main(int argc, const char **argv)
 
 	ClassAd	ad;
 	net->publish( ad );
-	ad.fPrint( stdout );
+	fPrintAd( stdout, ad );
 
 	delete net;
 
@@ -155,7 +154,7 @@ CheckArgs(int argc, const char **argv, Options &opts)
 
 		if ( arg.Match( 'd', "debug") ) {
 			if ( arg.hasOpt() ) {
-				set_debug_flags( arg.getOpt() );
+				set_debug_flags( arg.getOpt(), 0 );
 				index = arg.ConsumeOpt( );
 			} else {
 				fprintf(stderr, "Value needed for %s argument\n", arg.Arg() );

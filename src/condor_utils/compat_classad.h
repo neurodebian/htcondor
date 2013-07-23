@@ -22,23 +22,10 @@
 
 #include "classad/classad_distribution.h"
 #include "MyString.h"
+#include "classad_oldnew.h"
 
 class StringList;
 class Stream;
-
-// hopefully this can go away when classads has native support for 64bit int
-// in the mean time, we want to do the conversion as close to the classad api
-// as possible.
-#ifndef classad_int64
-# ifdef WIN32
-# define classad_int64 __int64
-# elif defined(__x86_64__) && ! defined(Darwin)
-# define classad_int64_is_long
-# define classad_int64 long
-# else
-# define classad_int64 long long
-# endif
-#endif
 
 #ifndef TRUE
 #define TRUE  1
@@ -59,88 +46,32 @@ typedef enum {
 	TargetScheddAttrs
 } TargetAdType;
 
-// This enum is lifted directly from old ClassAds.
-typedef enum
-{
-  // Literals
-  LX_VARIABLE,
-  LX_INTEGER,
-  LX_FLOAT,
-  LX_STRING,
-  LX_BOOL,
-  LX_NULL,
-  LX_UNDEFINED,
-  LX_ERROR,
+class ClassAdFileParseHelper;
 
-  // Operators
-  LX_ASSIGN,
-  LX_AGGADD,
-  LX_AGGEQ,
-  LX_AND,
-  LX_OR,
-  LX_LPAREN,
-  LX_RPAREN,
-  LX_MACRO,
-  LX_META_EQ,
-  LX_META_NEQ,
-  LX_EQ,
-  LX_NEQ,
-  LX_LT,
-  LX_LE,
-  LX_GT,
-  LX_GE,
-  LX_ADD,
-  LX_SUB,
-  LX_MULT,
-  LX_DIV,
-  LX_EOF,
+bool ClassAdAttributeIsPrivate( char const *name );
 
-  LX_EXPR,
+	/** Print the ClassAd as an old ClassAd to the FILE
+		@param file The file handle to print to.
+		@return TRUE
+	*/
+int	fPrintAd(FILE *file, classad::ClassAd &ad, bool exclude_private = false, StringList *attr_white_list = NULL);
 
-  LX_TIME,
+	/** Print the ClassAd as an old ClasAd with dprintf
+		@param level The dprintf level.
+	*/
+void dPrintAd( int level, classad::ClassAd &ad );
 
-  LX_FUNCTION,
-  LX_SEMICOLON,
-  LX_COMMA,
+	/** Format the ClassAd as an old ClassAd into the MyString.
+		@param output The MyString to write into
+		@return TRUE
+	*/
+int sPrintAd( MyString &output, classad::ClassAd &ad, bool exclude_private = false, StringList *attr_white_list = NULL );
 
-  NOT_KEYWORD
-} LexemeType;
-
-// This class is lifted directly from old ClassAds for EvalExprTree()
-class EvalResult
-{
-    public :
-
-    EvalResult();
-  	~EvalResult();
-
-		/// copy constructor
-	EvalResult(const EvalResult & copyfrom);
-		/// assignment operator
-	EvalResult & operator=(const EvalResult & rhs);
-
-		// free storage and reset to undefined value
-	void clear();
-
-	void fPrintResult(FILE *); // for debugging
-
-		/// convert to LX_STRING
-		/// if value is ERROR or UNDEFINED, do not convert unless force=true
-	void toString(bool force=false);
-
-   	union
-    	{
-   	    int i;
-   	    float f;
-   	    char* s;
-        };
-  	LexemeType type;
-
-	bool debug;
-
-	private :
-	void deepcopy(const EvalResult & copyfrom);
-};
+	/** Format the ClassAd as an old ClassAd into the std::string.
+		@param output The std::string to write into
+		@return TRUE
+	*/
+int sPrintAd( std::string &output, classad::ClassAd &ad, bool exclude_private = false, StringList *attr_white_list = NULL );
 
 class ClassAd : public classad::ClassAd
 {
@@ -157,27 +88,25 @@ class ClassAd : public classad::ClassAd
 		//@{
 
 		/** A constructor that reads old ClassAds from a FILE */
-	ClassAd(FILE*,const char*,int&,int&,int&);	// Constructor, read from file.
+	ClassAd(FILE*,const char*delim,int&isEOF,int&error,int&empty);	// Constructor, read from file.
+
+		/* helper for constructor that reads from file 
+		 * returns number of attributes added, 0 if none, -1 if parse error
+		 */
+	int InsertFromFile(FILE*, bool& is_eof, int& error, ClassAdFileParseHelper* phelp=NULL);
 
 		/* This is a pass-through to ClassAd::Insert(). Because we define
 		 * our own Insert() below, our parent's Insert() won't be found
 		 * by users of this class.
 		 */
-	bool Insert( const std::string &attrName, classad::ExprTree *expr );
+	bool Insert( const std::string &attrName, classad::ExprTree *& expr, bool bCache = true );
 
-	int Insert(const char *name, classad::ExprTree *expr );
+	int Insert(const char *name, classad::ExprTree *& expr, bool bCache = true );
 
 		/** Insert an attribute/value into the ClassAd 
 		 *  @param str A string of the form "Attribute = Value"
 		 */
 	int Insert(const char *str);
-
-		/** This function should never be used.  Use Insert(char const *str)
-		 *  instead.  The second bool argument is deprecated but necessary to
-		 *  prevent implicit casting of false to NULL and therefore
-		 *  calling of the totally wrong Insert() method!
-		 */
-	int Insert(const char *str,bool unused);
 
 		/** Insert an attribute/value into the ClassAd 
 		 *  @param expr A string of the form "Attribute = Value"
@@ -203,18 +132,16 @@ class ClassAd : public classad::ClassAd
 	{ return InsertAttr( name, value) ? TRUE : FALSE; }
 
 	int Assign(char const *name,unsigned int value)
-	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
+	{ return InsertAttr( name, (long long)value) ? TRUE : FALSE; }
 
-#if ! defined classad_int64_is_long
-	int Assign(char const *name,long value) // TJ: fix for int64 classad
-	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
-#endif
+	int Assign(char const *name,long value)
+	{ return InsertAttr( name, value) ? TRUE : FALSE; }
 
-	int Assign(char const *name,classad_int64 value) // TJ: fix for int64 classad
-	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
+	int Assign(char const *name,long long value)
+	{ return InsertAttr( name, value) ? TRUE : FALSE; }
 
 	int Assign(char const *name,unsigned long value)
-	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
+	{ return InsertAttr( name, (long long)value) ? TRUE : FALSE; }
 
 	int Assign(char const *name,float value)
 	{ return InsertAttr( name, (double)value) ? TRUE : FALSE; }
@@ -274,22 +201,17 @@ class ClassAd : public classad::ClassAd
 		 *  @param value The integer
 		 *  @return true if the attribute exists and is an integer, false otherwise
 		 */
-
 	int LookupInteger(const char *name, int &value) const;
+	int LookupInteger(const char *name, long &value) const;
+	int LookupInteger(const char *name, long long &value) const;
+
 		/** Lookup (don't evaluate) an attribute that is a float.
 		 *  @param name The attribute
 		 *  @param value The integer
 		 *  @return true if the attribute exists and is a float, false otherwise
 		 */
-
-	int LookupInteger(const char *name, int64_t &value) const;
-		/** Lookup (don't evaluate) an attribute that is a float.
-		 *  @param name The attribute
-		 *  @param value The integer
-		 *  @return true if the attribute exists and is a float, false otherwise
-		 */
-
 	int LookupFloat(const char *name, float &value) const;
+	int LookupFloat(const char *name, double &value) const;
 
 		/** Lookup (don't evaluate) an attribute that can be considered a boolean
 		 *  @param name The attribute
@@ -307,6 +229,14 @@ class ClassAd : public classad::ClassAd
 
 	int LookupBool(const char *name, bool &value) const;
 
+		/** Lookup and evaluate an attribute in the ClassAd whose type is not known
+		 *  @param name The name of the attribute
+		 *  @param target A ClassAd to resolve MY or other references
+		 *  @param value Where we the copy value
+		 *  @return 1 on success, 0 if the attribute doesn't exist
+		 */
+	int EvalAttr (const char *name, classad::ClassAd *target, classad::Value & value);
+
 		/** Lookup and evaluate an attribute in the ClassAd that is a string
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
@@ -320,6 +250,7 @@ class ClassAd : public classad::ClassAd
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
 		 *  @param value Where we the copy the string. We ensure there is enough space. 
+		 *    This parameter is only modified on success.
 		 *  @return 1 on success, 0 if the attribute doesn't exist, or if it does exist 
 		 *  but is not a string.
          */
@@ -328,6 +259,7 @@ class ClassAd : public classad::ClassAd
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
 		 *  @param value A MyString where we the copy the string. We ensure there is enough space. 
+		 *    This parameter is only modified on success.
 		 *  @return 1 on success, 0 if the attribute doesn't exist, or if it does exist 
 		 *  but is not a string.
          */
@@ -337,6 +269,7 @@ class ClassAd : public classad::ClassAd
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
 		 *  @param value A std::string where we the copy the string.
+		 *    This parameter is only modified on success.
 		 *  @return 1 on success, 0 if the attribute doesn't exist, or if it does exist 
 		 *  but is not a string.
          */
@@ -346,38 +279,44 @@ class ClassAd : public classad::ClassAd
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
 		 *  @param value Where we the copy the value.
+		 *    This parameter is only modified on success.
 		 *  @return 1 on success, 0 if the attribute doesn't exist, or if it does exist 
 		 *  but is not an integer
 		 */
-	int EvalInteger (const char *name, classad::ClassAd *target, int &value);
-	int EvalInteger (const char *name, classad::ClassAd *target, classad_int64 & value) {
-		int ival;
-		int result = EvalInteger(name, target, ival);  // TJ: fix for int64 classad
-		value = ival;
+	int EvalInteger (const char *name, classad::ClassAd *target, long long &value);
+	int EvalInteger (const char *name, classad::ClassAd *target, int& value) {
+		long long ival = 0;
+		int result = EvalInteger(name, target, ival);
+		if ( result ) {
+			value = (int)ival;
+		}
 		return result;
 	}
-#if ! defined classad_int64_is_long
 	int EvalInteger (const char *name, classad::ClassAd *target, long & value) {
-		int ival;
-		int result = EvalInteger(name, target, ival);  // TJ: fix for int64 classad
-		value = ival;
+		long long ival = 0;
+		int result = EvalInteger(name, target, ival);
+		if ( result ) {
+			value = (long)ival;
+		}
 		return result;
 	}
-#endif
 
 		/** Lookup and evaluate an attribute in the ClassAd that is a float
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
 		 *  @param value Where we the copy the value. Danger: we just use strcpy.
+		 *    This parameter is only modified on success.
 		 *  @return 1 on success, 0 if the attribute doesn't exist, or if it does exist 
 		 *  but is not a float.
 		 */
 
 	int EvalFloat (const char *name, classad::ClassAd *target, double &value);
 	int EvalFloat (const char *name, classad::ClassAd *target, float &value) {
-		double dval;
+		double dval = 0.0;
 		int result = EvalFloat(name, target, dval);
-		value = dval;
+		if ( result ) {
+			value = dval;
+		}
 		return result;
 	}
 
@@ -385,92 +324,24 @@ class ClassAd : public classad::ClassAd
 		 *  @param name The name of the attribute
 		 *  @param target A ClassAd to resolve MY or other references
 		 *  @param value Where we a 1 (if the value is non-zero) or a 1. 
+		 *    This parameter is only modified on success.
 		 *  @return 1 on success, 0 if the attribute doesn't exist, or if it does exist 
 		 *  but is not a number.
 		 */
 	int EvalBool  (const char *name, classad::ClassAd *target, int &value);
 
-		/** Set the MyType attribute */
-	void		SetMyTypeName(const char *);
-		/** Get the value of the MyType attribute */
-	const char*	GetMyTypeName() const ;
-		/** Set the value of the TargetType attribute */
-	void 		SetTargetTypeName(const char *);
-		/** Get the value of the TargetType attribtute */
-	const char*	GetTargetTypeName() const;
-
 	bool initFromString(char const *str,MyString *err_msg=NULL);
-
-		/** Print the ClassAd as an old ClassAd to the stream
-		 * @param s the stream
-		 */
-	int put(Stream& s);
-
-		/** Send the ClassAd as an old ClassAd on the stream
-		 * @param s the stream
-		 * @param attr_whitelist list of attributes to send
-		 */
-	int put(Stream& s,StringList *attr_whitelist);
 
 		/** Read the old ClassAd from the stream, and fill in this ClassAd.
 		 * @param s the stream
 		 */
 	int initFromStream(Stream& s);
 
-		/** Print the ClassAd as an old AttrList to the stream
-		 * @param s the stream
-		 */
-	int putAttrList(Stream& s);
-
 		/** Read the old ClassAd as an old AttrList from the stream,
 		 * and fill in this ClassAd.
 		 * @param s the stream
 		 */
 	int initAttrListFromStream(Stream& s);
-
-		/** Print the ClassAd as an old ClassAd to the FILE
-			@param file The file handle to print to.
-			@return TRUE
-		*/
-	int	fPrint(FILE *file, StringList *attr_white_list = NULL);
-
-		/** Print the ClassAd as an old ClasAd with dprintf
-			@param level The dprintf level.
-		*/
-	void dPrint( int level);
-
-		/** Format the ClassAd as an old ClassAd into the MyString.
-			@param output The MyString to write into
-			@return TRUE
-		*/
-	int sPrint( MyString &output, StringList *attr_white_list = NULL );
-		/** Format the ClassAd as an old ClassAd into the std::string.
-			@param output The std::string to write into
-			@return TRUE
-		*/
-	int sPrint( std::string &output, StringList *attr_white_list = NULL );
-        /** Prints an expression with a certain name into a buffer. 
-         *
-         *  @param buffer The buffer to place the named expression into. NOTE: if this is NULL, then the function returns some malloc'd memory. Free it.
-         *  @param buffersize The size of the buffer.
-         *  @param name The attr whose expr is to be printed into the buffer.
-         *  @return Returns the now-filled buffer.
-         */
-    char* sPrintExpr(char* buffer, unsigned int buffersize, const char* name);
-
-    /* Prints out the classad as xml to a file.
-     * @param fp The file to be printed to.
-     * @return TRUE as long as the file existed.
-     */
-    int fPrintAsXML(FILE *fp, StringList *attr_white_list = NULL);
-
-    /* Prints the current classad as XML to a string. fPrintAsXML calls this.
-     * @param output The MyString to have filled with the XML-ified classad.
-	 *   The string is appended to, not overwritten.
-     * @return TRUE
-     */
-    int sPrintAsXML(MyString &output, StringList *attr_white_list = NULL);
-    int sPrintAsXML(std::string &output, StringList *attr_white_list = NULL);
 
     void ResetExpr();
 
@@ -492,25 +363,6 @@ class ClassAd : public classad::ClassAd
 	void RemoveExplicitTargetRefs(  );
 	
 	void AddTargetRefs( TargetAdType target_type, bool do_version_check = true );
-
-	static bool ClassAdAttributeIsPrivate( char const *name );
-
-	void SetPrivateAttributesInvisible( bool invisible )
-	{ m_privateAttrsAreInvisible = invisible; }
-
-    /** Is this value valid for being written to the log? The value is a RHS of an expression. Only '\n' or '\r' are invalid.
-     *
-     * @param value The thing we check to see if valid.
-     * @return True, unless value had '\n' or '\r'.
-     */
-    static bool IsValidAttrValue(const char *value);
-
-	//	Decides if a string is a valid attribute name, the LHS
-	//  of an expression.  As per the manual, valid names:
-	//
-	//  Attribute names are sequences of alphabetic characters, digits and 
-	//  underscores, and may not begin with a digit
-	static bool IsValidAttrName(const char *name);
 
 	bool NextExpr( const char *&name, ExprTree *&value );
 
@@ -579,12 +431,108 @@ class ClassAd : public classad::ClassAd
     classad::DirtyAttrList::iterator m_dirtyItr;
     bool m_dirtyItrInit;
 
-	bool m_privateAttrsAreInvisible;
-
 	void _GetReferences(classad::ExprTree *tree,
 						StringList &internal_refs,
 						StringList &external_refs);
+
+	// poison Assign of ExprTree* type for public users
+	// otherwise the compiler will resolve against the bool overload 
+	// and quietly leak the tree.
+	int Assign(char const *name,classad::ExprTree * tree)
+	{ return Insert(name, tree) ? TRUE : FALSE; }
+
 };
+
+class ClassAdFileParseHelper
+{
+ public:
+	// Some compilers whine when you have virtual methods but not an
+	// explicit virtual destructor
+	virtual ~ClassAdFileParseHelper() {}
+	// return 0 to skip (is_comment), 1 to parse line, 2 for end-of-classad, -1 for abort
+	virtual int PreParse(std::string & line, ClassAd & ad, FILE* file)=0;
+	// return 0 to skip and continue, 1 to re-parse line, 2 to quit parsing with success, -1 to abort parsing.
+	virtual int OnParseError(std::string & line, ClassAd & ad, FILE* FILE)=0;
+};
+
+// this implements a classad file parse helper that
+// ignores lines of blanks and lines that begin with #, 
+// treats empty lines as class-ad record separators
+class CondorClassAdFileParseHelper : public ClassAdFileParseHelper
+{
+ public:
+	// Some compilers whine when you have virtual methods but not an
+	// explicit virtual destructor
+	virtual ~CondorClassAdFileParseHelper() {}
+	// return 0 to skip (is_comment), 1 to parse line, 2 for end-of-classad, -1 for abort
+	virtual int PreParse(std::string & line, ClassAd & ad, FILE* file);
+	// return 0 to skip and continue, 1 to re-parse line, 2 to quit parsing with success, -1 to abort parsing.
+	virtual int OnParseError(std::string & line, ClassAd & ad, FILE* FILE);
+	CondorClassAdFileParseHelper(std::string delim) : ad_delimitor(delim) {};
+ private:
+	std::string ad_delimitor;
+};
+
+/** Is this value valid for being written to the log?
+ *  The value is a RHS of an expression. Only '\n' or '\r' are invalid.
+ *
+ *  @param value The thing we check to see if valid.
+ *  @return True, unless value had '\n' or '\r'.
+ */
+bool IsValidAttrValue(const char *value);
+
+/** Decides if a string is a valid attribute name, the LHS
+ *  of an expression.  As per the manual, valid names:
+ *
+ *  Attribute names are sequences of alphabetic characters, digits and 
+ *  underscores, and may not begin with a digit.
+ *
+ *  @param name The thing we check to see if valid.
+ *  @return true if valid, else false
+ */
+bool IsValidAttrName(const char *name);
+
+/* Prints out the classad as xml to a file.
+ * @param fp The file to be printed to.
+ * @param ad The classad containing the attribute
+ * @param An optional white-list of attributes to be printed.
+ * @return TRUE as long as the file existed.
+ */
+int fPrintAdAsXML(FILE *fp, classad::ClassAd &ad,
+				  StringList *attr_white_list = NULL);
+
+/* Prints the classad as XML to a string. fPrintAdAsXML calls this.
+ * @param output The string to have filled with the XML-ified classad.
+ *   The string is appended to, not overwritten.
+ * @param ad The ad to be printed.
+ * @param An optional white-list of attributes to be printed.
+ * @return TRUE
+ */
+int sPrintAdAsXML(MyString &output, classad::ClassAd &ad,
+				  StringList *attr_white_list = NULL);
+int sPrintAdAsXML(std::string &output, classad::ClassAd &ad,
+				  StringList *attr_white_list = NULL);
+
+/** Given an attribute name, return a buffer containing the name
+ *  and it's unevaluated value, like so:
+ *    <name> = <expression>
+ *  The returned buffer is malloc'd and must be free'd by the
+ *  caller.
+ *  @param ad The classad containing the attribute
+ *  @param name The attr whose expr is to be printed into the buffer.
+ *  @return Returns a malloc'd buffer.
+ */
+char* sPrintExpr(const classad::ClassAd &ad, const char* name);
+
+	/** Set the MyType attribute */
+void SetMyTypeName(classad::ClassAd &ad, const char *);
+	/** Get the value of the MyType attribute */
+const char*	GetMyTypeName(const classad::ClassAd &ad);
+	/** Set the value of the TargetType attribute */
+void SetTargetTypeName(classad::ClassAd &ad, const char *);
+	/** Get the value of the TargetType attribtute */
+const char*	GetTargetTypeName(const classad::ClassAd& ad);
+
 
 void getTheMyRef( classad::ClassAd *ad );
 void releaseTheMyRef( classad::ClassAd *ad );

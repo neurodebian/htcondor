@@ -81,6 +81,7 @@ long ProcAPI::boottime_expiration = 0;
 #endif // LINUX
 #else // WIN32
 
+#include <psapi.h> // for GetProcessMemoryInfo
 #include "ntsysinfo.WINDOWS.h"
 static CSysinfo ntSysInfo;	// for getting parent pid on NT
 
@@ -211,6 +212,27 @@ ProcAPI::getProcInfo( pid_t pid, piPTR& pi, int &status )
 		// success
 	return PROCAPI_SUCCESS;
 }
+
+size_t ProcAPI::getBasicUsage(pid_t pid, double * puser_time, double * psys_time)
+{
+	int status;
+	procInfoRaw procRaw;
+	int retVal = ProcAPI::getProcInfoRaw(pid, procRaw, status);
+	if (retVal != 0){
+		//on failure, set everything to 0.
+		initProcInfoRaw(procRaw);
+	}
+
+	if (puser_time) {
+		*puser_time = procRaw.user_time_1 + (procRaw.user_time_2 * 1.0e-9);
+	}
+	if (psys_time) {
+		*psys_time = procRaw.sys_time_1 + (procRaw.sys_time_2 * 1.0e-9);
+	}
+
+	return (size_t)procRaw.imgsize * 1024;
+}
+
 
 /* Fills ProcInfoRaw with the following units:
    imgsize		: KB
@@ -577,6 +599,35 @@ ProcAPI::getPSSInfo( pid_t pid, procInfo& procRaw, int &status )
 	}
 }
 #endif
+
+size_t ProcAPI::getBasicUsage(pid_t pid, double * puser_time, double * psys_time)
+{
+	int status;
+	procInfoRaw procRaw;
+	int retVal = ProcAPI::getProcInfoRaw(pid, procRaw, status);
+	if (retVal != 0){
+		//on failure, set everything to 0.
+		initProcInfoRaw(procRaw);
+	}
+
+	long hertz = 1;
+# if defined(HZ)
+	hertz = HZ;
+# elif defined(_SC_CLK_TCK)
+	hertz = sysconf(_SC_CLK_TCK);
+# else
+#   error "Unable to determine system clock"
+# endif
+
+	if (puser_time) {
+		*puser_time = procRaw.user_time_1 / (double)hertz;
+	}
+	if (psys_time) {
+		*psys_time = procRaw.sys_time_1  / (double)hertz;
+	}
+
+	return (size_t)procRaw.imgsize * 1024;
+}
 
 /* Fills in procInfoRaw with the following units:
    imgsize		: kbytes
@@ -981,6 +1032,30 @@ ProcAPI::getProcInfo( pid_t pid, piPTR& pi, int &status )
 	return PROCAPI_SUCCESS;
 }
 
+size_t ProcAPI::getBasicUsage(pid_t pid, double * puser_time, double * psys_time)
+{
+	int status;
+	procInfoRaw procRaw;
+	int retVal = ProcAPI::getProcInfoRaw(pid, procRaw, status);
+	if (retVal != 0){
+		//on failure, set everything to 0.
+		initProcInfoRaw(procRaw);
+	}
+
+	if (puser_time) {
+		*puser_time = procRaw.user_time_1;
+	}
+	if (psys_time) {
+		*psys_time = procRaw.sys_time_1;
+	}
+
+		// if the page size hasn't been found, get it
+	if( pagesize == 0 ) {	
+		pagesize = getpagesize() / 1024;  // pagesize is in k now
+	}
+	return (size_t)procRaw.imgsize * pagesize * 1024;
+}
+
 /* Fills in procInfoRaw with the following units:
    imgsize		: pages
    rssize		: pages
@@ -1127,6 +1202,25 @@ ProcAPI::getProcInfo( pid_t pid, piPTR& pi, int &status )
 #endif
 
 	return PROCAPI_SUCCESS;
+}
+
+size_t ProcAPI::getBasicUsage(pid_t pid, double * puser_time, double * psys_time)
+{
+	int status;
+	procInfoRaw procRaw;
+	int retVal = ProcAPI::getProcInfoRaw(pid, procRaw, status);
+	if (retVal != 0){
+		//on failure, set everything to 0.
+		initProcInfoRaw(procRaw);
+	}
+
+	if (puser_time) {
+		*puser_time = procRaw.user_time_1;
+	}
+	if (psys_time) {
+		*psys_time = procRaw.sys_time_1;
+	}
+	return (size_t)procRaw.imgsize;
 }
 
 /* Fills procInfoRaw with the following units:
@@ -1424,6 +1518,25 @@ ProcAPI::getProcInfo( pid_t pid, piPTR& pi, int &status )
 	return PROCAPI_SUCCESS;
 }
 
+size_t ProcAPI::getBasicUsage(pid_t pid, double * puser_time, double * psys_time)
+{
+	int status;
+	procInfoRaw procRaw;
+	int retVal = ProcAPI::getProcInfoRaw(pid, procRaw, status);
+	if (retVal != 0){
+		//on failure, set everything to 0.
+		initProcInfoRaw(procRaw);
+	}
+
+	if (puser_time) {
+		*puser_time = procRaw.user_time_1;
+	}
+	if (psys_time) {
+		*psys_time = procRaw.sys_time_1;
+	}
+	return (size_t)procRaw.imgsize;
+}
+
 int
 ProcAPI::getProcInfoRaw( pid_t pid, procInfoRaw& procRaw, int &status ) 
 {
@@ -1609,6 +1722,49 @@ ProcAPI::getProcInfo( pid_t pid, piPTR& pi, int &status )
 						now_secs );
 
     return PROCAPI_SUCCESS;
+}
+
+size_t ProcAPI::getBasicUsage(pid_t pid, double * puser_time, double * psys_time)
+{
+	if (pid == getpid()) {
+		if (puser_time || psys_time) {
+			UINT64 ntCreate=0, ntExit=0, ntSys=0, ntUser=0; // nanotime. tick rate of 100 nanosec.
+			if ( ! GetProcessTimes(GetCurrentProcess(),
+									(FILETIME*)&ntCreate, (FILETIME*)&ntExit,
+									(FILETIME*)&ntSys, (FILETIME*)&ntUser)) {
+				ntSys = ntUser = 0;
+			}
+			if (puser_time) {
+				*puser_time = (double)ntUser / (double)(1000*1000*10); // convert to seconds
+			}
+			if (psys_time) {
+				*psys_time = (double)ntSys / (double)(1000*1000*10); // convert to seconds
+			}
+		}
+
+		PROCESS_MEMORY_COUNTERS_EX mem;
+		ZeroMemory(&mem, sizeof(mem));
+		if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&mem, sizeof(mem))) {
+			return mem.PrivateUsage;
+		}
+	}
+
+	int status;
+	procInfoRaw procRaw;
+	int retVal = ProcAPI::getProcInfoRaw(pid, procRaw, status);
+	if (retVal != 0){
+		if (puser_time) *puser_time = 0.0;
+		if (psys_time) *psys_time = 0.0;
+		return 0;
+	}
+
+	if (puser_time) {
+		*puser_time = (double)procRaw.user_time / procRaw.object_frequency;
+	}
+	if (psys_time) {
+		*psys_time = (double)procRaw.sys_time / procRaw.object_frequency;
+	}
+	return (size_t)procRaw.imgsize;
 }
 
 /* Fills in the procInfoRaw with the following units:
@@ -2198,7 +2354,11 @@ procInfo*
 ProcAPI::getProcInfoList()
 {
 #if !defined(WIN32) && !defined(HPUX) && !defined(AIX)
-	buildPidList();
+	if (buildPidList() != PROCAPI_SUCCESS) {
+		dprintf(D_ALWAYS, "ProcAPI: error retrieving list of processes\n");
+		deallocAllProcInfos();
+		return NULL;
+	}
 #endif
 
 	if (buildProcInfoList() != PROCAPI_SUCCESS) {
@@ -2355,37 +2515,53 @@ ProcAPI::buildPidList() {
 	current = pidList;
 
 	int mib[4];
-	struct kinfo_proc *kp, *kprocbuf;
-	size_t origBufSize;
+	struct kinfo_proc *kp = NULL;
 	size_t bufSize = 0;
 	int nentries;
+	int rc = -1;
+	int ntries = 5;
 
 	mib[0] = CTL_KERN;
 	mib[1] = KERN_PROC;
 	mib[2] = KERN_PROC_ALL;
 	mib[3] = 0;
 
+	do {
+		ntries--;
 		//
 		// Returns back the size of the kinfo_proc struct
 		//
-	if (sysctl(mib, 4, NULL, &bufSize, NULL, 0) < 0) {
-		 //perror("Failure calling sysctl");
-		return PROCAPI_FAILURE;
-	}	
+		if (sysctl(mib, 4, NULL, &bufSize, NULL, 0) < 0) {
+			dprintf(D_ALWAYS, "ProcAPI: Failed to get list of pids: %s\n",
+					strerror(errno));
+			deallocPidList();
+			free( kp );
+			return PROCAPI_FAILURE;
+		}
 
-	kprocbuf = kp = (struct kinfo_proc *)malloc(bufSize);
+		ASSERT( bufSize );
+		kp = (struct kinfo_proc *)realloc(kp, bufSize);
 
-	origBufSize = bufSize;
-	if ( sysctl(mib, 4, kp, &bufSize, NULL, 0) < 0) {
-		free(kprocbuf);
+		rc = sysctl(mib, 4, kp, &bufSize, NULL, 0);
+	} while ( ntries >= 0 && ( ( rc == -1 && errno == ENOMEM ) || ( rc == 0 && bufSize == 0 ) ) );
+
+	if ( rc == -1 || bufSize == 0 ) {
+		dprintf(D_ALWAYS, "ProcAPI: Failed to get list of pids: %s\n",
+				strerror(errno));
+		free(kp);
+		deallocPidList();
 		return PROCAPI_FAILURE;
 	}
 
 	nentries = bufSize / sizeof(struct kinfo_proc);
 
-	for(int i = nentries; --i >=0; kp++) {
+	for(int i = 0; i < nentries; i++) {
+			// Pid 0 is not a real process. It represents the kernel.
+		if ( kp[i].kp_proc.p_pid == 0 ) {
+			continue;
+		}
 		temp = new pidlist;
-		temp->pid = (pid_t) kp->kp_proc.p_pid;
+		temp->pid = (pid_t) kp[i].kp_proc.p_pid;
 		temp->next = NULL;
 		current->next = temp;
 		current = temp;
@@ -2395,7 +2571,7 @@ ProcAPI::buildPidList() {
 	pidList = pidList->next;
 	delete temp;           // remove header node.
 
-	free(kprocbuf);
+	free(kp);
 
 	return PROCAPI_SUCCESS;
 }
@@ -2416,36 +2592,46 @@ ProcAPI::buildPidList() {
 	current = pidList;
 
 	int mib[4];
-	struct kinfo_proc *kp, *kprocbuf;
-	size_t origBufSize;
+	struct kinfo_proc *kp = NULL;
 	size_t bufSize = 0;
 	int nentries;
+	int rc = -1;
+	int ntries = 5;
 
 	mib[0] = CTL_KERN;
 	mib[1] = KERN_PROC;
 	mib[2] = KERN_PROC_ALL;
 	mib[3] = 0;
 	if (sysctl(mib, 3, NULL, &bufSize, NULL, 0) < 0) {
-		 //perror("Failure calling sysctl");
+		dprintf(D_ALWAYS, "ProcAPI: Failed to get list of pids: %s\n",
+				strerror(errno));
+		deallocPidList();
 		return PROCAPI_FAILURE;
 	}	
 
-	kprocbuf = kp = (struct kinfo_proc *)malloc(bufSize);
+	do {
+		ntries--;
+		kp = (struct kinfo_proc *)realloc(kp, bufSize);
 
-	origBufSize = bufSize;
-	if ( sysctl(mib, 3, kp, &bufSize, NULL, 0) < 0) {
-		free(kprocbuf);
+		rc = sysctl(mib, 3, kp, &bufSize, NULL, 0);
+	} while ( ntries >= 0 && rc == -1 && errno == ENOMEM );
+
+	if ( rc == -1 ) {
+		dprintf(D_ALWAYS, "ProcAPI: Failed to get list of pids: %s\n",
+				strerror(errno));
+		free(kp);
+		deallocPidList();
 		return PROCAPI_FAILURE;
 	}
 
 	nentries = bufSize / sizeof(struct kinfo_proc);
 
-	for(int i = nentries; --i >=0; kp++) {
+	for(int i = 0; i < nentries; i++) {
 		temp = new pidlist;
 #if defined(CONDOR_FREEBSD4)
-		temp->pid = (pid_t) kp->kp_proc.p_pid;
+		temp->pid = (pid_t) kp[i].kp_proc.p_pid;
 #else
-		temp->pid = kp->ki_pid;
+		temp->pid = kp[i].ki_pid;
 #endif
 		temp->next = NULL;
 		current->next = temp;
@@ -2456,7 +2642,7 @@ ProcAPI::buildPidList() {
 	pidList = pidList->next;
 	delete temp;           // remove header node.
 
-	free(kprocbuf);
+	free(kp);
 
 	return PROCAPI_SUCCESS;
 }
@@ -2694,7 +2880,7 @@ ProcAPI::printProcInfo(FILE* fp, piPTR pi){
 uid_t 
 ProcAPI::getFileOwner(int fd) {
 	
-#if HAVE_FSTAT64
+#if defined(HAVE_FSTAT64) && !defined(DARWIN)
 	// If we do not use fstat64(), fstat() fails if the inode number
 	// is too big and possibly for a few other reasons as well.
 	struct stat64 si;

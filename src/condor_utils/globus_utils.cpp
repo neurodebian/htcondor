@@ -246,9 +246,9 @@ quote_x509_string( char* instr) {
 	// phase 1, scan the string to compute the new length
 	result_string_len = 0;
 	for (tmp_scan_ptr = instr; *tmp_scan_ptr; tmp_scan_ptr++) {
-		if( ((*tmp_scan_ptr)==x509_fqan_escape[0]) ) {
+		if( (*tmp_scan_ptr)==x509_fqan_escape[0] ) {
 			result_string_len += x509_fqan_escape_sub_len;
-		} else if( ((*tmp_scan_ptr)==x509_fqan_delimiter[0]) ) {
+		} else if( (*tmp_scan_ptr)==x509_fqan_delimiter[0] ) {
 			result_string_len += x509_fqan_delimiter_sub_len;
 		} else {
 			result_string_len++;
@@ -264,10 +264,10 @@ quote_x509_string( char* instr) {
 	result_string_len = 0;
 
 	for (tmp_scan_ptr = instr; *tmp_scan_ptr; tmp_scan_ptr++) {
-		if( ((*tmp_scan_ptr)==x509_fqan_escape[0]) ) {
+		if( (*tmp_scan_ptr)==x509_fqan_escape[0] ) {
 			strcat(&(result_string[result_string_len]), x509_fqan_escape_sub);
 			result_string_len += x509_fqan_escape_sub_len;
-		} else if( ((*tmp_scan_ptr)==x509_fqan_delimiter[0]) ) {
+		} else if( (*tmp_scan_ptr)==x509_fqan_delimiter[0] ) {
 			strcat(&(result_string[result_string_len]), x509_fqan_delimiter_sub);
 			result_string_len += x509_fqan_delimiter_sub_len;
 		} else {
@@ -287,6 +287,200 @@ quote_x509_string( char* instr) {
 }
 
 #if defined(HAVE_EXT_GLOBUS)
+
+globus_gsi_cred_handle_t x509_proxy_read( const char *proxy_file )
+{
+	globus_gsi_cred_handle_t         handle       = NULL;
+	globus_gsi_cred_handle_attrs_t   handle_attrs = NULL;
+	char *my_proxy_file = NULL;
+	bool error = false;
+
+	if ( activate_globus_gsi() != 0 ) {
+		return NULL;
+	}
+
+	if (globus_gsi_cred_handle_attrs_init(&handle_attrs)) {
+		set_error_string( "problem during internal initialization1" );
+		error = true;
+		goto cleanup;
+	}
+
+	if (globus_gsi_cred_handle_init(&handle, handle_attrs)) {
+		set_error_string( "problem during internal initialization2" );
+		error = true;
+		goto cleanup;
+	}
+
+	/* Check for proxy file */
+	if (proxy_file == NULL) {
+		my_proxy_file = get_x509_proxy_filename();
+		if (my_proxy_file == NULL) {
+			goto cleanup;
+		}
+		proxy_file = my_proxy_file;
+	}
+
+	// We should have a proxy file, now, try to read it
+	if (globus_gsi_cred_read_proxy(handle, proxy_file)) {
+		set_error_string( "unable to read proxy file" );
+		error = true;
+		goto cleanup;
+	}
+
+ cleanup:
+	if (my_proxy_file) {
+		free(my_proxy_file);
+	}
+
+	if (handle_attrs) {
+		globus_gsi_cred_handle_attrs_destroy(handle_attrs);
+	}
+
+	if (error && handle) {
+		globus_gsi_cred_handle_destroy(handle);
+		handle = NULL;
+	}
+
+	return handle;
+}
+
+void x509_proxy_free( globus_gsi_cred_handle_t handle )
+{
+	if (handle) {
+		globus_gsi_cred_handle_destroy(handle);
+	}
+}
+
+time_t x509_proxy_expiration_time( globus_gsi_cred_handle_t handle )
+{
+	time_t time_left;
+
+	if (globus_gsi_cred_get_lifetime(handle, &time_left)) {
+		set_error_string( "unable to extract expiration time" );
+		return -1;
+    }
+
+	return time(NULL) + time_left;
+}
+
+char* x509_proxy_email( globus_gsi_cred_handle_t handle )
+{
+	X509_NAME *email_orig = NULL;
+        STACK_OF(X509) *cert_chain = NULL;
+	GENERAL_NAME *gen;
+	GENERAL_NAMES *gens;
+        X509 *cert = NULL;
+	char *email = NULL, *email2 = NULL;
+	int i, j;
+
+	if (globus_gsi_cred_get_cert_chain(handle, &cert_chain)) {
+		cert = NULL;
+		set_error_string( "unable to find certificate in proxy" );
+		goto cleanup;
+	}
+
+	for(i = 0; i < sk_X509_num(cert_chain) && email == NULL; ++i) {
+		if((cert = sk_X509_value(cert_chain, i)) == NULL) {
+			continue;
+		}
+		if ((email_orig = (X509_NAME *)X509_get_ext_d2i(cert, NID_pkcs9_emailAddress, 0, 0)) != NULL) {
+			if ((email2 = X509_NAME_oneline(email_orig, NULL, 0)) == NULL) {
+				continue;
+			} else {
+				// Return something that we can free().
+				email = strdup(email2);
+				OPENSSL_free(email2);
+				break;
+			}
+		}
+		gens = (GENERAL_NAMES *)X509_get_ext_d2i(cert, NID_subject_alt_name, 0, 0);
+		if (gens) {
+			for (j = 0; j < sk_GENERAL_NAME_num(gens); ++j) {
+				if ((gen = sk_GENERAL_NAME_value(gens, j)) == NULL) {
+					continue;
+				}
+				if (gen->type != GEN_EMAIL) {
+					continue;
+				}
+				ASN1_IA5STRING *email_ia5 = gen->d.ia5;
+				// Sanity checks.
+				if (email_ia5->type != V_ASN1_IA5STRING) goto cleanup;
+				if (!email_ia5->data || !email_ia5->length) goto cleanup;
+				email2 = BUF_strdup((char *)email_ia5->data);
+				// We want to return something we can free(), so make another copy.
+				if (email2) {
+					email = strdup(email2);
+					OPENSSL_free(email2);
+				}
+				break;
+			}
+			sk_GENERAL_NAME_pop_free(gens, GENERAL_NAME_free);
+		}
+	}
+
+	if (email == NULL) {
+		set_error_string( "unable to extract email" );
+		goto cleanup;
+	}
+
+ cleanup:
+	if (cert_chain) {
+		sk_X509_pop_free(cert_chain, X509_free);
+	}
+
+	if (email_orig) {
+		X509_NAME_free(email_orig);
+	}
+
+	return email;
+}
+
+char* x509_proxy_subject_name( globus_gsi_cred_handle_t handle )
+{
+	char *subject_name = NULL;
+
+	if (globus_gsi_cred_get_subject_name(handle, &subject_name)) {
+		set_error_string( "unable to extract subject name" );
+		return NULL;
+	}
+
+	return subject_name;
+}
+
+char* x509_proxy_identity_name( globus_gsi_cred_handle_t handle )
+{
+	char *subject_name = NULL;
+
+	if (globus_gsi_cred_get_identity_name(handle, &subject_name)) {
+		set_error_string( "unable to extract identity name" );
+		return NULL;
+	}
+
+	return subject_name;
+}
+
+int x509_proxy_seconds_until_expire( globus_gsi_cred_handle_t handle )
+{
+	time_t time_now;
+	time_t time_expire;
+	time_t time_diff;
+
+	time_now = time(NULL);
+	time_expire = x509_proxy_expiration_time( handle );
+
+	if ( time_expire == -1 ) {
+		return -1;
+	}
+
+	time_diff = time_expire - time_now;
+
+	if ( time_diff < 0 ) {
+		time_diff = 0;
+	}
+
+	return (int)time_diff;
+}
+
 int
 extract_VOMS_info( globus_gsi_cred_handle_t cred_handle, int verify_type, char **voname, char **firstfqan, char **quoted_DN_and_FQAN)
 {
@@ -451,10 +645,8 @@ end:
 #endif
 
 }
-#endif /* defined(HAVE_EXT_GLOBUS) */
 
 
-#if defined(HAVE_EXT_GLOBUS)
 int
 extract_VOMS_info_from_file( const char* proxy_file, int verify_type, char **voname, char **firstfqan, char **quoted_DN_and_FQAN)
 {
@@ -533,115 +725,16 @@ x509_proxy_email( const char *proxy_file )
 	return NULL;
 #else
 
-	globus_gsi_cred_handle_t         handle       = NULL;
-	globus_gsi_cred_handle_attrs_t   handle_attrs = NULL;
-	X509_NAME *email_orig = NULL;
-        STACK_OF(X509) *cert_chain = NULL;
-	GENERAL_NAME *gen;
-	GENERAL_NAMES *gens;
-        X509 *cert = NULL;
-	char *email = NULL, *email2 = NULL;
-	char *my_proxy_file = NULL;
-	int i, j;
+	char *email = NULL;
+	globus_gsi_cred_handle_t proxy_handle = x509_proxy_read( proxy_file );
 
-	if ( activate_globus_gsi() != 0 ) {
+	if ( proxy_handle == NULL ) {
 		return NULL;
 	}
 
-	if (globus_gsi_cred_handle_attrs_init(&handle_attrs)) {
-		set_error_string( "problem during internal initialization1" );
-		goto cleanup;
-	}
+	email = x509_proxy_email( proxy_handle );
 
-	if (globus_gsi_cred_handle_init(&handle, handle_attrs)) {
-		set_error_string( "problem during internal initialization2" );
-		goto cleanup;
-	}
-
-	/* Check for proxy file */
-	if (proxy_file == NULL) {
-		my_proxy_file = get_x509_proxy_filename();
-		if (my_proxy_file == NULL) {
-			goto cleanup;
-		}
-		proxy_file = my_proxy_file;
-	}
-
-	// We should have a proxy file, now, try to read it
-	if (globus_gsi_cred_read_proxy(handle, proxy_file)) {
-		set_error_string( "unable to read proxy file" );
-		goto cleanup;
-	}
-
-	if (globus_gsi_cred_get_cert_chain(handle, &cert_chain)) {
-		cert = NULL;
-		set_error_string( "unable to find certificate in proxy" );
-		goto cleanup;
-	}
-
-	for(i = 0; i < sk_X509_num(cert_chain) && email == NULL; ++i) {
-		if((cert = X509_dup(sk_X509_value(cert_chain, i))) == NULL) {
-			continue;
-		}
-		if ((email_orig = (X509_NAME *)X509_get_ext_d2i(cert, NID_pkcs9_emailAddress, 0, 0)) != NULL) {
-			if ((email2 = X509_NAME_oneline(email_orig, NULL, 0)) == NULL) {
-				continue;
-			} else {
-				// Return something that we can free().
-				email = strdup(email2);
-				OPENSSL_free(email2);
-				break;
-			}
-		}
-		gens = (GENERAL_NAMES *)X509_get_ext_d2i(cert, NID_subject_alt_name, 0, 0);
-		if (gens) {
-			for (j = 0; j < sk_GENERAL_NAME_num(gens); ++j) {
-				if ((gen = sk_GENERAL_NAME_value(gens, j)) == NULL) {
-					continue;
-				}
-				if (gen->type != GEN_EMAIL) {
-					continue;
-				}
-				ASN1_IA5STRING *email_ia5 = gen->d.ia5;
-				// Sanity checks.
-				if (email_ia5->type != V_ASN1_IA5STRING) goto cleanup;
-				if (!email_ia5->data || !email_ia5->length) goto cleanup;
-				email2 = BUF_strdup((char *)email_ia5->data);
-				// We want to return something we can free(), so make another copy.
-				if (email2) {
-					email = strdup(email2);
-					OPENSSL_free(email2);
-				}
-				break;
-			}
-		}
-	}
-
-	if (email == NULL) {
-		set_error_string( "unable to extract email" );
-		goto cleanup;
-	}
-
- cleanup:
-	if (my_proxy_file) {
-		free(my_proxy_file);
-	}
-
-	if (cert_chain) {
-		sk_X509_free(cert_chain);
-	}
-
-	if (handle_attrs) {
-		globus_gsi_cred_handle_attrs_destroy(handle_attrs);
-	}
-
-	if (handle) {
-		globus_gsi_cred_handle_destroy(handle);
-	}
-
-	if (email_orig) {
-		X509_NAME_free(email_orig);
-	}
+	x509_proxy_free( proxy_handle );
 
 	return email;
 #endif /* !defined(HAVE_EXT_GLOBUS) */
@@ -661,58 +754,16 @@ x509_proxy_subject_name( const char *proxy_file )
 	set_error_string( "This version of Condor doesn't support X509 credentials!" );
 	return NULL;
 #else
-
-	globus_gsi_cred_handle_t         handle       = NULL;
-	globus_gsi_cred_handle_attrs_t   handle_attrs = NULL;
 	char *subject_name = NULL;
-	char *my_proxy_file = NULL;
+	globus_gsi_cred_handle_t proxy_handle = x509_proxy_read( proxy_file );
 
-	if ( activate_globus_gsi() != 0 ) {
+	if ( proxy_handle == NULL ) {
 		return NULL;
 	}
 
-	if (globus_gsi_cred_handle_attrs_init(&handle_attrs)) {
-		set_error_string( "problem during internal initialization1" );
-		goto cleanup;
-	}
+	subject_name = x509_proxy_subject_name( proxy_handle );
 
-	if (globus_gsi_cred_handle_init(&handle, handle_attrs)) {
-		set_error_string( "problem during internal initialization2" );
-		goto cleanup;
-	}
-
-	/* Check for proxy file */
-	if (proxy_file == NULL) {
-		my_proxy_file = get_x509_proxy_filename();
-		if (my_proxy_file == NULL) {
-			goto cleanup;
-		}
-		proxy_file = my_proxy_file;
-	}
-
-	// We should have a proxy file, now, try to read it
-	if (globus_gsi_cred_read_proxy(handle, proxy_file)) {
-		set_error_string( "unable to read proxy file" );
-	   goto cleanup;
-	}
-
-	if (globus_gsi_cred_get_subject_name(handle, &subject_name)) {
-		set_error_string( "unable to extract subject name" );
-		goto cleanup;
-	}
-
- cleanup:
-	if (my_proxy_file) {
-		free(my_proxy_file);
-	}
-
-	if (handle_attrs) {
-		globus_gsi_cred_handle_attrs_destroy(handle_attrs);
-	}
-
-	if (handle) {
-		globus_gsi_cred_handle_destroy(handle);
-	}
+	x509_proxy_free( proxy_handle );
 
 	return subject_name;
 
@@ -739,57 +790,16 @@ x509_proxy_identity_name( const char *proxy_file )
 	return NULL;
 #else
 
-	globus_gsi_cred_handle_t         handle       = NULL;
-	globus_gsi_cred_handle_attrs_t   handle_attrs = NULL;
 	char *subject_name = NULL;
-	char *my_proxy_file = NULL;
+	globus_gsi_cred_handle_t proxy_handle = x509_proxy_read( proxy_file );
 
-	if ( activate_globus_gsi() != 0 ) {
+	if ( proxy_handle == NULL ) {
 		return NULL;
 	}
 
-	if (globus_gsi_cred_handle_attrs_init(&handle_attrs)) {
-		set_error_string( "problem during internal initialization1" );
-		goto cleanup;
-	}
+	subject_name = x509_proxy_identity_name( proxy_handle );
 
-	if (globus_gsi_cred_handle_init(&handle, handle_attrs)) {
-		set_error_string( "problem during internal initialization2" );
-		goto cleanup;
-	}
-
-	/* Check for proxy file */
-	if (proxy_file == NULL) {
-		my_proxy_file = get_x509_proxy_filename();
-		if (my_proxy_file == NULL) {
-			goto cleanup;
-		}
-		proxy_file = my_proxy_file;
-	}
-
-	// We should have a proxy file, now, try to read it
-	if (globus_gsi_cred_read_proxy(handle, proxy_file)) {
-		set_error_string( "unable to read proxy file" );
-	   goto cleanup;
-	}
-
-	if (globus_gsi_cred_get_identity_name(handle, &subject_name)) {
-		set_error_string( "unable to extract identity name" );
-		goto cleanup;
-	}
-
-cleanup:
-	if (my_proxy_file) {
-		free(my_proxy_file);
-	}
-
-	if (handle_attrs) {
-		globus_gsi_cred_handle_attrs_destroy(handle_attrs);
-	}
-
-	if (handle) {
-		globus_gsi_cred_handle_destroy(handle);
-	}
+	x509_proxy_free( proxy_handle );
 
 	return subject_name;
 
@@ -807,60 +817,16 @@ x509_proxy_expiration_time( const char *proxy_file )
 	return -1;
 #else
 
-    globus_gsi_cred_handle_t         handle       = NULL;
-    globus_gsi_cred_handle_attrs_t   handle_attrs = NULL;
 	time_t expiration_time = -1;
-	time_t time_left;
-	char *my_proxy_file = NULL;
+	globus_gsi_cred_handle_t proxy_handle = x509_proxy_read( proxy_file );
 
-	if ( activate_globus_gsi() != 0 ) {
+	if ( proxy_handle == NULL ) {
 		return -1;
 	}
 
-    if (globus_gsi_cred_handle_attrs_init(&handle_attrs)) {
-        set_error_string( "problem during internal initialization" );
-        goto cleanup;
-    }
+	expiration_time = x509_proxy_expiration_time( proxy_handle );
 
-    if (globus_gsi_cred_handle_init(&handle, handle_attrs)) {
-        set_error_string( "problem during internal initialization" );
-        goto cleanup;
-    }
-
-    /* Check for proxy file */
-    if (proxy_file == NULL) {
-        my_proxy_file = get_x509_proxy_filename();
-        if (my_proxy_file == NULL) {
-            goto cleanup;
-        }
-		proxy_file = my_proxy_file;
-	}
-
-    // We should have a proxy file, now, try to read it
-    if (globus_gsi_cred_read_proxy(handle, proxy_file)) {
-       set_error_string( "unable to read proxy file" );
-       goto cleanup;
-    }
-
-	if (globus_gsi_cred_get_lifetime(handle, &time_left)) {
-		set_error_string( "unable to extract expiration time" );
-        goto cleanup;
-    }
-
-	expiration_time = time(NULL) + time_left;
-
- cleanup:
-    if (my_proxy_file) {
-        free(my_proxy_file);
-    }
-
-    if (handle_attrs) {
-        globus_gsi_cred_handle_attrs_destroy(handle_attrs);
-    }
-
-    if (handle) {
-        globus_gsi_cred_handle_destroy(handle);
-    }
+	x509_proxy_free( proxy_handle );
 
 	return expiration_time;
 
@@ -1345,6 +1311,7 @@ x509_receive_delegation( const char *destination_file,
 	globus_result_t result = GLOBUS_SUCCESS;
 	globus_gsi_cred_handle_t proxy_handle =  NULL;
 	globus_gsi_proxy_handle_t request_handle = NULL;
+	globus_gsi_proxy_handle_attrs_t handle_attrs = NULL;
 	char *buffer = NULL;
 	int buffer_len = 0;
 	char *destination_file_tmp = NULL;
@@ -1354,7 +1321,49 @@ x509_receive_delegation( const char *destination_file,
 		return -1;
 	}
 
-	result = globus_gsi_proxy_handle_init( &request_handle, NULL );
+	// see if we'd like the default number of bits or something custom
+	int bits = param_integer("GSI_DELEGATION_KEYBITS", 0);
+
+	// default for clock skew is currently (2013-03-27) 5 minutes, but allow
+	// that to be changed
+	int skew = param_integer("GSI_DELEGATION_CLOCK_SKEW_ALLOWABLE", 0);
+
+	// prepare any special attributes desired
+	result = globus_gsi_proxy_handle_attrs_init( &handle_attrs );
+	if ( result != GLOBUS_SUCCESS ) {
+		rc = -1;
+		error_line = __LINE__;
+		goto cleanup;
+	}
+
+	if (bits) {
+		// as of 2013-02-27, a bug in globus 5.2.1 causes a crash if bits
+		// is less than 512.  so we just make that the minimum.  there is no
+		// maximum, although setting it above 4096 could take a really long
+		// time to compute.  i would bet that in 20 years this comment is
+		// hilarious.
+		if (bits < 512) {
+			bits = 512;
+		}
+
+		result = globus_gsi_proxy_handle_attrs_set_keybits( handle_attrs, bits );
+		if ( result != GLOBUS_SUCCESS ) {
+			rc = -1;
+			error_line = __LINE__;
+			goto cleanup;
+		}
+	}
+
+	if (skew) {
+		result = globus_gsi_proxy_handle_attrs_set_clock_skew_allowable( handle_attrs, skew );
+		if ( result != GLOBUS_SUCCESS ) {
+			rc = -1;
+			error_line = __LINE__;
+			goto cleanup;
+		}
+	}
+
+	result = globus_gsi_proxy_handle_init( &request_handle, handle_attrs );
 	if ( result != GLOBUS_SUCCESS ) {
 		rc = -1;
 		error_line = __LINE__;
@@ -1441,6 +1450,9 @@ x509_receive_delegation( const char *destination_file,
 	}
 	if ( buffer ) {
 		free( buffer );
+	}
+	if (handle_attrs) {
+		 globus_gsi_proxy_handle_attrs_destroy( handle_attrs );
 	}
 	if ( request_handle ) {
 		globus_gsi_proxy_handle_destroy( request_handle );

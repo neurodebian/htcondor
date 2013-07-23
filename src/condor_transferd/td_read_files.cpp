@@ -45,7 +45,7 @@ class ThreadArg
 // This handler is called when a client wishes to read files from the
 // transferd's storage.
 int
-TransferD::read_files_handler(int cmd, Stream *sock) 
+TransferD::read_files_handler(int /* cmd */, Stream *sock) 
 {
 	ReliSock *rsock = (ReliSock*)sock;
 	MyString capability;
@@ -57,8 +57,6 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 	int tid;
 	ClassAd reqad;
 	ClassAd respad;
-
-	cmd = cmd; // quiet the compiler
 
 	dprintf(D_ALWAYS, "Got TRANSFERD_READ_FILES!\n");
 
@@ -77,7 +75,7 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 				"Failure to register transferd - Authentication failed" );
 			dprintf( D_ALWAYS, "setup_transfer_request_handler() "
 				"aborting: %s\n",
-				errstack.getFullText() );
+				errstack.getFullText().c_str() );
 			refuse( rsock );
 			return CLOSE_STREAM;
 		} 
@@ -98,7 +96,7 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 	rsock->decode();
 
 	// soak the request ad from the client about what it wants to transfer
-	reqad.initFromStream(*rsock);
+	getClassAd(rsock, reqad);
 	rsock->end_of_message();
 
 	reqad.LookupString(ATTR_TREQ_CAPABILITY, capability);
@@ -110,7 +108,7 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 		// didn't find it. Log it and tell them to leave and close up shop
 		respad.Assign(ATTR_TREQ_INVALID_REQUEST, TRUE);
 		respad.Assign(ATTR_TREQ_INVALID_REASON, "Invalid capability!");
-		respad.put(*rsock);
+		putClassAd(rsock, respad);
 		rsock->end_of_message();
 
 		dprintf(D_ALWAYS, "Client identity '%s' tried to read some files "
@@ -130,7 +128,7 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 			respad.Assign(ATTR_TREQ_INVALID_REQUEST, TRUE);
 			respad.Assign(ATTR_TREQ_INVALID_REASON, 
 				"Invalid file transfer protocol!");
-			respad.put(*rsock);
+			putClassAd(rsock, respad);
 			rsock->end_of_message();
 
 			dprintf(D_ALWAYS, "Client identity '%s' tried to read some files "
@@ -144,7 +142,7 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 			respad.Assign(ATTR_TREQ_INVALID_REQUEST, TRUE);
 			respad.Assign(ATTR_TREQ_INVALID_REASON, 
 				"Transfer Request was not an download request!");
-			respad.put(*rsock);
+			putClassAd(rsock, respad);
 			rsock->end_of_message();
 
 			dprintf(D_ALWAYS, "Client identity '%s' tried to read some files "
@@ -158,7 +156,7 @@ TransferD::read_files_handler(int cmd, Stream *sock)
 
 	respad.Assign(ATTR_TREQ_INVALID_REQUEST, FALSE);
 	respad.Assign(ATTR_TREQ_NUM_TRANSFERS, treq->get_num_transfers());
-	respad.put(*rsock);
+	putClassAd(rsock, respad);
 	rsock->end_of_message();
 
 	/////////////////////////////////////////////////////////////////////////
@@ -239,7 +237,7 @@ TransferD::read_files_thread(void *targ, Stream *sock)
 
 		// first we send the jobad to the client, so they can instantiate
 		// a file transfer object on their end too.
-		jad->put(*rsock);
+		putClassAd(rsock, *jad);
 		rsock->end_of_message();
 
 		FileTransfer ftrans;
@@ -259,7 +257,7 @@ TransferD::read_files_thread(void *targ, Stream *sock)
 			respad.Assign(ATTR_TREQ_INVALID_REQUEST, TRUE);
 			respad.Assign(ATTR_TREQ_INVALID_REASON, 
 				"FileTransfer Object failed to SimpleInit.");
-			respad.put(*rsock);
+			putClassAd(rsock, respad);
 			rsock->end_of_message();
 
 			rsock->timeout(old_timeout);
@@ -280,7 +278,7 @@ TransferD::read_files_thread(void *targ, Stream *sock)
 			respad.Assign(ATTR_TREQ_INVALID_REQUEST, TRUE);
 			respad.Assign(ATTR_TREQ_INVALID_REASON, 
 				"FileTransfer Object failed to upload.");
-			respad.put(*rsock);
+			putClassAd(rsock, respad);
 			rsock->end_of_message();
 
 			rsock->timeout(old_timeout);
@@ -304,7 +302,7 @@ TransferD::read_files_thread(void *targ, Stream *sock)
 	//
 	//	ATTR_TREQ_INVALID_REQUEST (set to false)
 	//
-	respad.put(*rsock);
+	putClassAd(rsock, respad);
 	rsock->end_of_message();
 
 	delete rsock;
@@ -354,7 +352,7 @@ TransferD::read_files_reaper(int tid, int exit_status)
 		result.Assign(ATTR_TREQ_SIGNALED, TRUE);
 		result.Assign(ATTR_TREQ_SIGNAL, signal);
 		result.Assign(ATTR_TREQ_UPDATE_STATUS, "NOT OK");
-		str.sprintf("Died with signal %d", signal);
+		str.formatstr("Died with signal %d", signal);
 		result.Assign(ATTR_TREQ_UPDATE_REASON, str);
 
 	} else {
@@ -372,7 +370,7 @@ TransferD::read_files_reaper(int tid, int exit_status)
 
 			default:
 				result.Assign(ATTR_TREQ_UPDATE_STATUS, "NOT OK");
-				str.sprintf("File transfer exited with incorrect exit code %d",
+				str.formatstr("File transfer exited with incorrect exit code %d",
 					exit_code);
 				result.Assign(ATTR_TREQ_UPDATE_REASON, str);
 				result.Assign(ATTR_TREQ_SIGNALED, FALSE);
@@ -388,7 +386,7 @@ TransferD::read_files_reaper(int tid, int exit_status)
 
 	// XXX Detail what is in this ad.
 	m_update_sock->encode();
-	result.put(*m_update_sock);
+	putClassAd(m_update_sock, result);
 	m_update_sock->end_of_message();
 
 	// now remove the treq forever from our knowledge

@@ -33,6 +33,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <inttypes.h>
 
 #include "safe.unix.h"
 #include "parse_config.unix.h"
@@ -766,14 +767,14 @@ static char *do_common_dir_cmd_tasks(configuration *c,
     dir_name = strrchr(dir_parent, '/');
     if (dir_name == NULL) {
         fatal_error_exit(1,
-                         "directory without parent directory specified");
+                         "directory (%s) without parent directory specified", dir_parent);
     }
 
     *dir_name++ = '\0';
 
     if (!is_string_in_list(&c->valid_dirs, dir_parent)) {
         fatal_error_exit(1,
-                         "directory is not in list of valid dirs");
+                         "directory (%s) is not in list of valid dirs", dir_parent);
     }
 
     r = safe_is_path_trusted(dir_parent, &conf_safe_uids, &conf_safe_gids);
@@ -839,7 +840,9 @@ static void do_mkdir(configuration *c)
         fatal_error_exit(1, "error switching user to root");
     }
 
-    r = mkdir(dir_name, 0755);
+    // make the directory private by default.  ideally, the permissions to use
+    // should be a parameter that is passed in.  ZKM TODO
+    r = mkdir(dir_name, 0700);
     if (r == -1) {
         fatal_error_exit(1, "error creating directory %s", dir_name);
     }
@@ -906,6 +909,53 @@ static void do_rmdir(configuration *c)
     }
 
     free(dir_name);
+}
+
+static int
+dirusage_func(const char *, const struct stat *stat_buf, void *data)
+{
+    int r = 0;
+	if (data == NULL) {
+		// should never happen.  return error
+		r = 1;
+	} else if (stat_buf == NULL) {
+		// should never happen.  return error
+		r = 1;
+	} else {
+		off_t file_size = stat_buf->st_size;
+		*((off_t*)data) += file_size;
+	}
+    return r;
+}
+
+static int do_dirusage(configuration *c)
+{
+    dir_cmd_params dir_cmd_conf;
+    char *dir_name;
+    int r;
+    struct stat stat_buf;
+
+    dir_name = do_common_dir_cmd_tasks(c, &dir_cmd_conf, 0, 0);
+
+    r = lstat(dir_name, &stat_buf);
+    if (r == -1) {
+        fatal_error_exit(1, "error stat'ing leaf dir (%s)", dir_name);
+    }
+
+    if (!S_ISDIR(stat_buf.st_mode)) {
+        fatal_error_exit(1, "leaf dir is not a directory (%s)", dir_name);
+    }
+
+    off_t total_size = 0;
+
+    r = safe_dir_walk(dir_name, dirusage_func, &total_size, 64);
+    if (r != 0) {
+        fatal_error_exit(1, "error in recursive delete of directory");
+    }
+    free(dir_name);
+
+    nonfatal_write("%ju", (intmax_t)total_size);
+    return 0;
 }
 
 typedef struct uid_pair {
@@ -1194,6 +1244,8 @@ static void do_command(const char *cmd, int cmd_fd, configuration *c)
         do_mkdir(c);
     } else if (!strcmp(cmd, "rmdir")) {
         do_rmdir(c);
+    } else if (!strcmp(cmd, "dirusage")) {
+        do_dirusage(c);
     } else if (!strcmp(cmd, "chowndir")) {
         do_chown_dir(c);
     } else {

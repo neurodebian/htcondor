@@ -30,6 +30,7 @@
 #include "internet.h"
 #include "../condor_schedd.V6/qmgr_job_updater.h"
 #include "condor_update_style.h"
+#include "file_transfer.h"
 
 /* Forward declaration to prevent loops... */
 class RemoteResource;
@@ -238,6 +239,8 @@ class BaseShadow : public Service
 		*/
 	virtual float bytesReceived() { return 0.0; }
 
+	virtual void getFileTransferStatus(FileTransferStatus &upload_status,FileTransferStatus &download_status) = 0;
+
 	virtual int getExitReason( void ) = 0;
 
 	virtual bool claimIsClosing( void ) = 0;
@@ -296,8 +299,6 @@ class BaseShadow : public Service
 	int getProc() { return proc; }
 		/// Returns this job's GlobalJobId string
 	const char* getGlobalJobId() { return gjid; }
-		/// Returns the spool
-	char *getSpool() { return spool; }
 		/// Returns the schedd address
 	char *getScheddAddr() { return scheddAddr; }
         /// Returns the current working dir for the job
@@ -450,9 +451,6 @@ class BaseShadow : public Service
 	void checkSwap( void );
 
 	// config file parameters
-	char *spool;
-	char *fsDomain;
-	char *uidDomain;
 	int reconnect_ceiling;
 	double reconnect_e_factor;
 	bool m_RunAsNobody;

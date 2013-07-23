@@ -40,8 +40,9 @@ It can be used to identify different jobs in the output of \Condor{q}.
 The VM image for the job must already reside in one of Amazon's storage
 service (S3 or EBS) and be registered with EC2.
 In the submit description file,
-provide the identifier for the image using either \SubmitCmd{ec2\_ami\_id}.
+provide the identifier for the image using \SubmitCmd{ec2\_ami\_id}.
 
+\index{grid type!ec2!authentication methods}
 This grid type requires access to user authentication information,
 in the form of path names to files containing the appropriate keys.
 
@@ -55,16 +56,21 @@ ec2_access_key_id = /path/to/access.key
 ec2_secret_access_key = /path/to/secret.key
 \end{verbatim}
 
-While both pairs of files may be associated with the same account, 
-the credentials are not the same.
+The \Expr{euca3://} and \Expr{euca3s://} protocols must use this 
+authentication method.
+These protocols exist to work correctly when the resources do not support
+the \Param{InstanceInitiatedShutdownBehavior} parameter.
 
 The second authentication method for the EC2 grid type is X.509.
 Specify the service with an \Expr{x509://} URL, 
 even if the URL was given in another form.  
 Use \SubmitCmd{ec2\_access\_key\_id} to 
 specify the path to the X.509 public key (certificate),
-and \SubmitCmd{ec2\_secret\_access\_key} specifies the path to the X.509 
-private key as in the following example:
+which is not the same as the built-in authentication's access key.
+\SubmitCmd{ec2\_secret\_access\_key} specifies the path to the X.509 
+private key,
+which is not the same as the built-in authentication's secret key.
+The following example illustrates the specification for X.509 authentication:
 
 \begin{verbatim}
 grid_resource = ec2 x509://service.example
@@ -116,6 +122,49 @@ data are concatenated, with the data from \SubmitCmd{ec2\_user\_data}
 occurring first.  HTCondor performs the base64 encoding that EC2 expects on 
 the data.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsubsection{\label{sec:spot-instances}Using Spot Instances}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+EC2 jobs may also be submitted to clouds that support spot instances.
+A spot instance differs from a conventional, or dedicated, instance in two
+primary ways.
+First, the instance price varies according to demand.
+Second,
+the cloud provider may terminate the instance prematurely.
+To start a spot instance,
+the submitter specifies a bid,
+which represents the most the submitter is willing to pay per hour
+to run the VM.
+\index{submit commands!ec2\_spot\_price}
+Within HTCondor, the submit command \SubmitCmd{ec2\_spot\_price}
+specifies this floating point value.
+For example, 
+to bid 1.1 cents per hour on Amazon:
+
+\begin{verbatim}
+ec2_spot_price = 0.011
+\end{verbatim}
+
+Note that the EC2 API does not specify how the cloud provider 
+should interpret the bid.
+Empirically, Amazon uses fractional US dollars.
+
+Other submission details for a spot instance are identical to those
+for a dedicated instance.
+
+A spot instance will not necessarily begin immediately.
+Instead, 
+it will begin as soon as the price drops below the bid.
+Thus, spot instance jobs
+may remain in the idle state for much longer than dedicated instance jobs,
+as they wait for the price to drop.
+Furthermore, if the price rises above the bid, 
+the cloud service will terminate the instance.
+
+More information about Amazon's spot instances is available at
+\URL{http://aws.amazon.com/ec2/spot-instances/}.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{\label{sec:Amazon-config}EC2 Configuration Variables}
@@ -133,3 +182,60 @@ EC2_GAHP_LOG = /tmp/EC2GahpLog.$(USERNAME)
 
 The \SubmitCmd{ec2} grid type does not presently permit the explicit use 
 of an HTTP proxy.
+
+The specification of a service with an \Expr{https://}, an \Expr{x509://},
+or an \Expr{euca3s://} URL validates that service's certificate,
+checking that a trusted certificate authority (CA) signed it.
+Commercial EC2 service providers generally use certificates signed by 
+widely-recognized CAs.
+These CAs will usually work without any additional configuration.  
+For other providers, a specification of trusted CAs may be needed.
+Without, errors such as the following will be in the EC2 GAHP log:
+
+\footnotesize
+\begin{verbatim}
+06/13/13 15:16:16 curl_easy_perform() failed (60): 
+'Peer certificate cannot be authenticated with given CA certificates'.
+\end{verbatim}
+\normalsize
+
+Specify trusted CAs by including their certificates in a group of trusted CAs
+either in an on disk directory or in a single file. 
+Either of these alternatives may contain multiple certificates.  
+Which is used will vary from system to system, 
+depending on the system's SSL implementation. 
+HTCondor uses \Prog{libcurl}; 
+information about the \Prog{libcurl} specification of trusted CAs
+is available at 
+
+\URL{http://curl.haxx.se/libcurl/c/curl\_easy\_setopt.html}
+
+Versions of HTCondor with standard universe support ship with their 
+own \Prog{libcurl}, which will be linked against \Prog{OpenSSL}.
+
+The behavior when specifying both a directory and a file is undefined, 
+although the EC2 GAHP allows it.
+
+The EC2 GAHP will set the CA file to whichever variable it finds first, 
+checking these in the following order:
+
+\begin{enumerate}
+\item The environment variable \Env{X509\_CERT\_FILE},
+  set when the \Condor{master} starts up.
+\item The HTCondor configuration variable \Macro{SOAP\_SSL\_CA\_FILE}.
+\end{enumerate}
+
+The EC2 GAHP supplies no default value, if it does not find a CA file.
+
+The EC2 GAHP will set the CA directory given whichever of these
+variables it finds first, 
+checking in the following order:
+
+\begin{enumerate}
+\item The HTCondor configuration variable \Macro{GSI\_DAEMON\_TRUSTED\_CA\_DIR}.
+\item The environment variable \Env{X509\_CERT\_DIR},
+  set when the \Condor{master} starts up.
+\item The HTCondor configuration variable \Macro{SOAP\_SSL\_CA\_DIR}.
+\end{enumerate}
+
+The EC2 GAHP supplies no default value, if it does not find a CA directory.

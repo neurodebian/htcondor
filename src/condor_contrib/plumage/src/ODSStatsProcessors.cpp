@@ -138,7 +138,7 @@ plumage::stats::processSchedulerStats(ODSMongodbOps* ops, Date_t& ts) {
 void 
 plumage::stats::processAccountantStats(ClassAd* ad, ODSMongodbOps* ops, Date_t& ts)
 {
-    // attr%d holders...sadly reverting back to MyString for convenience of sprintf
+    // attr%d holders...sadly reverting back to MyString for convenience of formatstr
     MyString  attrName, attrPrio, attrResUsed, attrWtResUsed, attrFactor, attrBeginUsage, attrAccUsage;
     MyString  attrLastUsage, attrAcctGroup, attrIsAcctGroup;
     MyString  attrConfigQuota, attrEffectiveQuota, attrSubtreeQuota, attrSurplusPolicy;
@@ -168,25 +168,25 @@ plumage::stats::processAccountantStats(ClassAd* ad, ODSMongodbOps* ops, Date_t& 
         isAcctGroup = false;
 
         // skip stale records unless we have none
-        attrLastUsage.sprintf("LastUsageTime%d", i );
+        attrLastUsage.formatstr("LastUsageTime%d", i );
         ad->LookupInteger  ( attrLastUsage.Value(), lastUsage );
         if (lastUsage < minLastUsageTime && acct_count > 0)
             continue;
 
         // parse the horrid classad
-        attrName.sprintf("Name%d", i );
-        attrPrio.sprintf("Priority%d", i );
-        attrResUsed.sprintf("ResourcesUsed%d", i );
-        attrWtResUsed.sprintf("WeightedResourcesUsed%d", i );
-        attrFactor.sprintf("PriorityFactor%d", i );
-        attrBeginUsage.sprintf("BeginUsageTime%d", i );
-        attrAccUsage.sprintf("WeightedAccumulatedUsage%d", i );
-        attrAcctGroup.sprintf("AccountingGroup%d", i);
-        attrIsAcctGroup.sprintf("IsAccountingGroup%d", i);
-        attrConfigQuota.sprintf("ConfigQuota%d", i);
-        attrEffectiveQuota.sprintf("EffectiveQuota%d", i);
-        attrSubtreeQuota.sprintf("SubtreeQuota%d", i);
-        attrSurplusPolicy.sprintf("SurplusPolicy%d", i);
+        attrName.formatstr("Name%d", i );
+        attrPrio.formatstr("Priority%d", i );
+        attrResUsed.formatstr("ResourcesUsed%d", i );
+        attrWtResUsed.formatstr("WeightedResourcesUsed%d", i );
+        attrFactor.formatstr("PriorityFactor%d", i );
+        attrBeginUsage.formatstr("BeginUsageTime%d", i );
+        attrAccUsage.formatstr("WeightedAccumulatedUsage%d", i );
+        attrAcctGroup.formatstr("AccountingGroup%d", i);
+        attrIsAcctGroup.formatstr("IsAccountingGroup%d", i);
+        attrConfigQuota.formatstr("ConfigQuota%d", i);
+        attrEffectiveQuota.formatstr("EffectiveQuota%d", i);
+        attrSubtreeQuota.formatstr("SubtreeQuota%d", i);
+        attrSurplusPolicy.formatstr("SurplusPolicy%d", i);
 
         ad->LookupString   ( attrName.Value(), name );
         ad->LookupFloat    ( attrPrio.Value(), priority );

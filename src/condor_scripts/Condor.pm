@@ -74,9 +74,13 @@ my $AbortCallback;
 my $ShadowCallback;
 my $HoldCallback;
 my $ReleaseCallback;
+my $DisconnectedCallback;
+my $ReconnectedCallback;
+my $ReconnectFailedCallback;
 my $JobErrCallback;
 my $TimedCallback;
 my $WantErrorCallback;
+my $ULogCallback;
 
 
 sub Reset
@@ -104,9 +108,13 @@ sub Reset
     undef $ShadowCallback;
     undef $HoldCallback;
     undef $ReleaseCallback;
+    undef $DisconnectedCallback;
+    undef $ReconnectedCallback;
+    undef $ReconnectFailedCallback;
     undef $JobErrCallback;
     undef $TimedCallback;
     undef $WantErrorCallback;
+    undef $ULogCallback;
 }
 
 sub SetHandle
@@ -511,12 +519,31 @@ sub RegisterRelease
     my $sub = shift || croak "missing argument";
     $ReleaseCallback = $sub;
 }
+sub RegisterDisconnected
+{
+    my $sub = shift || croak "missing argument";
+    $DisconnectedCallback = $sub;
+}
+sub RegisterReconnected
+{
+    my $sub = shift || croak "missing argument";
+    $ReconnectedCallback = $sub;
+}
+sub RegisterReconnectFailed
+{
+    my $sub = shift || croak "missing argument";
+    $ReconnectFailedCallback = $sub;
+}
 sub RegisterJobErr
 {
     my $sub = shift || croak "missing argument";
     $JobErrCallback = $sub;
 }
-
+sub RegisterULog
+{
+    my $sub = shift || croak "missing argument";
+    $ULogCallback = $sub;
+}
 sub RegisterWantError
 {
     my $sub = shift || croak "missing argument";
@@ -670,7 +697,7 @@ sub Monitor
 	    $info{'cluster'} = $1;
 	    $info{'job'} = $2;
 
-	    debug( "Saw job ($1.$2) evicted\n" ,1);
+	    debug( "Saw job ($1.$2) evicted\n" ,2);
 
 	    # execute callback if one is registered
 	    &$EvictedCallback( %info )
@@ -695,7 +722,7 @@ sub Monitor
 
 	    if( $line =~ /^\s+\(0\) Job was not checkpointed\./ )
 	    {
-		debug( "job was evicted without ckpt\n" ,1);
+		debug( "job was evicted without ckpt\n" ,2);
 		# execute callback if one is registered
 		&$EvictedWithoutCheckpointCallback( %info )
 		    if defined $EvictedWithoutCheckpointCallback;
@@ -703,14 +730,14 @@ sub Monitor
 	    }
 	    elsif( $line =~ /^\s+\(1\) Job was checkpointed\./ )
 	    {
-		debug( "job was evicted with ckpt\n" ,1);
+		debug( "job was evicted with ckpt\n" ,2);
 		# execute callback if one is registered
 		&$EvictedWithCheckpointCallback( %info )
 		    if defined $EvictedWithCheckpointCallback;
 	    }
 	    elsif( $line =~ /^\s+\(0\) Job terminated and was requeued.*$/ )
 	    {
-		debug( "job was evicted and requeued\n" ,1);
+		debug( "job was evicted and requeued\n" ,2);
 		# execute callback if one is registered
 		&$EvictedWithRequeueCallback( %info )
 		    if defined $EvictedWithRequeueCallback;
@@ -732,7 +759,7 @@ sub Monitor
 	    $info{'cluster'} = $1;
 	    $info{'job'} = $2;
 
-	    debug( "Saw job terminated\n" ,1);
+	    debug( "Saw job terminated\n" ,2);
 
 	    # decrement # of queued jobs so we will know when to exit monitor
 	    $num_active_jobs--;
@@ -817,7 +844,7 @@ sub Monitor
 	    {
 		debug( "parse error on line $linenum of $info{'log'}:\n" .
 		       "   no termination status message found after " .
-		       "termination: continuing...\n" ,1);
+		       "termination: continuing...\n" ,2);
 		# re-parse line so we don't miss whatever it said
 		goto PARSE;
 	    }
@@ -830,7 +857,7 @@ sub Monitor
 	    $info{'cluster'} = $1;
 	    $info{'job'} = $2;
 
-	    debug( "Saw Shadow Exception\n" ,1);
+	    debug( "Saw Shadow Exception\n" ,2);
 
 		if(! defined $ShadowCallback)
 		{
@@ -864,6 +891,147 @@ sub Monitor
 	    next LINE;
 	}
 
+	# 022: Job Disconnected
+	if( $line =~ /^022\s+\(0*(\d+)\.0*(\d+)/ )
+	{
+	    $info{'cluster'} = $1;
+	    $info{'job'} = $2;
+
+	    debug( "Saw Job Disconnected\n" ,2);
+
+	    # read next line to see cause
+	    $line = <SUBMIT_LOG>;
+		while( ! defined $line )
+		{
+			sleep 2;
+			if(defined $TimedCallback)
+			{
+				CheckTimedCallback();
+			}
+			$line = <SUBMIT_LOG>;
+		}
+	    CondorUtils::fullchomp($line);
+	    $linenum++;
+
+		$info{'cause'} = $line;
+
+	    # read next line to see recovery
+	    $line = <SUBMIT_LOG>;
+		while( ! defined $line )
+		{
+			sleep 2;
+			if(defined $TimedCallback)
+			{
+				CheckTimedCallback();
+			}
+			$line = <SUBMIT_LOG>;
+		}
+	    CondorUtils::fullchomp($line);
+	    $linenum++;
+
+		$info{'recovery'} = $line;
+
+		# execute callback if one is registered
+		&$DisconnectedCallback( %info )
+		    if defined $DisconnectedCallback;
+
+	    next LINE;
+	}
+
+	# 023: Job Reconnected
+	if( $line =~ /^023\s+\(0*(\d+)\.0*(\d+)/ )
+	{
+	    $info{'cluster'} = $1;
+	    $info{'job'} = $2;
+
+	    debug( "Saw Job Reconnected\n" ,2);
+
+	    # read next line to see cause
+	    $line = <SUBMIT_LOG>;
+		while( ! defined $line )
+		{
+			sleep 2;
+			if(defined $TimedCallback)
+			{
+				CheckTimedCallback();
+			}
+			$line = <SUBMIT_LOG>;
+		}
+	    CondorUtils::fullchomp($line);
+	    $linenum++;
+
+		$info{'startd'} = $line;
+
+	    # read next line to see recovery
+	    $line = <SUBMIT_LOG>;
+		while( ! defined $line )
+		{
+			sleep 2;
+			if(defined $TimedCallback)
+			{
+				CheckTimedCallback();
+			}
+			$line = <SUBMIT_LOG>;
+		}
+	    CondorUtils::fullchomp($line);
+	    $linenum++;
+
+		$info{'starter'} = $line;
+
+		# execute callback if one is registered
+		&$ReconnectedCallback( %info )
+		    if defined $ReconnectedCallback;
+
+	    next LINE;
+	}
+
+	# 024: Job Reconnect Failed
+	if( $line =~ /^024\s+\(0*(\d+)\.0*(\d+)/ )
+	{
+	    $info{'cluster'} = $1;
+	    $info{'job'} = $2;
+
+	    debug( "Saw Job Reconnect Fail\n" ,2);
+
+	    # read next line to see cause
+	    $line = <SUBMIT_LOG>;
+		while( ! defined $line )
+		{
+			sleep 2;
+			if(defined $TimedCallback)
+			{
+				CheckTimedCallback();
+			}
+			$line = <SUBMIT_LOG>;
+		}
+	    CondorUtils::fullchomp($line);
+	    $linenum++;
+
+		$info{'cause'} = $line;
+
+	    # read next line to see recovery
+	    $line = <SUBMIT_LOG>;
+		while( ! defined $line )
+		{
+			sleep 2;
+			if(defined $TimedCallback)
+			{
+				CheckTimedCallback();
+			}
+			$line = <SUBMIT_LOG>;
+		}
+	    CondorUtils::fullchomp($line);
+	    $linenum++;
+
+		$info{'recovery'} = $line;
+
+		# execute callback if one is registered
+		&$ReconnectedCallback( %info )
+		    if defined $ReconnectedCallback;
+
+	    next LINE;
+	}
+
 	# 001: job executing
 	elsif( $line =~ 
 	       /^001\s+\(0*(\d+)\.0*(\d+).*: (.+)/ )
@@ -876,7 +1044,7 @@ sub Monitor
 	    # For grid universe jobs, there won't be any
 	    $info{'host'} =~ s/^<([^>]+)>/$1/;
 	    
-	    debug( "Saw job executing\n" ,1);
+	    debug( "Saw job executing\n" ,2);
 
 	    # execute callback if one is registered
 	    &$ExecuteCallback( %info )
@@ -894,7 +1062,7 @@ sub Monitor
 	    $info{'host'} = $3;
 	    $info{'sinful'} = "<$3>";
 
-	    debug( "Saw job submitted\n" ,1);
+	    debug( "Saw job submitted\n" ,2);
 	    $submit_info{'cluster'} = $1; # squirrel it away for TimedWait
 
 	    # mark that we've seen a submit so we can start watching # of jobs
@@ -915,7 +1083,7 @@ sub Monitor
 	    $info{'cluster'} = $1;
 	    $info{'job'} = $2;
 
-	    debug( "Saw job abort cluster $1 job $2\n" ,1);
+	    debug( "Saw job abort cluster $1 job $2\n" ,2);
 
 	    # decrement # of queued jobs so we will know when to exit monitor
 	    $num_active_jobs--;
@@ -982,6 +1150,22 @@ sub Monitor
 	    # execute callback if one is registered
 	    &$JobErrCallback( %info )
 		if defined $JobErrCallback;
+	}
+#	008 (171.000.000) 06/15 14:49:45 user defined text
+	# 008: chirp ulog
+	elsif( $line =~ 
+		/^008\s+\((\d+)\.(\d+)\.\d+\)\s+([0-9\/]+)\s+([0-9:]+)\s*(.*)$/ )
+	{
+	    $info{'cluster'} = $1;
+	    $info{'job'} = $2;
+	    $info{'date'} = $3;
+	    $info{'time'} = $4;
+	    $info{'ulog'} = $5;
+
+	    debug( "Saw job ulog cluster $1 job $2 : $5\n" ,1);
+
+	    &$ULogCallback( %info )
+		if defined $ULogCallback;
 	}
     }
     return 1;

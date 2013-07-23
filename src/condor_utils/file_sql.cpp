@@ -300,7 +300,7 @@ QuillErrCode FILESQL::file_newEvent(const char *eventType, AttrList *info) {
 		MyString temp;
 		const char *tempv;
 	
-		retval = info->sPrint(temp);
+		retval = sPrintAd(temp, *info);
 		tempv = temp.Value();
 		retval = write(outfiledes,tempv, strlen(tempv));
 
@@ -347,14 +347,14 @@ QuillErrCode FILESQL::file_updateEvent(const char *eventType,
 		MyString temp, temp1;
 		const char *tempv;
 
-		retval = info->sPrint(temp);
+		retval = sPrintAd(temp, *info);
 		tempv = temp.Value();
 		retval = write(outfiledes,tempv, strlen(tempv));
 
 		retval = write(outfiledes,"***",3); /* Now the delimitor*/
 		retval = write(outfiledes,"\n",1); /* Now the newline*/
 
-		retval = condition->sPrint(temp1);
+		retval = sPrintAd(temp1, *condition);
 		tempv = temp1.Value();
 		retval = write(outfiledes,tempv, strlen(tempv));
 		
@@ -400,7 +400,7 @@ QuillErrCode FILESQL::file_deleteEvent(const char *eventType,
 		MyString temp;
 		const char *tempv;
 	
-		retval = condition->sPrint(temp);
+		retval = sPrintAd(temp, *condition);
 		tempv = temp.Value();
 		retval = write(outfiledes,tempv, strlen(tempv));
 
@@ -439,7 +439,7 @@ FILESQL::createInstance(bool use_sql_log) {
 	MyString outfilename = "";
 
 	MyString param_name;
-	param_name.sprintf("%s_SQLLOG", get_mySubSystem()->getName());
+	param_name.formatstr("%s_SQLLOG", get_mySubSystem()->getName());
 
 	char *tmp = param(param_name.Value());
 	if( tmp ) {
@@ -450,11 +450,11 @@ FILESQL::createInstance(bool use_sql_log) {
 		tmp = param ("LOG");		
 
 		if (tmp) {
-			outfilename.sprintf("%s/sql.log", tmp);
+			outfilename.formatstr("%s/sql.log", tmp);
 			free(tmp);
 		}
 		else {
-			outfilename.sprintf("sql.log");
+			outfilename.formatstr("sql.log");
 		}
 	}
 
@@ -481,13 +481,13 @@ int &prevLHF)
 		// make a copy so that we can add timestamp attribute into it
 	clCopy = *cl;
 	
-	tmp.sprintf("%s = %d", "PrevLastReportedTime", prevLHF);
+	tmp.formatstr("%s = %d", "PrevLastReportedTime", prevLHF);
 	(&clCopy)->Insert(tmp.Value());
 
 		// set the lastReportedTime and make it the new prevLHF
 	prevLHF = (int)time(NULL);
 
-	tmp.sprintf("%s = %d", "LastReportedTime", prevLHF);
+	tmp.formatstr("%s = %d", "LastReportedTime", prevLHF);
 	(&clCopy)->Insert(tmp.Value());
 
 	ASSERT( dbh );

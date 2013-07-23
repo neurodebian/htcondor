@@ -741,10 +741,13 @@ JICShadow::notifyJobExit( int exit_status, int reason, UserProc*
 	updateStartd(&ad, true);
 
 	if( !had_hold ) {
-		if( REMOTE_CONDOR_job_exit(exit_status, reason, &ad) < 0 ) {    
+		if( REMOTE_CONDOR_job_exit(exit_status, reason, &ad) < 0) {
 			dprintf( D_ALWAYS, "Failed to send job exit status to shadow\n" );
-			job_cleanup_disconnected = true;
-			return false;
+			if (job_universe != CONDOR_UNIVERSE_PARALLEL)
+			{
+				job_cleanup_disconnected = true;
+				return false;
+			}
 		}
 	}
 
@@ -783,7 +786,7 @@ JICShadow::updateStartd( ClassAd *ad, bool final_update )
 
 	m_job_startd_update_sock->encode();
 	if( !m_job_startd_update_sock->put((int)final_update) ||
-		!ad->put(*m_job_startd_update_sock) ||
+		!putClassAd(m_job_startd_update_sock, *ad) ||
 		!m_job_startd_update_sock->end_of_message() )
 	{
 		dprintf(D_FULLDEBUG,"Failed to send job ClassAd update to startd.\n");
@@ -791,8 +794,8 @@ JICShadow::updateStartd( ClassAd *ad, bool final_update )
 	else {
 		dprintf(D_FULLDEBUG,"Sent job ClassAd update to startd.\n");
 	}
-	if( DebugFlags & D_FULLDEBUG ) {
-		ad->dPrint(D_JOB);
+	if( IsDebugVerbose(D_JOB) ) {
+		dPrintAd(D_JOB, *ad);
 	}
 
 	if( final_update ) {
@@ -1471,7 +1474,7 @@ JICShadow::getJobStdFile( const char* attr_name )
 			base = tmp;
 		}
 		if( ! fullpath(base) ) {	// prepend full path
-			filename.sprintf( "%s%c", job_iwd, DIR_DELIM_CHAR );
+			filename.formatstr( "%s%c", job_iwd, DIR_DELIM_CHAR );
 		}
 		filename += base;
 	}
@@ -1826,19 +1829,30 @@ bool
 JICShadow::publishUpdateAd( ClassAd* ad )
 {
 	filesize_t execsz = 0;
-	char buf[200];
 
-	// if there is a filetrans object, then let's send the current
-	// size of the starter execute directory back to the shadow.  this
-	// way the ATTR_DISK_USAGE will be updated, and we won't end
-	// up on a machine without enough local disk space.
-	if ( filetrans ) {
-		Directory starter_dir( Starter->GetWorkingDir(), PRIV_USER );
-		execsz = starter_dir.GetDirectorySize();
-		sprintf( buf, "%s=%lu", ATTR_DISK_USAGE, (long unsigned)((execsz+1023)/1024) ); 
-		ad->InsertOrUpdate( buf );
-
+	// if we are using PrivSep, we need to use that mechanism to calculate
+	// the disk usage, as we don't have privs to traverse the users's execute
+	// dir.
+	CondorPrivSepHelper* privsep_helper = Starter->condorPrivSepHelper();
+	if (privsep_helper) {
+		off_t total_usage = 0;
+		if (privsep_helper->get_exec_dir_usage( &total_usage)) {
+			ad->Assign(ATTR_DISK_USAGE, (unsigned long)((total_usage+1023)/1024) );
+		}
+	} else{
+		// if there is a filetrans object, then let's send the current
+		// size of the starter execute directory back to the shadow.  this
+		// way the ATTR_DISK_USAGE will be updated, and we won't end
+		// up on a machine without enough local disk space.
+		if ( filetrans ) {
+			// make sure this computation is done with user priv, since that who
+			// owns the directory and it may not be world-readable
+			Directory starter_dir( Starter->GetWorkingDir(), PRIV_USER );
+			execsz = starter_dir.GetDirectorySize();
+			ad->Assign(ATTR_DISK_USAGE, (unsigned long)((execsz+1023)/1024) ); 
+		}
 	}
+
 	MyString spooled_files;
 	if( job_ad->LookupString(ATTR_SPOOLED_OUTPUT_FILES,spooled_files) && spooled_files.Length() > 0 )
 	{
@@ -1873,6 +1887,8 @@ JICShadow::publishJobExitAd( ClassAd* ad )
 	// way the ATTR_DISK_USAGE will be updated, and we won't end
 	// up on a machine without enough local disk space.
 	if ( filetrans ) {
+		// make sure this computation is done with user priv, since that who
+		// owns the directory and it may not be world-readable
 		Directory starter_dir( Starter->GetWorkingDir(), PRIV_USER );
 		execsz = starter_dir.GetDirectorySize();
 		sprintf( buf, "%s=%lu", ATTR_DISK_USAGE, (long unsigned)((execsz+1023)/1024) ); 
@@ -1994,7 +2010,7 @@ JICShadow::beginFileTransfer( void )
 		ASSERT( filetrans->Init(job_ad, false, PRIV_USER) );
 		filetrans->setSecuritySession(m_filetrans_sec_session);
 		filetrans->RegisterCallback(
-				  (FileTransferHandler)&JICShadow::transferCompleted,this );
+				  (FileTransferHandlerCpp)&JICShadow::transferCompleted,this );
 
 		if ( shadow_version == NULL ) {
 			dprintf( D_ALWAYS, "Can't determine shadow version for FileTransfer!\n" );
@@ -2136,7 +2152,7 @@ JICShadow::initIOProxy( void )
 	}
 
 	if( want_io_proxy || job_universe==CONDOR_UNIVERSE_JAVA ) {
-		io_proxy_config_file.sprintf( "%s%cchirp.config",
+		io_proxy_config_file.formatstr( "%s%cchirp.config",
 				 Starter->GetWorkingDir(), DIR_DELIM_CHAR );
 		if( !io_proxy.init(io_proxy_config_file.Value()) ) {
 			dprintf( D_FAILURE|D_ALWAYS, 
@@ -2258,7 +2274,7 @@ JICShadow::receiveMachineAd( Stream *stream )
 	mach_ad = new ClassAd();
 
 	stream->decode();
-	if (!mach_ad->initFromStream(*stream))
+	if (!getClassAd(stream, *mach_ad))
 	{
 		dprintf(D_ALWAYS, "Received invalid machine ad.  Discarding\n");
 		delete mach_ad;
@@ -2267,7 +2283,7 @@ JICShadow::receiveMachineAd( Stream *stream )
 	}
 	else
 	{
-		mach_ad->dPrint(D_JOB);
+		dPrintAd(D_JOB, *mach_ad);
 	}
 
 	return ret_val;

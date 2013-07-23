@@ -21,56 +21,108 @@
 #ifndef CONDOR_DEBUG_H
 #define CONDOR_DEBUG_H
 
+// Write a line to the audit log, if configured. Always insert the
+// connection id from the relevant Sock object.
+// TODO This declaration may need to be moved elsewhere
+// TODO Do we like this name?
+// TODO Once we have a connection id in Sock, use that
+#if defined(WIN32)
+#  define audit_log(df, sock, fmt, ...) dprintf(D_AUDIT | D_IDENT | df, (DPF_IDENT)((sock)->get_timeout_raw()), fmt, __VA_ARGS__)
+#else
+#  define audit_log(df, sock, fmt, ...) dprintf(D_AUDIT | D_IDENT | df, (DPF_IDENT)((sock)->get_timeout_raw()), fmt, ##__VA_ARGS__)
+#endif
+
 /*
-**	Definitions for flags to pass to dprintf
+**	Definitions for category and flags to pass to dprintf
 **  Note: this is a little confusing, since the flags specify both
-**  debug levels and dprintf options (i.e., D_NOHEADER).  The debug
-**  level flags use the lower order bits while the option flag(s)
-**  use the higher order bit(s).  Note that D_MAXFLAGS is 32 so we
-**  can store the debug level as a integer bitmask.  When adding a
-**  debug flag, be sure to update D_NUMLEVELS.  Since we start
-**  counting levels at 0, D_NUMLEVELS should be one greater than the
-**  highest level.
+**  a debug category, and dprintf options (i.e., D_NOHEADER).  The debug
+**  category flags use the lower order 8 bits while the option flag(s)
+**  use the higher order bit(s).  This allows a maximum of 256 categories
+**  although limitations in some of the underlying data structures currently
+**  allow for only 32 categories (easily bumped to 64 categories).
 */
-#define D_NUMLEVELS		28
-#define D_MAXFLAGS 		32
-#define D_ALWAYS 		(1<<0)
-#define D_SYSCALLS		(1<<1)
-#define D_CKPT			(1<<2)
-#define D_HOSTNAME		(1<<3)
-#define D_PERF_TRACE	(1<<4)
-#define D_LOAD			(1<<5)
-#define D_EXPR			(1<<6)
-#define D_PROC			(1<<7)
-#define D_JOB			(1<<8)
-#define D_MACHINE		(1<<9)
-#define D_FULLDEBUG	 	(1<<10)
-#define D_NFS			(1<<11)
-#define D_CONFIG        (1<<12)
-#define D_UNUSED2       (1<<13)
-#define D_UNUSED3		(1<<14)
-#define D_PROTOCOL		(1<<15)
-#define D_PRIV			(1<<16)
-#define D_SECURITY		(1<<17)
-#define D_DAEMONCORE	(1<<18)
-#define D_COMMAND		(1<<19)
-#define D_MATCH			(1<<20)
-#define D_NETWORK		(1<<21)
-#define D_KEYBOARD		(1<<22)
-#define D_PROCFAMILY	(1<<23)
-#define D_IDLE			(1<<24)
-#define D_THREADS		(1<<25)
-#define D_ACCOUNTANT	(1<<26)
-#define D_FAILURE	(1<<27)
-/* 
-   the rest of these aren't debug levels, but are format-modifying
-   flags to change the appearance of the dprintf line
-*/ 
+
+// The debug categories enum
+enum {
+   D_CATEGORY_BASE = 0,
+   D_ALWAYS = 0,
+   D_ERROR,
+   D_STATUS,
+   D_GENERAL,
+   D_JOB,
+   D_MACHINE,
+   D_CONFIG,
+   D_PROTOCOL,
+   D_PRIV,
+   D_DAEMONCORE,
+   D_GENERIC_VERBOSE, // (1<<D_GENERIC_VERBOSE) == D_FULLDEBUG
+   D_SECURITY,
+   D_COMMAND,
+   D_MATCH,
+   D_NETWORK,
+   D_KEYBOARD,
+   D_PROCFAMILY,
+   D_IDLE,
+   D_THREADS,
+   D_ACCOUNTANT,
+   D_SYSCALLS,
+   D_CKPT,
+   D_HOSTNAME,
+   D_PERF_TRACE,
+   D_LOAD,
+   D_PROC,
+   D_NFS,
+   D_AUDIT, // messages for the audit log
+   D_TEST,  // messages with this category are parsed by various tests.
+   D_UNUSED29,
+   D_UNUSED30,
+   D_BUG,   // messages that indicate the daemon is going down.
+
+   // NOTE: can't go beyond 31 categories so long as DebugOutputChoice is just an unsigned int.
+
+   // this must be last
+   D_CATEGORY_COUNT
+};
+#define D_CATEGORY_MASK (0x1F)
+#define D_CATEGORY_RESERVED_MASK (0xFF)
+
+#define D_VERBOSE_MASK  (3<<8)
+#define D_TERSE         (0<<8)
+#define D_VERBOSE       (1<<8)
+#define D_DIAGNOSTIC    (2<<8)
+#define D_NEVER         (3<<8)
+
+#define D_FULLDEBUG     (1<<10) // when or'd with a D_category, it means that category, or (D_ALWAYS|D_VERBOSE)
+#define D_EXPR          (1<<11) // set by condor_submit, used by ??
+#define D_FAILURE       (1<<12) // nearly always mixed with D_ALWAYS, ignored for now.
+
+
+// format-modifying flags to change the appearance of the dprintf line
+#define D_IDENT         (1<<25) // 
+#define D_SUB_SECOND    (1<<26) // future: print sub-second timestamp
+#define D_TIMESTAMP     (1<<27) // future: print unix timestamp rather than human-readable time.
 #define D_PID           (1<<28)
 #define D_FDS           (1<<29)
-#define D_UNUSED4       (1<<30)
+#define D_CAT           (1<<30)
 #define D_NOHEADER      (1<<31)
-#define D_ALL           (~(0) & (~(D_NOHEADER)))
+//#define D_ALL           (~(0) & (~(D_NOHEADER)))
+
+// first re-definition pass.  add a separate set of flags for Verbose mode
+// for each category. 
+//
+#define IsDebugLevel(cat)    ((AnyDebugBasicListener & (1<<(cat&D_CATEGORY_MASK))) != 0)
+#define IsDebugCategory(cat) ((AnyDebugBasicListener & (1<<(cat&D_CATEGORY_MASK))) != 0)
+#define IsDebugVerbose(cat)  ((AnyDebugVerboseListener & (1<<(cat&D_CATEGORY_MASK))) != 0)
+#define IsFulldebug(cat)     ((AnyDebugBasicListener & D_FULLDEBUG) != 0 || IsDebugVerbose(cat))
+#define IsDebugCatAndVerbosity(flags) ((flags & (D_VERBOSE_MASK | D_FULLDEBUG)) ? IsDebugVerbose(flags) : IsDebugLevel(flags))
+
+// in the future, we will change the debug system to use a table rather than 
+// a bit mask.  possibly this..
+//#define IsDebugLevel(cat)    (DebugCategories[(cat) & D_CATEGORY_MASK)] > 0)
+//   or this
+//#define IsDebugLevel(cat)    (DebugLevels & (3<<((cat)*2))) != 0)
+
+
 #ifdef __cplusplus
 #include <string>
 #include <map>
@@ -91,8 +143,11 @@ extern "C" {
 #define PREFAST_ASSUME(x)
 #endif
 
-extern int DebugFlags;	/* Bits to look for in dprintf */
-extern int Termlog;		/* Are we logging to a terminal? */
+typedef unsigned int DebugOutputChoice;
+
+extern unsigned int DebugHeaderOptions;	// for D_FID, D_PID, D_NOHEADER & D_
+extern DebugOutputChoice AnyDebugBasicListener;   /* Bits to look for in dprintf */
+extern DebugOutputChoice AnyDebugVerboseListener; /* verbose bits for dprintf */
 extern int DebugShouldLockToAppend; /* Should we lock the file before each write? */
 
 /* DebugId is a function that may be registered to be called to insert text
@@ -102,18 +157,49 @@ extern int DebugShouldLockToAppend; /* Should we lock the file before each write
  */
 extern int (*DebugId)(char **buf,int *bufpos,int *buflen);
 
+typedef unsigned long long DPF_IDENT;
 void dprintf ( int flags, const char *fmt, ... ) CHECK_PRINTF_FORMAT(2,3);
 #ifdef __cplusplus
-void dprintf_config( const char *subsys, param_functions * p_funcs = NULL );
+}
+void dprintf ( int flags, DPF_IDENT ident, const char *fmt, ... ) CHECK_PRINTF_FORMAT(3,4);
+extern "C" {
+// parse config files (via param_functions) and use them to fill out the array of dprintf_output_settings
+// one for each output log file. returns the number of entries needed in p_info, (may be larger than c_info!)
+// if p_info is NULL, then dprintf_set_outputs is called with the dprintf_output_settings array.  if != NULL, then
+// the array is returned, calling dprintf_set_outputs is left to the caller.
+//
+// NOTE!!! as of May-2012, some of the dprintf globals are still set as side effects in this function
+//         so you should always call it unless you are doing output purely to STDERR and want defaults
+//         for all config knobs.
+int dprintf_config( 
+	const char *subsys,  // in: subsystem name to use for param lookups
+	struct dprintf_output_settings *p_info = NULL, // in,out: if != NULL results of config parsing returned here
+	int c_info = 0); // in: number of entries in p_info array on input.                  
+
+int dprintf_config_tool(const char* subsys = NULL, int flags = 0);
+
+// parse strflags and cat_and_flags and merge them into the in,out args
+// for backward compatibility, the D_ALWAYS bit will always be set in basic
+// and bits passed in via the in,out args will be preserved unless explicitly cleared via D_FLAG:0 syntax.
+void _condor_parse_merge_debug_flags(
+	const char *strflags, // in: if not NULL, parse to get flags
+	int         flags,    // in: set header flags, D_FULLDEBUG prior to parsing strflags
+	unsigned int & HeaderOpts, // in,out: formatting options, D_PID, etc
+	DebugOutputChoice & basic, // in,out: basic output choice
+	DebugOutputChoice & verbose); // in,out: verbose output choice, expect this to get folded into basic someday.
+
+bool dprintf_to_term_check();
+
 #endif
-void _condor_dprintf_va ( int flags, const char* fmt, va_list args );
+void _condor_dprintf_va ( int flags, DPF_IDENT ident, const char* fmt, va_list args );
 int _condor_open_lock_file(const char *filename,int flags, mode_t perm);
 void PREFAST_NORETURN _EXCEPT_ ( const char *fmt, ... ) CHECK_PRINTF_FORMAT(1,2);
 void Suicide(void);
-void set_debug_flags( const char *strflags );
+void set_debug_flags( const char *strflags, int cat_and_flags );
 void PREFAST_NORETURN _condor_dprintf_exit( int error_code, const char* msg );
 void _condor_fd_panic( int line, const char *file );
-void _condor_set_debug_flags( const char *strflags );
+void _condor_set_debug_flags( const char *strflags, int cat_and_flags );
+int  _condor_dprintf_is_initialized();
 
 int  dprintf_config_ContinueOnFailure( int fContinue );
 
@@ -231,14 +317,20 @@ char    *mymalloc(), *myrealloc(), *mycalloc();
         (ptr)->ru_stime.tv_usec ); \
 }
 
-#ifndef REMIND
+#ifndef PRAGMA_REMIND
 # ifdef _MSC_VER // for Microsoft C, prefix file and line to the the message
 #  define PRAGMA_QUOTE(x)   #x
 #  define PRAGMA_QQUOTE(y)  PRAGMA_QUOTE(y)
-#  define REMIND(str)       message(__FILE__ "(" PRAGMA_QQUOTE(__LINE__) ") : " str)
+#  define PRAGMA_REMIND(str) __pragma(message(__FILE__ "(" PRAGMA_QQUOTE(__LINE__) ") : " str))
 # elif defined __GNUC__ // gcc emits file and line prefix automatically.
-#  define REMIND(str)       message str
+#  if ((__GNUC__ * 100) + __GNUC_MINOR__) >= 402
+#   define PRAGMA_QUOTE(x)  _Pragma(#x)
+#   define PRAGMA_REMIND(str) PRAGMA_QUOTE(message(str))
+#  else
+#   define PRAGMA_REMIND(str)
+#  endif
 # else 
+#  define PRAGMA_REMIND(str)
 # endif
 #endif // REMIND
 
@@ -272,3 +364,6 @@ char    *mymalloc(), *myrealloc(), *mycalloc();
 #	define ASSERT(cond) CONDOR_ASSERT(cond)
 #	define assert(cond) CONDOR_ASSERT(cond)
 #endif	/* of ifdef WIN32 */
+
+#define dprintf_set_tool_debug(name, flags) dprintf_config_tool(name, flags)
+

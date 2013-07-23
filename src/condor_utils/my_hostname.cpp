@@ -177,6 +177,8 @@ network_interface_to_ip(char const *interface_param_name,char const *interface_p
 			desireability = 3;
 		}
 
+		if(dev->is_up()) { desireability *= 10; }
+
 		//dprintf(D_HOSTNAME, "Considering %s (Ranked at %d) as possible local hostname versus %s (%d)\n", addr.to_ip_string().Value(), desireability, ip.c_str(), desireability);
 
 		if( desireability > best_so_far ) {
@@ -374,22 +376,6 @@ void ConfigConvertDefaultIPToSocketIP()
 //	}
 
 	enable_convert_default_IP_to_socket_IP = true;
-
-	/*
-	  Woe is us. If CCB is enabled, we should *NOT* be re-writing IP
-	  addresses in the ClassAds we send out. :(  We already go
-	  through a lot of trouble to make sure they're all set how they
-	  should be.  This only used to work at all because of a bug in
-	  CCB + CEDAR where all outbound connections were hitting
-	  CCB_bind() and so we thought my_sock_ip below was the CCB
-	  broker's IP, and it all "worked".  Once we're not longer
-	  pounding the CCB broker for all outbound connections, this bug
-	  becomes visible.
-	*/
-	if (param_boolean("NET_REMAP_ENABLE", false)) {
-		enable_convert_default_IP_to_socket_IP = false;
-		dprintf(D_FULLDEBUG,"Disabling ConvertDefaultIPToSocketIP() because NET_REMAP_ENABLE is true.\n");
-	}
 
 	/*
 	  When using TCP_FORWARDING_HOST, if we rewrite addresses, we will

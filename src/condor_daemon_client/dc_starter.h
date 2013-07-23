@@ -25,6 +25,12 @@
 #include "condor_classad.h"
 #include "condor_io.h"
 
+class PeekGetFD
+{
+public:
+	virtual ~PeekGetFD() { }
+	virtual int getNextFD(const std::string &) = 0;
+};
 
 /** The subclass of the Daemon object for talking to a starter
 */
@@ -86,6 +92,8 @@ public:
 
 	bool startSSHD(char const *known_hosts_file,char const *private_client_key_file,char const *preferred_shells,char const *slot_name,char const *ssh_keygen_args,ReliSock &sock,int timeout,char const *sec_session_id,MyString &remote_user,MyString &error_msg,bool &retry_is_sensible);
 
+	bool peek(bool transfer_stdout, ssize_t &stdout_offset, bool transfer_stderr, ssize_t &stderr_offset, const std::vector<std::string> &filenames, std::vector<ssize_t> &offsets, size_t max_bytes, bool &retry_sensible, PeekGetFD &next, std::string &, unsigned, const std::string &, DCTransferQueue *xfer_q);
+
  private:
 	bool is_initialized;
 
@@ -104,7 +112,7 @@ public:
 	MessageClosureEnum messageSent( DCMessenger *messenger, Sock *sock );
 
 private:
-	MyString m_hold_reason;
+	std::string m_hold_reason;
 	int m_hold_code;
 	int m_hold_subcode;
 	bool m_soft;

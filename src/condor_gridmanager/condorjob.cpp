@@ -111,9 +111,6 @@ void CondorJobReconfig()
 {
 	int tmp_int;
 
-	tmp_int = param_integer( "CONDOR_JOB_POLL_INTERVAL", 5 * 60 );
-	CondorResource::setPollInterval( tmp_int );
-
 	tmp_int = param_integer( "GRIDMANAGER_GAHP_CALL_TIMEOUT", 8 * 60 * 60 );
 	tmp_int = param_integer( "GRIDMANAGER_GAHP_CALL_TIMEOUT_CONDOR", tmp_int );
 	CondorJob::setGahpCallTimeout( tmp_int );
@@ -221,7 +218,7 @@ CondorJob::CondorJob( ClassAd *classad )
 
 		token = GetNextToken( " ", false );
 		if ( !token || strcasecmp( token, "condor" ) ) {
-			sprintf( error_string, "%s not of type condor",
+			formatstr( error_string, "%s not of type condor",
 								  ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
@@ -230,7 +227,7 @@ CondorJob::CondorJob( ClassAd *classad )
 		if ( token && *token ) {
 			remoteScheddName = strdup( token );
 		} else {
-			sprintf( error_string, "%s missing schedd name",
+			formatstr( error_string, "%s missing schedd name",
 								  ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
@@ -239,13 +236,13 @@ CondorJob::CondorJob( ClassAd *classad )
 		if ( token && *token ) {
 			remotePoolName = strdup( token );
 		} else {
-			sprintf( error_string, "%s missing pool name",
+			formatstr( error_string, "%s missing pool name",
 								  ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
 
 	} else {
-		sprintf( error_string, "%s is not set in the job ad",
+		formatstr( error_string, "%s is not set in the job ad",
 							  ATTR_GRID_RESOURCE );
 		goto error_exit;
 	}
@@ -268,7 +265,7 @@ CondorJob::CondorJob( ClassAd *classad )
 		}
 		submitterId = strdup( buff );
 	} else {
-		sprintf( error_string, "%s is not set in the job ad",
+		formatstr( error_string, "%s is not set in the job ad",
 							  ATTR_GLOBAL_JOB_ID );
 		goto error_exit;
 	}
@@ -276,7 +273,7 @@ CondorJob::CondorJob( ClassAd *classad )
 	myResource = CondorResource::FindOrCreateResource( remoteScheddName,
 													   remotePoolName,
 													   jobProxy );
-	myResource->RegisterJob( this, submitterId );
+	myResource->CondorRegisterJob( this, submitterId );
 	if ( job_already_submitted ) {
 		myResource->AlreadySubmitted( this );
 	}
@@ -450,7 +447,7 @@ void CondorJob::doEvaluateState()
 			int tmp_int = 0;
 			ClassAd **status_ads = NULL;
 			std::string constraint;
-			sprintf( constraint, "%s==%d&&%s==%d", ATTR_CLUSTER_ID,
+			formatstr( constraint, "%s==%d&&%s==%d", ATTR_CLUSTER_ID,
 								remoteJobId.cluster, ATTR_PROC_ID,
 								remoteJobId.proc );
 			rc = gahp->condor_job_status_constrained( remoteScheddName,
@@ -875,7 +872,7 @@ void CondorJob::doEvaluateState()
 			int num_ads;
 			ClassAd **status_ads = NULL;
 			std::string constraint;
-			sprintf( constraint, "%s==%d&&%s==%d", ATTR_CLUSTER_ID,
+			formatstr( constraint, "%s==%d&&%s==%d", ATTR_CLUSTER_ID,
 								remoteJobId.cluster, ATTR_PROC_ID,
 								remoteJobId.proc );
 			rc = gahp->condor_job_status_constrained( remoteScheddName,
@@ -1077,7 +1074,7 @@ void CondorJob::doEvaluateState()
 			// TODO: Let our action here be dictated by the user preference
 			// expressed in the job ad.
 			if( remoteJobId.cluster != 0 ) {
-				sprintf( errorString, "Internal error: Attempting to clear "
+				formatstr( errorString, "Internal error: Attempting to clear "
 									 "request, but remoteJobId.cluster(%d) "
 									 "!= 0, condorState is %s (%d)",
 									 remoteJobId.cluster,
@@ -1226,7 +1223,7 @@ void CondorJob::SetRemoteJobId( const char *job_id )
 			return;
 		}
 
-		sprintf( full_job_id, "condor %s %s %s", remoteScheddName,
+		formatstr( full_job_id, "condor %s %s %s", remoteScheddName,
 							 remotePoolName, job_id );
 	} else {
 		remoteJobId.cluster = 0;
@@ -1373,7 +1370,8 @@ void CondorJob::ProcessRemoteAd( ClassAd *remote_ad )
 		new_expr = remote_ad->LookupExpr( attrs_to_copy[index] );
 
 		if ( new_expr != NULL && ( old_expr == NULL || !(*old_expr == *new_expr) ) ) {
-			jobAd->Insert( attrs_to_copy[index], new_expr->Copy() );
+			ExprTree * pTree = new_expr->Copy();
+			jobAd->Insert( attrs_to_copy[index], pTree, false );
 		}
 	}
 
@@ -1421,6 +1419,7 @@ ClassAd *CondorJob::buildSubmitAd()
 	submit_ad->Delete( ATTR_FILE_SYSTEM_DOMAIN );
 	submit_ad->Delete( ATTR_ULOG_FILE );
 	submit_ad->Delete( ATTR_ULOG_USE_XML );
+	submit_ad->Delete( ATTR_DAGMAN_WORKFLOW_LOG );
 	submit_ad->Delete( ATTR_NOTIFY_USER );
 	submit_ad->Delete( ATTR_ON_EXIT_HOLD_CHECK );
 	submit_ad->Delete( ATTR_ON_EXIT_REMOVE_CHECK );
@@ -1492,7 +1491,7 @@ ClassAd *CondorJob::buildSubmitAd()
 
 		char const *working_name = StdoutRemapName;
 		if ( !output_remaps.empty() ) output_remaps += ";";
-		sprintf_cat( output_remaps, "%s=%s", working_name, filename.c_str() );
+		formatstr_cat( output_remaps, "%s=%s", working_name, filename.c_str() );
 		submit_ad->Assign( ATTR_JOB_OUTPUT, working_name );
 	}
 
@@ -1502,7 +1501,7 @@ ClassAd *CondorJob::buildSubmitAd()
 
 		char const *working_name = StderrRemapName;
 		if ( !output_remaps.empty() ) output_remaps += ";";
-		sprintf_cat( output_remaps, "%s=%s", working_name, filename.c_str() );
+		formatstr_cat( output_remaps, "%s=%s", working_name, filename.c_str() );
 		submit_ad->Assign( ATTR_JOB_ERROR, working_name );
 	}
 
@@ -1511,21 +1510,21 @@ ClassAd *CondorJob::buildSubmitAd()
 						   output_remaps.c_str() );
 	}
 
-	sprintf( expr, "%s = %s == %d", ATTR_JOB_LEAVE_IN_QUEUE, ATTR_JOB_STATUS,
+	formatstr( expr, "%s = %s == %d", ATTR_JOB_LEAVE_IN_QUEUE, ATTR_JOB_STATUS,
 				  COMPLETED );
 
 	if ( jobAd->LookupInteger( ATTR_JOB_LEASE_EXPIRATION, tmp_int ) ) {
 		submit_ad->Assign( ATTR_TIMER_REMOVE_CHECK, tmp_int );
-		sprintf_cat( expr, " && ( time() < %s )", ATTR_TIMER_REMOVE_CHECK );
+		formatstr_cat( expr, " && ( time() < %s )", ATTR_TIMER_REMOVE_CHECK );
 	}
 
 	submit_ad->Insert( expr.c_str() );
 
-	sprintf( expr, "%s = Undefined", ATTR_OWNER );
+	formatstr( expr, "%s = Undefined", ATTR_OWNER );
 	submit_ad->Insert( expr.c_str() );
 
 	const int STAGE_IN_TIME_LIMIT  = 60 * 60 * 8; // 8 hours in seconds.
-	sprintf( expr, "%s = (%s > 0) =!= True && time() > %s + %d",
+	formatstr( expr, "%s = (%s > 0) =!= True && time() > %s + %d",
 				  ATTR_PERIODIC_REMOVE_CHECK, ATTR_STAGE_IN_FINISH,
 				  ATTR_Q_DATE, STAGE_IN_TIME_LIMIT );
 	submit_ad->Insert( expr.c_str() );
@@ -1601,7 +1600,8 @@ ClassAd *CondorJob::buildSubmitAd()
 				}
 			}
 
-			submit_ad->Insert( attr_name, next_expr->Copy() );
+			ExprTree * pTree = next_expr->Copy();
+			submit_ad->Insert( attr_name, pTree );
 		}
 	}
 

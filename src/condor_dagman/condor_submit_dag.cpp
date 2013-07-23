@@ -70,15 +70,12 @@ int submitDag( SubmitDagShallowOptions &shallowOpts );
 //---------------------------------------------------------------------------
 int main(int argc, char *argv[])
 {
-	param_functions *p_funcs = NULL;
 	printf("\n");
 
 		// Set up the dprintf stuff to write to stderr, so that Condor
 		// libraries which use it will write to the right place...
-	Termlog = true;
-	p_funcs = get_param_functions();
-	dprintf_config("condor_submit_dag", p_funcs); 
-	DebugFlags = D_ALWAYS | D_NOHEADER;
+	dprintf_set_tool_debug("TOOL", 0);
+	set_debug_flags(NULL, D_ALWAYS | D_NOHEADER);
 	config();
 
 		// Initialize our Distribution object -- condor vs. hawkeye, etc.
@@ -88,6 +85,17 @@ int main(int argc, char *argv[])
 		// structures.
 	SubmitDagDeepOptions deepOpts;
 	SubmitDagShallowOptions shallowOpts;
+
+		// We're setting strScheddDaemonAdFile and strScheddAddressFile
+		// here so that the classad updating feature (see gittrac #1782)
+		// works properly.  The problem is that the schedd daemon ad and
+		// address files are normally defined relative to the $LOG value.
+		// Because we specify a different log directory on the condor_dagman
+		// command line, if we don't set the values here, condor_dagman
+		// won't be able to find those files when it tries to communicate
+		/// with the schedd.  wenger 2013-03-11
+	shallowOpts.strScheddDaemonAdFile = param( "SCHEDD_DAEMON_AD_FILE" );
+	shallowOpts.strScheddAddressFile = param( "SCHEDD_ADDRESS_FILE" );
 	parseCommandLine(deepOpts, shallowOpts, argc, argv);
 
 	int tmpResult;
@@ -443,14 +451,14 @@ void ensureOutputFilesExist(const SubmitDagDeepOptions &deepOpts,
 	}
 
 		// Get rid of the halt file (if one exists).
-	unlink( HaltFileName( shallowOpts.primaryDagFile ).Value() );
+	tolerant_unlink( HaltFileName( shallowOpts.primaryDagFile ).Value() );
 
 	if (deepOpts.bForce)
 	{
-		unlink(shallowOpts.strSubFile.Value());
-		unlink(shallowOpts.strSchedLog.Value());
-		unlink(shallowOpts.strLibOut.Value());
-		unlink(shallowOpts.strLibErr.Value());
+		tolerant_unlink(shallowOpts.strSubFile.Value());
+		tolerant_unlink(shallowOpts.strSchedLog.Value());
+		tolerant_unlink(shallowOpts.strLibOut.Value());
+		tolerant_unlink(shallowOpts.strLibErr.Value());
 		RenameRescueDagsAfter(shallowOpts.primaryDagFile.Value(),
 					shallowOpts.dagFiles.number() > 1, 0, maxRescueDagNum);
 	}
@@ -721,6 +729,9 @@ void writeSubmitFile(/* const */ SubmitDagDeepOptions &deepOpts,
 	args.AppendArg(deepOpts.autoRescue);
 	args.AppendArg("-DoRescueFrom");
 	args.AppendArg(deepOpts.doRescueFrom);
+	if(!deepOpts.always_use_node_log) {
+		args.AppendArg("-dont_use_default_node_log");
+	}
 
 	shallowOpts.dagFiles.rewind();
 	while ( (dagFile = shallowOpts.dagFiles.next()) != NULL ) {
@@ -765,6 +776,14 @@ void writeSubmitFile(/* const */ SubmitDagDeepOptions &deepOpts,
 	if(deepOpts.useDagDir)
 	{
 		args.AppendArg("-UseDagDir");
+	}
+	if(deepOpts.suppress_notification)
+	{
+		args.AppendArg("-Suppress_notification");
+	}
+	else
+	{
+		args.AppendArg("-Dont_Suppress_notification");
 	}
 
 	args.AppendArg("-CsdVersion");
@@ -1103,6 +1122,18 @@ parseCommandLine(SubmitDagDeepOptions &deepOpts,
 			{
 				shallowOpts.bPostRun = false;
 			}
+			else if ( (strArg.find("-dont_use_default_node_log") != -1) )
+			{
+				deepOpts.always_use_node_log = false;
+			}
+			else if ( (strArg.find("-suppress_notification") != -1) )
+			{
+				deepOpts.suppress_notification = true;
+			}
+			else if ( (strArg.find("-dont_suppress_notification") != -1) )
+			{
+				deepOpts.suppress_notification = false;
+			}
 			else if ( parsePreservedArgs( strArg, iArg, argc, argv,
 						shallowOpts) )
 			{
@@ -1242,5 +1273,8 @@ int printUsage(int iExitCode)
 	printf("    -DumpRescue         (DAGMan dumps rescue DAG and exits)\n");
 	printf("    -valgrind           (create submit file to run valgrind on DAGMan)\n");
 	printf("    -priority <priority> (jobs will run with this priority by default)\n");
+	printf("    -dont_use_default_node_log (Restore pre-7.9.0 behavior of using UserLog only)\n");
+	printf("    -suppress_notification (Set \"notification = never\" in all jobs submitted by this DAGMan)\n");
+	printf("    -dont_suppress_notification (Allow jobs to specify notification)\n");
 	exit(iExitCode);
 }

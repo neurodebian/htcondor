@@ -20,8 +20,12 @@
 
 #include "condor_common.h"
 #include "startd.h"
+#include "my_popen.h"
 #include <math.h>
 #include "filesystem_remap.h"
+
+#include <set>
+#include <algorithm>
 
 #ifdef WIN32
 #include "winreg.windows.h"
@@ -83,10 +87,10 @@ MachAttributes::MachAttributes()
 
 	dprintf( D_FULLDEBUG, "Memory: Detected %d megs RAM\n", m_phys_mem );
 
-		// identification of the checkpointing platform signature
-	m_ckptpltfrm = strdup(sysapi_ckptpltfrm());
+	// identification of the checkpointing platform signature
+	m_ckptpltfrm = strdup( sysapi_ckptpltfrm() );
 
-        // temporary attributes for raw utsname info
+	// temporary attributes for raw utsname info
 	m_utsname_sysname = NULL;
 	m_utsname_nodename = NULL;
 	m_utsname_release = NULL;
@@ -261,6 +265,8 @@ MachAttributes::init_user_settings()
 
 	} // end while(m_user_specified.next());
 
+    
+
 #ifdef WIN32
     // build and save off the string of .NET versions.
     //
@@ -412,11 +418,12 @@ MachAttributes::compute( amask_t how_much )
 
 		m_idle_interval = param_integer( "IDLE_INTERVAL", -1 );
 
-			// checkpoint platform signature
+		// checkpoint platform signature
 		if (m_ckptpltfrm) {
 			free(m_ckptpltfrm);
 		}
-		m_ckptpltfrm = strdup(sysapi_ckptpltfrm());
+
+		m_ckptpltfrm = strdup( sysapi_ckptpltfrm() );
 
 		pair_strings_vector root_dirs = root_dir_list();
 		std::stringstream result;
@@ -508,6 +515,138 @@ MachAttributes::compute( amask_t how_much )
 
 
 }
+
+
+void MachAttributes::init_machine_resources() {
+    // defines the space of local machine resources, and their quantity
+    m_machres_map.clear();
+
+    // this may be filled from resource inventory scripts
+    m_machres_attr.Clear();
+
+    // these are reserved for standard/fixed resources
+    std::set<string> fixedRes;
+    fixedRes.insert("cpu");
+    fixedRes.insert("cpus");
+    fixedRes.insert("disk");
+    fixedRes.insert("swap");
+    fixedRes.insert("mem");
+    fixedRes.insert("memory");
+    fixedRes.insert("ram");
+
+    // get the list of defined local resource names:
+    char* ptmp = param("MACHINE_RESOURCE_NAMES");
+    string resnames;
+    if (NULL != ptmp) {
+        // if admin defined MACHINE_RESOURCE_NAMES, then use this list
+        // as the source of expected custom machine resources
+        resnames = ptmp;
+        free(ptmp);
+    } else {
+        // otherwise, build the list of custom machine resources from
+        // all occurrences of MACHINE_RESOURCE_<resname>
+        std::set<string> resset;
+        Regex re;
+        int err = 0;
+        const char* pszMsg = 0;
+        const string prefix = "MACHINE_RESOURCE_";
+        const string invprefix = "INVENTORY_";
+        const string restr = prefix + "(.+)";
+        ASSERT(re.compile(restr.c_str(), &pszMsg, &err, PCRE_CASELESS));
+	std::vector<std::string> resdef;
+        const int n = param_names_matching(re, resdef);
+        for (int j = 0;  j < n;  ++j) {
+            string rname = resdef[j].substr(prefix.length());
+            string testinv = rname.substr(0, invprefix.length());
+            if (0 == strcasecmp(testinv.c_str(), invprefix.c_str())) {
+                // if something was defined via MACHINE_RESOURCE_INVENTORY_<rname>, strip "INVENTORY_"
+                rname = rname.substr(invprefix.length());
+            }
+            std::transform(rname.begin(), rname.end(), rname.begin(), ::tolower);
+            resset.insert(rname);
+        }
+        for (std::set<string>::iterator j(resset.begin());  j != resset.end();  ++j) {
+            resnames += " ";
+            resnames += *j;
+        }
+    }
+
+    // scan the list of local resources, to obtain their quantity and associated attributes (if any)
+    StringList reslist(resnames.c_str());
+    reslist.rewind();
+    while (const char* rnp = reslist.next()) {
+        string rname(rnp);
+        std::transform(rname.begin(), rname.end(), rname.begin(), ::tolower);
+        if (fixedRes.count(rname) > 0) {
+            EXCEPT("pre-defined resource name '%s' is reserved", rname.c_str());
+        }
+
+        // If MACHINE_RESOURCE_<rname> is present, use that and move on:
+        string pname;
+        formatstr(pname, "MACHINE_RESOURCE_%s", rname.c_str());
+        char* machresp = param(pname.c_str());
+        if (machresp) {
+            int v = param_integer(pname.c_str(), 0, 0, INT_MAX);
+            m_machres_map[rname] = v;
+            free(machresp);
+            continue;
+        }
+
+        // current definition of REMIND macro is not working with gcc
+        #pragma message("MACHINE_RESOURCE_INVENTORY_<rname> is deprecated, and will be removed when a solution using '|' in config files is fleshed out")
+        // if we didn't find MACHINE_RESOURCE_<rname>, then try MACHINE_RESOURCE_INVENTORY_<rname>
+        formatstr(pname, "MACHINE_RESOURCE_INVENTORY_%s", rname.c_str());
+        char* invscriptp = param(pname.c_str());
+        if (NULL == invscriptp) {
+            EXCEPT("Missing configuration for local machine resource %s", rname.c_str());
+        }
+
+        // if there is an inventory script, then attempt to execute it and use its output to
+        // identify the local resource quantity, and any associated attributes:
+        string invscript = invscriptp;
+        free(invscriptp);
+
+        ArgList invcmd;
+        StringList invcmdal(invscript.c_str());
+        invcmdal.rewind();
+        while (char* invarg = invcmdal.next()) {
+            invcmd.AppendArg(invarg);
+        }
+        FILE* fp = my_popen(invcmd, "r", FALSE);
+        if (NULL == fp) {
+            EXCEPT("Failed to execute local resource inventory script \"%s\"\n", invscript.c_str());
+        }
+
+        ClassAd invad;
+        char invline[1000];
+        while (fgets(invline, sizeof(invline), fp)) {
+            if (!invad.Insert(invline)) {
+                dprintf(D_ALWAYS, "Failed to insert \"%s\" into machine resource attributes: ignoring\n", invline);
+            }
+        }
+        my_pclose(fp);
+
+        // require the detected machine resource to be present as an attribute
+        string ccname(rname.c_str());
+        *(ccname.begin()) = toupper(*(ccname.begin()));
+        string detname;
+        formatstr(detname, "%s%s", ATTR_DETECTED_PREFIX, ccname.c_str());
+        int v = 0;
+        if (!invad.LookupInteger(detname.c_str(), v)) {
+            EXCEPT("Missing required attribute \"%s = <n>\" from output of %s\n", detname.c_str(),  invscript.c_str());
+        }
+
+        // success
+        m_machres_map[rname] = v;
+        invad.Delete(rname.c_str());
+        m_machres_attr.Update(invad);
+    }
+
+    for (slotres_map_t::iterator j(m_machres_map.begin());  j != m_machres_map.end();  ++j) {
+        dprintf(D_ALWAYS, "Local machine resource %s = %d\n", j->first.c_str(), int(j->second));
+    }
+}
+
 
 void
 MachAttributes::final_idle_dprintf()
@@ -682,6 +821,21 @@ MachAttributes::publish( ClassAd* cp, amask_t how_much)
 			cp->Assign(ATTR_LOCAL_CREDD, m_local_credd);
 		}
 #endif
+
+        string machine_resources = "cpus memory disk swap";
+        // publish any local resources
+        for (slotres_map_t::iterator j(m_machres_map.begin());  j != m_machres_map.end();  ++j) {
+            string rname(j->first.c_str());
+            *(rname.begin()) = toupper(*(rname.begin()));
+            string attr;
+            formatstr(attr, "%s%s", ATTR_DETECTED_PREFIX, rname.c_str());
+            cp->Assign(attr.c_str(), int(j->second));
+            formatstr(attr, "%s%s", ATTR_TOTAL_PREFIX, rname.c_str());
+            cp->Assign(attr.c_str(), int(j->second));
+            machine_resources += " ";
+            machine_resources += j->first;
+        }
+        cp->Assign(ATTR_MACHINE_RESOURCES, machine_resources.c_str());
 	}
 
 		// We don't want this inserted into the public ad automatically
@@ -717,6 +871,26 @@ MachAttributes::publish( ClassAd* cp, amask_t how_much)
 	// Advertise chroot information
 	if ( m_named_chroot.size() > 0 ) {
 		cp->Assign( "NamedChroot", m_named_chroot.c_str() );
+	}
+
+#ifdef WIN32
+// window's strtok_s is the 'safe' version of strtok, it's not identical to linx's strtok_r, but it's close enough.
+#define strtok_r strtok_s
+#endif
+
+	// Advertise processor flags.
+	const char * pflags = sysapi_processor_flags();
+	if (pflags) {
+		char * savePointer = NULL;
+		char * processor_flags = strdup( pflags );
+		char * flag = strtok_r( processor_flags, " ", & savePointer );
+		std::string attributeName;
+		while( flag != NULL ) {
+			formatstr( attributeName, "has_%s", flag );
+			cp->Assign( attributeName.c_str(), true );
+			flag = strtok_r( NULL, " ", & savePointer );
+		}
+		free( processor_flags );
 	}
 }
 
@@ -838,6 +1012,7 @@ CpuAttributes::CpuAttributes( MachAttributes* map_arg,
 							  int num_phys_mem,
 							  float virt_mem_fraction,
 							  float disk_fraction,
+                              const slotres_map_t& slotres_map,
 							  MyString &execute_dir,
 							  MyString &execute_partition_id )
 {
@@ -847,6 +1022,8 @@ CpuAttributes::CpuAttributes( MachAttributes* map_arg,
 	c_slot_mem = c_phys_mem = num_phys_mem;
 	c_virt_mem_fraction = virt_mem_fraction;
 	c_disk_fraction = disk_fraction;
+    c_slotres_map = slotres_map;
+    c_slottot_map = slotres_map;
 	c_execute_dir = execute_dir;
 	c_execute_partition_id = execute_partition_id;
 	c_idle = -1;
@@ -908,7 +1085,16 @@ CpuAttributes::publish( ClassAd* cp, amask_t how_much )
 
 		cp->Assign( ATTR_TOTAL_SLOT_CPUS, c_num_slot_cpus );
 		
-		
+        // publish local resource quantities for this slot
+        for (slotres_map_t::iterator j(c_slotres_map.begin());  j != c_slotres_map.end();  ++j) {
+            string rname(j->first.c_str());
+            *(rname.begin()) = toupper(*(rname.begin()));
+            string attr;
+            formatstr(attr, "%s%s", "", rname.c_str());
+            cp->Assign(attr.c_str(), int(j->second));
+            formatstr(attr, "%s%s", ATTR_TOTAL_SLOT_PREFIX, rname.c_str());
+            cp->Assign(attr.c_str(), int(c_slottot_map[j->first]));
+        }
 	}
 }
 
@@ -963,14 +1149,14 @@ CpuAttributes::display( amask_t how_much )
 				 "CondorLoad:", c_condor_load,
 				 "OwnerLoad:", c_owner_load );
 	} else {
-		if( DebugFlags & D_LOAD ) {
+		if( IsDebugLevel( D_LOAD ) ) {
 			dprintf( D_FULLDEBUG, 
 					 "%s %.2f  %s %.2f  %s %.2f\n",  
 					 "SystemLoad:", c_condor_load + c_owner_load,
 					 "CondorLoad:", c_condor_load,
 					 "OwnerLoad:", c_owner_load );
 		}
-		if( DebugFlags & D_KEYBOARD ) {
+		if( IsDebugLevel( D_KEYBOARD ) ) {
 			dprintf( D_FULLDEBUG, 
 					 "Idle time: %s %-8d %s %d\n",  
 					 "Keyboard:", (int)c_idle, 
@@ -984,7 +1170,16 @@ void
 CpuAttributes::show_totals( int dflag )
 {
 	::dprintf( dflag | D_NOHEADER, 
+			 "slot type %d: " , c_type);
+
+	
+	if( c_num_cpus == AUTO_CPU ) {
+		::dprintf( dflag | D_NOHEADER, 
+			 "Cpus: auto");
+	} else {
+		::dprintf( dflag | D_NOHEADER, 
 			 "Cpus: %d", c_num_cpus);
+	}
 
 	if( c_phys_mem == AUTO_MEM ) {
 		::dprintf( dflag | D_NOHEADER, 
@@ -1008,18 +1203,31 @@ CpuAttributes::show_totals( int dflag )
 
 	if( IS_AUTO_SHARE(c_disk_fraction) ) {
 		::dprintf( dflag | D_NOHEADER, 
-				   ", Disk: auto\n" );
+				   ", Disk: auto" );
 	}
 	else {
 		::dprintf( dflag | D_NOHEADER, 
-				   ", Disk: %.2f%%\n", 100*c_disk_fraction );
+				   ", Disk: %.2f%%", 100*c_disk_fraction );
 	}
+
+    for (slotres_map_t::iterator j(c_slotres_map.begin());  j != c_slotres_map.end();  ++j) {
+        if (IS_AUTO_SHARE(j->second)) {
+            ::dprintf(dflag | D_NOHEADER, ", %s: auto", j->first.c_str()); 
+        } else {
+            ::dprintf(dflag | D_NOHEADER, ", %s: %d", j->first.c_str(), int(j->second));
+        }
+    }
+
+    ::dprintf(dflag | D_NOHEADER, "\n");
 }
 
 
 void
 CpuAttributes::dprintf( int flags, const char* fmt, ... )
 {
+    if (NULL == rip) {
+        EXCEPT("CpuAttributes::dprintf() called with NULL resource pointer");
+    }
 	va_list args;
 	va_start( args, fmt );
 	rip->dprintf_va( flags, fmt, args );
@@ -1041,6 +1249,10 @@ CpuAttributes::operator+=( CpuAttributes& rhs )
 		c_disk_fraction += rhs.c_disk_fraction;
 	}
 
+    for (slotres_map_t::iterator j(c_slotres_map.begin());  j != c_slotres_map.end();  ++j) {
+        j->second += rhs.c_slotres_map[j->first];
+    }
+
 	compute( A_TIMEOUT | A_UPDATE ); // Re-compute
 
 	return *this;
@@ -1060,6 +1272,10 @@ CpuAttributes::operator-=( CpuAttributes& rhs )
 		c_disk_fraction -= rhs.c_disk_fraction;
 	}
 
+    for (slotres_map_t::iterator j(c_slotres_map.begin());  j != c_slotres_map.end();  ++j) {
+        j->second -= rhs.c_slotres_map[j->first];
+    }
+
 	compute( A_TIMEOUT | A_UPDATE ); // Re-compute
 
 	return *this;
@@ -1069,10 +1285,15 @@ AvailAttributes::AvailAttributes( MachAttributes* map ):
 	m_execute_partitions(500,MyStringHash,updateDuplicateKeys)
 {
 	a_num_cpus = map->num_cpus();
+	a_num_cpus_auto_count = 0;
 	a_phys_mem = map->phys_mem();
 	a_phys_mem_auto_count = 0;
 	a_virt_mem_fraction = 1.0;
 	a_virt_mem_auto_count = 0;
+    a_slotres_map = map->machres();
+    for (slotres_map_t::iterator j(a_slotres_map.begin());  j != a_slotres_map.end();  ++j) {
+        a_autocnt_map[j->first] = 0;
+    }
 }
 
 AvailDiskPartition &
@@ -1112,27 +1333,46 @@ AvailAttributes::decrement( CpuAttributes* cap )
 		new_disk -= cap->c_disk_fraction;
 	}
 
-	if( new_cpus < floor || new_phys_mem < floor || 
-		new_virt_mem < floor || new_disk < floor ) {
-		return false;
-	} else {
-		a_num_cpus = new_cpus;
+    bool resfloor = false;
+    slotres_map_t new_res(a_slotres_map);
+    for (slotres_map_t::iterator j(new_res.begin());  j != new_res.end();  ++j) {
+        if (!IS_AUTO_SHARE(cap->c_slotres_map[j->first])) {
+            j->second -= cap->c_slotres_map[j->first];
+        }
+        if (j->second < floor) { 
+            resfloor = true;
+        }
+    }
 
-		a_phys_mem = new_phys_mem;
-		if( cap->c_phys_mem == AUTO_MEM ) {
-			a_phys_mem_auto_count += 1;
-		}
+	if (resfloor || new_cpus < floor || new_phys_mem < floor || 
+		new_virt_mem < floor || new_disk < floor) {
+	    return false;
+    }
 
-		a_virt_mem_fraction = new_virt_mem;
-		if( IS_AUTO_SHARE(cap->c_virt_mem_fraction) ) {
-			a_virt_mem_auto_count += 1;
-		}
+    a_num_cpus = new_cpus;
 
-		partition.m_disk_fraction = new_disk;
-		if( IS_AUTO_SHARE(cap->c_disk_fraction) ) {
-			partition.m_auto_count += 1;
-		}
-	}
+    a_phys_mem = new_phys_mem;
+    if( cap->c_phys_mem == AUTO_MEM ) {
+        a_phys_mem_auto_count += 1;
+    }
+
+    a_virt_mem_fraction = new_virt_mem;
+    if( IS_AUTO_SHARE(cap->c_virt_mem_fraction) ) {
+        a_virt_mem_auto_count += 1;
+    }
+
+    partition.m_disk_fraction = new_disk;
+    if( IS_AUTO_SHARE(cap->c_disk_fraction) ) {
+        partition.m_auto_count += 1;
+    }
+
+    for (slotres_map_t::iterator j(a_slotres_map.begin());  j != a_slotres_map.end();  ++j) {
+        j->second = new_res[j->first];
+        if (IS_AUTO_SHARE(cap->c_slotres_map[j->first])) {
+            a_autocnt_map[j->first] += 1;
+        }
+    }
+
 	return true;
 }
 
@@ -1166,6 +1406,19 @@ AvailAttributes::computeAutoShares( CpuAttributes* cap )
 		}
 		cap->c_disk_fraction = new_value;
 	}
+
+    for (slotres_map_t::iterator j(a_slotres_map.begin());  j != a_slotres_map.end();  ++j) {
+        if (IS_AUTO_SHARE(cap->c_slotres_map[j->first])) {
+            // replace auto share vals with final values:
+            ASSERT(a_autocnt_map[j->first] > 0);
+            int new_value = int(j->second / a_autocnt_map[j->first]);
+            if (new_value <= 0) return false;
+            cap->c_slotres_map[j->first] = new_value;
+        }
+        // save off slot resource totals once we have final value:
+        cap->c_slottot_map[j->first] = cap->c_slotres_map[j->first];
+    }
+
 	return true;
 }
 
@@ -1175,7 +1428,11 @@ AvailAttributes::show_totals( int dflag, CpuAttributes *cap )
 {
 	AvailDiskPartition &partition = GetAvailDiskPartition( cap->c_execute_partition_id );
 	::dprintf( dflag | D_NOHEADER, 
-			 "Cpus: %d, Memory: %d, Swap: %.2f%%, Disk: %.2f%%\n",
-			 a_num_cpus, a_phys_mem, 100*a_virt_mem_fraction,
+			 "Slot #%d: Cpus: %d, Memory: %d, Swap: %.2f%%, Disk: %.2f%%",
+			 cap->c_type, a_num_cpus, a_phys_mem, 100*a_virt_mem_fraction,
 			 100*partition.m_disk_fraction );
+    for (slotres_map_t::iterator j(a_slotres_map.begin());  j != a_slotres_map.end();  ++j) {
+        ::dprintf(dflag | D_NOHEADER, ", %s: %d", j->first.c_str(), int(j->second));
+    }
+    ::dprintf(dflag | D_NOHEADER, "\n");
 }

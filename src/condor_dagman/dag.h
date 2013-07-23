@@ -267,7 +267,7 @@ class Dag {
 	/** Process a released event for a job.
 		@param The job corresponding to this event.
 	*/
-	void ProcessReleasedEvent(Job *job);
+	void ProcessReleasedEvent(Job *job, const ULogEvent *event);
 
     /** Get pointer to job with id jobID
         @param the handle of the job in the DAG
@@ -286,7 +286,7 @@ class Dag {
         @param condorID the CondorID of the job in the DAG
         @return address of Job object, or NULL if not found
     */
-    Job * FindNodeByEventID (int logsource, const CondorID condorID) const;
+    Job * FindNodeByEventID (int logsource, const CondorID condorID ) const;
 
     /** Ask whether a node name exists in the DAG
         @param nodeName the name of the node in the DAG
@@ -479,6 +479,7 @@ class Dag {
 
 	int PreScriptReaper( const char* nodeName, int status );
 	int PostScriptReaper( const char* nodeName, int status );
+	int PostScriptSubReaper( Job *job, int status );
 
 	void PrintReadyQ( debug_level_t level ) const;
 
@@ -726,6 +727,12 @@ class Dag {
 	*/
 	inline bool RunningFinalNode() { return _runningFinalNode; }
 
+	/** Determine whether the DAG is in recovery mode.
+		@return true iff the DAG is in recovery mode
+	*/
+	inline bool Recovery() const { return _recovery; }
+
+	inline void UseDefaultNodeLog(bool useit) { _use_default_node_log = useit; }
   private:
 
 	// If this DAG is a splice, then this is what the DIR was set to, it 
@@ -1160,6 +1167,12 @@ class Dag {
 
 		// The name of the halt file (we halt the DAG if that file exists).
 	MyString _haltFile;
+	
+		// Whether to use the default node log as *the* log
+		// for writing and reading events.  If false, use the user log
+		// This must be false if dagman is communicating with a pre-7.9.0
+		// schedd/shadow or submit.
+	bool _use_default_node_log;
 };
 
 #endif /* #ifndef DAG_H */

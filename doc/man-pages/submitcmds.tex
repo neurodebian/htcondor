@@ -34,9 +34,13 @@ argument must be the name of the class containing \Code{main}.
 There are two permissible formats for specifying arguments,
 identified as the old syntax and the new syntax.
 The old syntax supports white space characters within arguments
-only in special circumstances,
-hence the new syntax, 
-which supports uniform quoting of white space characters within arguments.
+only in special circumstances;
+when used, the command line arguments are represented in the
+job ClassAd attribute \Attr{Args}.
+The new syntax 
+supports uniform quoting of white space characters within arguments;
+when used, the command line arguments are represented in the
+job ClassAd attribute \Attr{Arguments}.
 
 \Bold{Old Syntax}
 
@@ -379,12 +383,12 @@ Owners of HTCondor jobs are notified by
 e-mail when certain events occur.
 If defined by \Arg{Always}, the owner will be notified
 whenever the job produces a checkpoint, as well as when the job completes.
-If defined by \Arg{Complete} (the default), the owner will
+If defined by \Arg{Complete}, the owner will
 be notified when the job terminates.
 If defined by \Arg{Error}, the owner will only be notified
 if the job terminates abnormally,
 or if the job is placed on hold because of a failure, and not by user request.
-If defined by \Arg{Never}, the owner will not receive e-mail,
+If defined by \Arg{Never} (the default), the owner will not receive e-mail,
 regardless to what happens to the job.
 The statistics included in the e-mail are documented in
 section~\ref{sec:job-completion} on
@@ -626,6 +630,17 @@ Characters may be appended to a numerical value to indicate units.
 \Expr{T} or \Expr{TB} indicates Tbytes.
 
 %%%%%%%%%%%%%%%%%%%
+%% request_<name>
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!request\_<name>}
+\label{man-condor-submit-request-name}
+\item[request\_<name> = $<$quantity$>$] 
+The required amount of the custom machine resource 
+identified by \Expr{<name>} that this job needs.
+The custom machine resource is defined in the machine's configuration.
+
+%%%%%%%%%%%%%%%%%%%
 %% requirements
 %%%%%%%%%%%%%%%%%%%
 
@@ -773,6 +788,45 @@ A single wild card character (\Expr{*}) may be used in each file name.
 The method of encryption utilized will be as agreed upon in security
 negotiation; if that negotiation failed, then the file transfer
 mechanism must also fail for files to be encrypted.
+
+%%%%%%%%%%%%%%%%%%%
+%% max_transfer_input_mb
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!max\_transfer\_input\_mb}
+\label{man-condor-submit-max-transfer-input-mb}
+\item[max\_transfer\_input\_mb = $<$ClassAd Integer Expression$>$] 
+This integer expression specifies the maximum allowed total size in
+Mbytes of the input files that are transferred for a job.  This
+expression does \emph{not} apply to grid universe, standard universe, or
+files transferred via file transfer plug-ins.  The expression may refer
+to attributes of the job.  The special value -1 indicates no limit.
+If not defined, the value set by configuration variable
+\Macro{MAX\_TRANSFER\_INPUT\_MB} is used.  
+If the observed size of all input files at submit time is
+larger than the limit, the job will be immediately placed on hold with
+a \Attr{HoldReasonCode} value of 32.
+If the job passes this initial test, but the size of
+the input files increases or the limit decreases so that the limit is
+violated, the job will be placed on hold at the time when the file
+transfer is attempted.
+
+\index{submit commands!max\_transfer\_output\_mb}
+\label{man-condor-submit-max-transfer-output-mb}
+\item[max\_transfer\_output\_mb = $<$ClassAd Integer Expression$>$] 
+This integer expression specifies the maximum allowed total size in
+Mbytes of the output files that are transferred for a job.  This
+expression does \emph{not} apply to grid universe, standard universe, or
+files transferred via file transfer plug-ins.  The expression may refer
+to attributes of the job.  The special value -1 indicates no limit.
+If not set, the value set by configuration variable
+\Macro{MAX\_TRANSFER\_OUTPUT\_MB} is used.  
+If the total size of the job's output files to be transferred
+is larger than the limit, the job will be placed on hold with
+a \Attr{HoldReasonCode} value of 33.
+The output will be transferred up to the point when the
+limit is hit, so some files may be fully transferred, some partially,
+and some not at all.
 
 %%%%%%%%%%%%%%%%%%%
 %% output_destination
@@ -1105,7 +1159,7 @@ Defaults to \Expr{False}.
 \item[keep\_claim\_idle = $<$integer$>$] 
 An integer number of seconds
 that a job requests the \Condor{schedd} to wait before releasing its
-claim after the job exits.
+claim after the job exits or after the job is removed.
 
 The process by which the 
 \Condor{schedd} claims a \Condor{startd} is somewhat time-consuming.
@@ -1681,6 +1735,19 @@ conditions that were present when the job checkpointed.
 \begin{description} 
 
 %%%%%%%%%%%%%%%%%%%
+%% batch_queue
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!batch\_queue}
+\label{condor-submit-batch-queue}
+\item[batch\_queue = $<$queuename$>$]
+Used for \SubmitCmd{pbs}, \SubmitCmd{lsf}, and \SubmitCmd{sge} 
+grid universe jobs.
+Specifies the name of the PBS/LSF/SGE job queue into which the job should
+be submitted.
+If not specified, the default queue is used.
+
+%%%%%%%%%%%%%%%%%%%
 %% cream_attributes
 %%%%%%%%%%%%%%%%%%%
 
@@ -1937,6 +2004,17 @@ specifies the path and file name containing the secret access key.
 For grid type \SubmitCmd{ec2} jobs, 
 defines the list of EC2 security groups which
 should be associated with the job.
+
+%%%%%%%%%%%%%%%%%%%
+%% ec2_spot_price
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!ec2\_spot\_price}
+\label{condor-submit-ec2-spot-price}
+\item[ec2\_spot\_price = $<$bid$>$]
+For grid type \SubmitCmd{ec2} jobs, 
+specifies the spot instance bid, which is the most that the job submitter
+is willing to pay per hour to run this job.
 
 %%%%%%%%%%%%%%%%%%%
 %% ec2_tag_names
@@ -2343,6 +2421,23 @@ For transferring files other than \File{stdout},
 see \SubmitCmd{transfer\_output\_files}.
 
 %%%%%%%%%%%%%%%%%%%
+%% use_x509userproxy
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!use\_x509userproxy}
+\label{condor-submit-use-x509userproxy}
+\item[use\_x509userproxy = $<$True \Bar\ False$>$]
+Set this command to \Expr{True} to indicate that the job requires an
+X.509 user proxy.
+If \SubmitCmd{x509userproxy} is set, then that file is used for the proxy.
+Otherwise, the proxy is looked for in the standard locations.
+If \SubmitCmd{x509userproxy} is set or if the job is a grid universe job
+of grid type 
+\SubmitCmd{gt2}, \SubmitCmd{gt5}, \SubmitCmd{cream}, or \SubmitCmd{nordugrid},
+then the value of \SubmitCmd{use\_x509userproxy} is forced to \Expr{True}.
+Defaults to \Expr{False}.
+
+%%%%%%%%%%%%%%%%%%%
 %% x509userproxy
 %%%%%%%%%%%%%%%%%%%
 
@@ -2357,7 +2452,7 @@ this value would allow HTCondor to access the proxy in a shared file system
 (for example, AFS).
 HTCondor will use the proxy specified in the submit description file first.
 If nothing is specified in the submit description file,
-it will use the environment variable X509\_USER\_CERT.
+it will use the environment variable X509\_USER\_PROXY.
 If that variable is not present,
 it will search in the default location.
 
@@ -2365,7 +2460,8 @@ it will search in the default location.
 the \SubmitCmd{universe} is \SubmitCmd{vanilla},
 or when the \SubmitCmd{universe} is \SubmitCmd{grid}
 and the type of grid system is one of \SubmitCmd{gt2},
-\SubmitCmd{gt5}, or \SubmitCmd{nordugrid}.
+\SubmitCmd{gt5}, \SubmitCmd{condor}, \SubmitCmd{cream}, 
+or \SubmitCmd{nordugrid}.
 Defining a value causes the proxy to be delegated to the execute machine.
 Further, VOMS attributes defined in the proxy will appear in
 the job ClassAd.
@@ -2659,6 +2755,34 @@ submission.
 \begin{description} 
 
 %%%%%%%%%%%%%%%%%%%
+%% accounting_group
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!accounting\_group}
+\label{condor-submit-accounting-group}
+\item[accounting\_group = $<$accounting-group-name$>$] 
+Causes jobs to negotiate under the given accounting group.  
+This value is advertised in the job ClassAd as \AdAttr{AcctGroup}.
+See section~\ref{sec:group-accounting} for more information about 
+accounting groups.
+
+%%%%%%%%%%%%%%%%%%%
+%% accounting_group_user
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!accounting\_group\_user}
+\label{condor-submit-accounting-group-user}
+\item[accounting\_group\_user = $<$accounting-group-user-name$>$] 
+Sets the user name associated with the accounting group name for 
+resource usage accounting purposes.  If not set, 
+defaults to the value of the job ClassAd attribute \AdAttr{Owner}.
+This value is
+advertised in the job ClassAd as \AdAttr{AcctGroupUser}.
+If an accounting group has not been set with the 
+\SubmitCmd{accounting\_group} command, 
+this command is ignored.
+
+%%%%%%%%%%%%%%%%%%%
 %% concurrency_limits
 %%%%%%%%%%%%%%%%%%%
 \index{submit commands!concurrency\_limits}
@@ -2776,6 +2900,17 @@ miss their deferral time to begin execution.
 See section~\ref{sec:JobDeferral} for further details and examples.
 
 %%%%%%%%%%%%%%%%%%%
+%% dagman_log
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!dagman\_log}
+\label{condor-submit-dagman-log}
+\item[dagman\_log = $<$pathname$>$] 
+DAGMan inserts this command to specify an event log that it watches to maintain
+the state of the DAG. If the \SubmitCmd{log} command is not specified in the
+submit file, DAGMan uses the \SubmitCmd{log} command to specify the event log.
+
+%%%%%%%%%%%%%%%%%%%
 %% deferral_prep_time
 %%%%%%%%%%%%%%%%%%%
 
@@ -2827,6 +2962,18 @@ The deferral window is used in conjunction with the
 miss their deferral time to begin execution.
 
 See section~\ref{sec:JobDeferral} for further details and examples.
+
+%%%%%%%%%%%%%%%%%%%
+%% description
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!description}
+\label{condor-submit-description}
+\item[description = $<$string$>$]
+A string that sets the value of the job ClassAd attribute
+\Attr{JobDescription}.
+When set, tools which display the executable such as \Condor{q}
+will instead use this string.
 
 %%%%%%%%%%%%%%%%%%%
 %% email_attributes
@@ -3259,6 +3406,7 @@ following \Arg{attribute} into the job ClassAd with the given
 \end{description} 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\index{Starter pre and post scripts}
 \emph{PRE AND POST SCRIPTS IMPLEMENTED WITH SPECIALLY-NAMED ATTRIBUTES}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{description} 
@@ -3269,11 +3417,11 @@ following \Arg{attribute} into the job ClassAd with the given
 
 \label{man-condor-submit-prescript}
 \index{submit commands!+PreCmd}
-\item[+PreCmd = $<$executable$>$]
+\item[+PreCmd = \texttt{"}$<$executable$>$\texttt{"}]
 A vanilla universe job may specify that a script is to be run 
 on the execute machine before the job, and this is called a prescript.
 Definition of this specifically-named attribute causes the script,
-identified by path and file name to be executed. 
+identified by path and file name, to be executed. 
 The prescript could prepare or initialize the job.
 Note that this definition of a prescript is different from the PRE script 
 described in DAGMan.
@@ -3283,16 +3431,40 @@ so it must be entered into the \SubmitCmd{transfer\_input\_files} list,
 when file transfer is enabled.
 
 %%%%%%%%%%%%%%%%%%%
+%% +PreArgs
+%%%%%%%%%%%%%%%%%%%
+\label{man-condor-submit-preargs}
+\index{submit commands!+PreArgs}
+\item[+PreArgs = \texttt{"}$<$argument\_list$>$\texttt{"}]
+Defines command line arguments for the prescript, 
+presuming the old syntax, as defined at ~\ref{man-condor-submit-arguments}.
+
+%%%%%%%%%%%%%%%%%%%
+%% +PreArguments
+%%%%%%%%%%%%%%%%%%%
+\label{man-condor-submit-prearguments}
+\index{submit commands!+PreArguments}
+\item[+PreArguments = \texttt{"}$<$argument\_list$>$\texttt{"}]
+Defines command line arguments for the prescript, 
+presuming the new syntax as defined at ~\ref{man-condor-submit-arguments}.
+An exception to the syntax is that double
+quotes must be escaped with a backslash instead of another double
+quote. 
+
+Note that if both +PreArgs and +PreArguments are specified, the
++PreArguments value is used and the +PreArgs value is ignored.
+
+%%%%%%%%%%%%%%%%%%%
 %% +PostCmd
 %%%%%%%%%%%%%%%%%%%
 
 \label{man-condor-submit-postscript}
 \index{submit commands!+PostCmd}
-\item[+PostCmd = $<$executable$>$]
+\item[+PostCmd = \texttt{"}$<$executable$>$\texttt{"}]
 A vanilla universe job may specify that a script is to be run 
 on the execute machine after the job exits, and this is called a postscript.
 Definition of this specifically-named attribute causes the script,
-identified by path and file name to be executed. 
+identified by path and file name, to be executed. 
 The postscript is run if the job exits, but not if the job is evicted.
 Note that this definition of a postscript is different from the POST script 
 described in DAGMan.
@@ -3301,9 +3473,55 @@ as the main executable is,
 so it must be entered into the \SubmitCmd{transfer\_input\_files} list,
 when file transfer is enabled.
 
+%%%%%%%%%%%%%%%%%%%
+%% +PostArgs
+%%%%%%%%%%%%%%%%%%%
+\label{man-condor-submit-postargs}
+\index{submit commands!+PostArgs}
+\item[+PostArgs = \texttt{"}$<$argument\_list$>$\texttt{"}]
+Defines command line arguments for the postscript, 
+presuming the old syntax as defined at ~\ref{man-condor-submit-arguments}.
+
+%%%%%%%%%%%%%%%%%%%
+%% +PostArguments
+%%%%%%%%%%%%%%%%%%%
+\label{man-condor-submit-postarguments}
+\index{submit commands!+PostArguments}
+\item[+PostArguments = \texttt{"}$<$argument\_list$>$\texttt{"}]
+Defines command line arguments for the postscript, 
+presuming the new syntax as defined at
+(~\ref{man-condor-submit-arguments}.
+An exception to the syntax is that double
+quotes must be escaped with a backslash instead of another double
+quote mark.
+
+Note that if both +PostArgs and +PostArguments are specified, the
++PostArguments value is used and the +PostArgs value is ignored.
+
 \end{description} 
 
+If any of the prescript or postscript values are not enclosed
+in double quotes, they are silently ignored.
 
+Below is an example of the use of starter pre and post scripts:
+
+\begin{verbatim}
++PreCmd		= "my_pre"
++PreArgs	= "pre\"arg1 prea'rg2"
++PostCmd	= "my_post"
++PostArguments	= "post\"arg1 'post''ar g2'"
+\end{verbatim}
+
+For this example \Attr{PreArgs} generates a first argument of
+\verb@pre"a1"@ and a second argument of \verb@pre'a2@.
+\Attr{PostArguments} generates a first argument of
+\verb@post"a1@ and a second argument of \verb@post'a 2@.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\emph{MACROS AND COMMENTS}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\label{macro-in-submit-description-file}
 \index{macro!in submit description file}
 In addition to commands, the submit description file can contain macros
 and comments:
@@ -3316,9 +3534,7 @@ defined by lines in the form of
 \begin{verbatim} 
         <macro_name> = <string> 
 \end{verbatim} 
-Three pre-defined macros are supplied by the submit description file parser.
-The third of the pre-defined macros is only relevant to MPI applications
-under the parallel universe.
+Two pre-defined macros are supplied by the submit description file parser.
 The
 \MacroU{Cluster} macro supplies the value of the
 \index{ClassAd job attribute!ClusterId}
@@ -3334,12 +3550,42 @@ intended to aid in the specification of input/output files, arguments,
 etc., for clusters with lots of jobs, and/or could be used to supply an
 HTCondor process with its own cluster and process numbers on the command
 line.
-The 
-\MacroU{Node} macro is defined for MPI applications run
-as parallel universe jobs.
+
+The \MacroU{Node} macro is defined for parallel universe jobs,
+and is especially relevant for MPI applications.
 It is a unique value assigned for the duration of the job
-that essentially identifies the machine on which a program is
+that essentially identifies the machine (slot) on which a program is
 executing.
+Values assigned start at 0 and increase monotonically.
+The values are assigned as the parallel job is about to start.
+
+Recursive definition of macros is permitted.
+An example of a construction that works is the following: 
+\begin{verbatim}
+foo = bar
+foo =  snap $(foo)
+\end{verbatim}
+As a result, \Expr{foo = snap bar}.
+
+Note that both left- and right- recursion works, so 
+\begin{verbatim}
+foo = bar
+foo =  $(foo) snap
+\end{verbatim}
+has as its result \Expr{foo = bar snap}.
+
+The construction 
+\begin{verbatim}
+foo = $(foo) bar 
+\end{verbatim}
+by itself will \emph{not} work, as it does not have an initial base case.
+Mutually recursive constructions such as: 
+\begin{verbatim}
+B = bar 
+C = $(B)
+B = $(C) boo
+\end{verbatim}
+will \emph{not} work, and will fill memory with expansions.
 
 \index{\$!as a literal character in a submit description file}
 To use the dollar sign character (\verb@$@) as a literal,

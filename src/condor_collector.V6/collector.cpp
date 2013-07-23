@@ -323,7 +323,7 @@ int CollectorDaemon::receive_query_cedar(Service* /*s*/,
 	sock->timeout(1);
 
 	bool ep = CondorThreads::enable_parallel(true);
-	bool res = !cad.initFromStream(*sock) || !sock->end_of_message();
+	bool res = !getClassAd(sock, cad) || !sock->end_of_message();
 	CondorThreads::enable_parallel(ep);
     if( res )
     {
@@ -345,8 +345,10 @@ int CollectorDaemon::receive_query_cedar(Service* /*s*/,
 	//   Before 7.7.3, submitter ads for parallel universe
 	//   jobs had a MyType of "Scheduler".
 	if ( whichAds == SUBMITTOR_AD ) {
-		cad.SetTargetTypeName( SUBMITTER_ADTYPE );
+		SetTargetTypeName( cad, SUBMITTER_ADTYPE );
 	}
+
+	UtcTime begin(true);
 
 	// Perform the query
 	List<ClassAd> results;
@@ -362,31 +364,35 @@ int CollectorDaemon::receive_query_cedar(Service* /*s*/,
 		}
 	}
 
+	UtcTime end_write, end_query(true);
+
 	// send the results via cedar
 	sock->encode();
 	results.Rewind();
 	ClassAd *curr_ad = NULL;
 	int more = 1;
 	
-		// See if query ad asks for server-side projection
-	char *projection = NULL;
-	cad.LookupString(ATTR_PROJECTION, &projection);
-	SimpleList<MyString> projectionList;
 
-	::split_args(projection, &projectionList);
-	free(projection);
+		// See if query ad asks for server-side projection
+	string projection = "";
 
 	while ( (curr_ad=results.Next()) )
     {
 		StringList expanded_projection;
 		StringList *attr_whitelist=NULL;
 
+		projection = "";
+		cad.EvalString(ATTR_PROJECTION, curr_ad, projection);
+		SimpleList<MyString> projectionList;
+
+		::split_args(projection.c_str(), &projectionList);
+
 		if (projectionList.Number() > 0) {
 			computeProjection(curr_ad, &projectionList, expanded_projection);
 			attr_whitelist = &expanded_projection;
 		}
 		
-        if (!sock->code(more) || !curr_ad->put(*sock,attr_whitelist))
+        if (!sock->code(more) || !putClassAd(sock, *curr_ad, false, attr_whitelist))
         {
             dprintf (D_ALWAYS,
                     "Error sending query result to client -- aborting\n");
@@ -409,6 +415,18 @@ int CollectorDaemon::receive_query_cedar(Service* /*s*/,
 	}
 	return_status = 1;
 
+	end_write.getTime();
+
+	dprintf (D_ALWAYS,
+			 "Query info: matched=%d; skipped=%d; query_time=%f; send_time=%f; type=%s; requirements={%s}; peer=%s; projection={%s}\n",
+			 __numAds__,
+			 __failed__,
+			 end_query.difference(begin),
+			 end_write.difference(end_query),
+			 AdTypeToString(whichAds),
+			 ExprTreeToString(__filter__),
+			 sock->peer_description(),
+			 projection.c_str());
 
     // all done; let daemon core will clean up connection
   END:
@@ -536,7 +554,7 @@ int CollectorDaemon::receive_invalidation(Service* /*s*/,
 		// is ready to read.
 	sock->timeout(1);
 
-    if( !cad.initFromStream(*sock) || !sock->end_of_message() )
+    if( !getClassAd(sock, cad) || !sock->end_of_message() )
     {
         dprintf( D_ALWAYS,
 				 "Failed to receive invalidation on %s: aborting\n",
@@ -755,7 +773,7 @@ int CollectorDaemon::receive_update_expect_ack( Service* /*s*/,
 		// is ready to read.
 	socket->timeout(1);
 
-    if ( !updateAd->initFromStream ( *socket ) ) {
+    if ( !getClassAd ( socket, *updateAd ) ) {
 
         dprintf ( 
             D_ALWAYS,
@@ -907,13 +925,16 @@ int CollectorDaemon::query_scanFunc (ClassAd *cad)
 		}
 	}
 
-	EvalResult result;
-	if ( EvalExprTree( __filter__, cad, NULL, &result ) &&
-		 result.type == LX_INTEGER && result.i != 0 ) {
+	classad::Value result;
+	bool val;
+	if ( EvalExprTree( __filter__, cad, NULL, result ) &&
+		 result.IsBooleanValueEquiv(val) && val ) {
 		// Found a match 
         __numAds__++;
 		__ClassAdResultList__->Append(cad);
-    }
+    } else {
+		__failed__++;
+	}
 
     return 1;
 }
@@ -928,6 +949,7 @@ void CollectorDaemon::process_query_public (AdTypes whichAds,
 	// set up for hashtable scan
 	__query__ = query;
 	__numAds__ = 0;
+	__failed__ = 0;
 	__ClassAdResultList__ = results;
 	// An empty adType means don't check the MyType of the ads.
 	// This means either the command indicates we're only checking one
@@ -957,7 +979,7 @@ void CollectorDaemon::process_query_public (AdTypes whichAds,
 		checks_absent = machine_refs.contains_anycase( ATTR_ABSENT );
 		if (!checks_absent) {
 			MyString modified_filter;
-			modified_filter.sprintf("(%s) && (%s =!= True)",
+			modified_filter.formatstr("(%s) && (%s =!= True)",
 				ExprTreeToString(__filter__),ATTR_ABSENT);
 			query->AssignExpr(ATTR_REQUIREMENTS,modified_filter.Value());
 			__filter__ = query->LookupExpr(ATTR_REQUIREMENTS);
@@ -975,11 +997,27 @@ void CollectorDaemon::process_query_public (AdTypes whichAds,
 		dprintf (D_ALWAYS, "Error sending query response\n");
 	}
 
-
 	dprintf (D_ALWAYS, "(Sending %d ads in response to query)\n", __numAds__);
 }	
 
+//
+// Setting ATTR_LAST_HEARD_FROM to 0 causes the housekeeper to invalidate
+// the ad.  Since we don't want that -- we just want the ad to expire --
+// set the time to the next-smallest legal value, instead.  Expiring
+// invalidated ads allows the offline plugin to decide if they should go
+// absent, instead.
+//
+int CollectorDaemon::expiration_scanFunc (ClassAd *cad)
+{
+    return setAttrLastHeardFrom( cad, 1 );
+}
+
 int CollectorDaemon::invalidation_scanFunc (ClassAd *cad)
+{
+    return setAttrLastHeardFrom( cad, 0 );
+}
+
+int CollectorDaemon::setAttrLastHeardFrom (ClassAd* cad, unsigned long time)
 {
 	if ( !__adType__.empty() ) {
 		std::string type = "";
@@ -989,11 +1027,12 @@ int CollectorDaemon::invalidation_scanFunc (ClassAd *cad)
 		}
 	}
 
-	EvalResult result;
-	if ( EvalExprTree( __filter__, cad, NULL, &result ) &&
-		 result.type == LX_INTEGER && result.i != 0 ) {
+	classad::Value result;
+	bool val;
+	if ( EvalExprTree( __filter__, cad, NULL, result ) &&
+		 result.IsBooleanValueEquiv(val) && val ) {
 
-		cad->Assign( ATTR_LAST_HEARD_FROM, 0 );
+		cad->Assign( ATTR_LAST_HEARD_FROM, time );
         __numAds__++;
     }
 
@@ -1011,7 +1050,14 @@ void CollectorDaemon::process_invalidation (AdTypes whichAds, ClassAd &query, St
 	sock->timeout(QueryTimeout);
 
 	bool query_contains_hash_key = false;
+
+    bool expireInvalidatedAds = param_boolean( "EXPIRE_INVALIDATED_ADS", false );
+    if( expireInvalidatedAds ) {
+        __numAds__ = collector.expire( whichAds, query, &query_contains_hash_key );
+    } else {        
 	__numAds__ = collector.remove( whichAds, query, &query_contains_hash_key );
+    }
+
     if ( !query_contains_hash_key )
 	{
 		dprintf ( D_ALWAYS, "Walking tables to invalidate... O(n)\n" );
@@ -1036,7 +1082,11 @@ void CollectorDaemon::process_invalidation (AdTypes whichAds, ClassAd &query, St
 			return;
 		}
 
-		if (param_boolean("HOUSEKEEPING_ON_INVALIDATE", true)) 
+        if (expireInvalidatedAds)
+        {
+            collector.walkHashTable (whichAds, expiration_scanFunc);
+            collector.invokeHousekeeper (whichAds);
+        } else if (param_boolean("HOUSEKEEPING_ON_INVALIDATE", true)) 
 		{
 			// first set all the "LastHeardFrom" attributes to low values ...
 			collector.walkHashTable (whichAds, invalidation_scanFunc);
@@ -1055,7 +1105,7 @@ void CollectorDaemon::process_invalidation (AdTypes whichAds, ClassAd &query, St
 		// why.  That is what the following block of code tries to solve.
 	if( __numAds__ > 1 ) {
 		dprintf(D_ALWAYS, "The invalidation query was this:\n");
-		query.dPrint(D_ALWAYS);
+		dPrintAd(D_ALWAYS, query);
 	}
 }	
 
@@ -1477,8 +1527,8 @@ void CollectorDaemon::init_classad(int interval)
     if( ad ) delete( ad );
     ad = new ClassAd();
 
-    ad->SetMyTypeName(COLLECTOR_ADTYPE);
-    ad->SetTargetTypeName("");
+    SetMyTypeName(*ad, COLLECTOR_ADTYPE);
+    SetTargetTypeName(*ad, "");
 
     char *tmp;
     tmp = param( "CONDOR_ADMIN" );
@@ -1490,12 +1540,12 @@ void CollectorDaemon::init_classad(int interval)
     MyString id;
     if( CollectorName ) {
             if( strchr( CollectorName, '@' ) ) {
-               id.sprintf( "%s", CollectorName );
+               id.formatstr( "%s", CollectorName );
             } else {
-               id.sprintf( "%s@%s", CollectorName, get_local_fqdn().Value() );
+               id.formatstr( "%s@%s", CollectorName, get_local_fqdn().Value() );
             }
     } else {
-            id.sprintf( "%s", get_local_fqdn().Value() );
+            id.formatstr( "%s", get_local_fqdn().Value() );
     }
     ad->Assign( ATTR_NAME, id.Value() );
 
@@ -1585,7 +1635,7 @@ void CollectorDaemon::send_classad_to_sock(int cmd, ClassAd* theAd) {
         }
 
         if (theAd) {
-            if (!theAd->put(*view_sock)) {
+            if (!putClassAd(view_sock, *theAd)) {
                 dprintf( D_ALWAYS, "Can't forward classad to View Collector %s\n", view_name);
                 view_sock->end_of_message();
                 view_sock->close();
@@ -1603,7 +1653,7 @@ void CollectorDaemon::send_classad_to_sock(int cmd, ClassAd* theAd) {
             ASSERT( makeStartdAdHashKey (hk, theAd) );
             pvt_ad = collector.lookup(STARTD_PVT_AD,hk);
             if (pvt_ad) {
-                if (!pvt_ad->put(*view_sock)) {
+                if (!putClassAd(view_sock, *pvt_ad)) {
                     dprintf( D_ALWAYS, "Can't forward startd private classad to View Collector %s\n", view_name);
                     view_sock->end_of_message();
                     view_sock->close();
@@ -1737,7 +1787,7 @@ computeProjection(ClassAd *full_ad, SimpleList<MyString> *projectionList,StringL
 	//   submitter ads, regardless of MyType.
 	//   Before 7.7.3, submitter ads for parallel universe
 	//   jobs had a MyType of "Scheduler".
-	if (strcmp("Scheduler", full_ad->GetMyTypeName()) == 0) {
+	if (strcmp("Scheduler", GetMyTypeName(*full_ad)) == 0) {
 		expanded_projection.append(ATTR_NUM_USERS);
 	}
 

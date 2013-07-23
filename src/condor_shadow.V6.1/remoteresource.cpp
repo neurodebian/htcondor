@@ -47,6 +47,7 @@ static const char *Resource_State_String [] = {
 	"PRE", 
 	"EXECUTING", 
 	"PENDING_DEATH", 
+	"PENDING_TRANSFER",
 	"FINISHED",
 	"SUSPENDED",
 	"STARTUP",
@@ -63,10 +64,7 @@ RemoteResource::RemoteResource( BaseShadow *shad )
 	starterAddress = NULL;
 	starterArch = NULL;
 	starterOpsys = NULL;
-	starter_version = NULL;
 	jobAd = NULL;
-	fs_domain = NULL;
-	uid_domain = NULL;
 	claim_sock = NULL;
 	last_job_lease_renewal = 0;
 	exit_reason = -1;
@@ -93,6 +91,10 @@ RemoteResource::RemoteResource( BaseShadow *shad )
 	already_killed_fast = false;
 	m_want_chirp = false;
 	m_want_streaming_io = false;
+	m_attempt_shutdown_tid = -1;
+	m_started_attempting_shutdown = 0;
+	m_upload_xfer_status = XFER_STATUS_UNKNOWN;
+	m_download_xfer_status = XFER_STATUS_UNKNOWN;
 }
 
 
@@ -109,9 +111,6 @@ RemoteResource::~RemoteResource()
 	if ( starterAddress) delete [] starterAddress;
 	if ( starterArch   ) delete [] starterArch;
 	if ( starterOpsys  ) delete [] starterOpsys;
-	if ( starter_version ) delete [] starter_version;
-	if ( uid_domain	   ) delete [] uid_domain;
-	if ( fs_domain     ) delete [] fs_domain;
 	closeClaimSock();
 	if ( jobAd && jobAd != shadow->getJobAd() ) {
 		delete jobAd;
@@ -128,6 +127,11 @@ RemoteResource::~RemoteResource()
 		if( m_filetrans_session.secSessionId() ) {
 			daemonCore->getSecMan()->invalidateKey( m_filetrans_session.secSessionId() );
 		}
+	}
+
+	if( m_attempt_shutdown_tid != -1 ) {
+		daemonCore->Cancel_Timer(m_attempt_shutdown_tid);
+		m_attempt_shutdown_tid = -1;
 	}
 }
 
@@ -284,6 +288,11 @@ RemoteResource::killStarter( bool graceful )
 		return false;
 	}
 
+	if( !graceful ) {
+			// stop any lingering file transfers, if any
+		abortFileTransfer();
+	}
+
 	if( ! dc_startd->deactivateClaim(graceful,&claim_is_closing) ) {
 		shadow->dprintf( D_ALWAYS, "RemoteResource::killStarter(): "
 						 "Could not send command to startd\n" );
@@ -391,6 +400,60 @@ RemoteResource::dprintfSelf( int debugLevel )
 	}
 }
 
+int
+RemoteResource::attemptShutdownTimeout()
+{
+	m_attempt_shutdown_tid = -1;
+	attemptShutdown();
+	return TRUE;
+}
+
+void
+RemoteResource::abortFileTransfer()
+{
+	filetrans.stopServer();
+	if( state == RR_PENDING_TRANSFER ) {
+		state = RR_FINISHED;
+	}
+}
+
+void
+RemoteResource::attemptShutdown()
+{
+	if( filetrans.transferIsInProgress() ) {
+			// This can happen if we process the job exit message
+			// before the file transfer reaper processes the exit of
+			// the file transfer process
+
+		if( m_attempt_shutdown_tid != -1 ) {
+			return;
+		}
+		if( m_started_attempting_shutdown == 0 ) {
+			m_started_attempting_shutdown = time(NULL);
+		}
+		int total_delay = time(NULL) - m_started_attempting_shutdown;
+		if( abs(total_delay) > 300 ) {
+				// Something is wrong.  We should not have had to wait this long
+				// for the file transfer reaper to finish.
+			dprintf(D_ALWAYS,"WARNING: giving up waiting for file transfer "
+					"to finish after %ds.  Shutting down shadow.\n",total_delay);
+		}
+		else {
+			m_attempt_shutdown_tid = daemonCore->Register_Timer(1, 0,
+				(TimerHandlercpp)&RemoteResource::attemptShutdownTimeout,
+				"attempt shutdown", this);
+			if( m_attempt_shutdown_tid != -1 ) {
+				dprintf(D_FULLDEBUG,"Delaying shutdown of shadow, because file transfer is still active.\n");
+				return;
+			}
+		}
+	}
+
+	abortFileTransfer();
+
+		// we call our shadow's shutdown method:
+	shadow->shutDown( exit_reason );
+}
 
 int
 RemoteResource::handleSysCalls( Stream * /* sock */ )
@@ -404,8 +467,7 @@ RemoteResource::handleSysCalls( Stream * /* sock */ )
 
 	if (do_REMOTE_syscall() < 0) {
 		shadow->dprintf(D_SYSCALLS,"Shadow: do_REMOTE_syscall returned < 0\n");
-			// we call our shadow's shutdown method:
-		shadow->shutDown( exit_reason );
+		attemptShutdown();
 		return KEEP_STREAM;
 	}
 	hadContact();
@@ -421,7 +483,8 @@ RemoteResource::getMachineName( char *& mName )
 		mName = strnewp( machineName );
 	} else {
 		if ( machineName ) {
-			strcpy( mName, machineName );
+			delete [] mName;
+			mName = strnewp( machineName );
 		} else {
 			mName[0] = '\0';
 		}
@@ -442,11 +505,10 @@ RemoteResource::getStartdAddress( char *& sinful )
 	if( ! addr ) {
 		return;
 	}
-	if( ! sinful ) {
-		sinful = strnewp( addr );
-	} else {
-		strcpy( sinful, addr );
+	if( sinful ) {
+		delete [] sinful;
 	}
+	sinful = strnewp( addr );
 }
 
 void
@@ -462,11 +524,10 @@ RemoteResource::getStartdName( char *& remoteName )
 	if( ! localName ) {
 		return;
 	}
-	if( ! remoteName ) {
-		remoteName = strnewp( localName );
-	} else {
-		strcpy( remoteName, localName );
+	if( remoteName ) {
+		delete [] remoteName;
 	}
+	remoteName = strnewp( localName );
 }
 
 
@@ -484,45 +545,11 @@ RemoteResource::getClaimId( char *& id )
 	if( ! my_id ) {
 		return;
 	}
-	if( ! id ) {
-		id = strnewp( my_id );
-	} else {
-		strcpy( id, my_id );
+	if( id ) {
+		delete[] id;
 	}
+	id = strnewp( my_id );
 }
-
-
-void
-RemoteResource::getUidDomain( char *& uidDomain )
-{
-
-	if ( !uidDomain ) {
-		uidDomain = strnewp( uid_domain );
-	} else {
-		if ( uid_domain ) {
-			strcpy( uidDomain, uid_domain );
-		} else {
-			uidDomain[0] = '\0';
-		}
-	}
-}
-
-
-void
-RemoteResource::getFilesystemDomain( char *& filesystemDomain )
-{
-
-	if ( !filesystemDomain ) {
-		filesystemDomain = strnewp( fs_domain );
-	} else {
-		if ( fs_domain ) {
-			strcpy( filesystemDomain, fs_domain );
-		} else {
-			filesystemDomain[0] = '\0';
-		}
-	}
-}
-
 
 void
 RemoteResource::getStarterAddress( char *& starterAddr )
@@ -532,43 +559,13 @@ RemoteResource::getStarterAddress( char *& starterAddr )
 		starterAddr = strnewp( starterAddress );
 	} else {
 		if ( starterAddress ) {
-			strcpy( starterAddr, starterAddress );
+			delete[] starterAddr;
+			starterAddr = strnewp( starterAddress );
 		} else {
 			starterAddr[0] = '\0';
 		}
 	}
 }
-
-
-void
-RemoteResource::getStarterArch( char *& arch )
-{
-	if(! arch ) {
-		arch = strnewp( starterArch );
-	} else {
-		if ( starterArch ) {
-			strcpy( arch, starterArch );
-		} else {
-			arch[0] = '\0';
-		}
-	}
-}
-
-
-void
-RemoteResource::getStarterOpsys( char *& opsys )
-{
-	if(! opsys ) {
-		opsys = strnewp( starterOpsys );
-	} else {
-		if ( starterOpsys ) {
-			strcpy( opsys, starterOpsys );
-		} else {
-			opsys[0] = '\0';
-		}
-	}
-}
-
 
 ReliSock*
 RemoteResource::getClaimSock()
@@ -629,7 +626,7 @@ RemoteResource::setStartdInfo( ClassAd* ad )
 	if( ! name ) {
 		ad->LookupString( ATTR_NAME, &name );
 		if( ! name ) {
-			ad->dPrint(D_ALWAYS);
+			dPrintAd(D_ALWAYS, *ad);
 			EXCEPT( "ad includes neither %s nor %s!", ATTR_NAME,
 					ATTR_REMOTE_HOST );
 		}
@@ -718,7 +715,7 @@ RemoteResource::initStartdInfo( const char *name, const char *pool,
 			MyString filetrans_claimid;
 				// prepend something to the claim id so that the session id
 				// is different for file transfer than for the claim session
-			filetrans_claimid.sprintf("filetrans.%s",claim_id);
+			filetrans_claimid.formatstr("filetrans.%s",claim_id);
 			m_filetrans_session = ClaimIdParser(filetrans_claimid.Value());
 
 				// Get rid of session parameters set by startd.
@@ -778,20 +775,12 @@ RemoteResource::setStarterInfo( ClassAd* ad )
 	}
 
 	if( ad->LookupString(ATTR_UID_DOMAIN, &tmp) ) {
-		if( uid_domain ) {
-			delete [] uid_domain;
-		}	
-		uid_domain = strnewp( tmp );
 		dprintf( D_SYSCALLS, "  %s = %s\n", ATTR_UID_DOMAIN, tmp );
 		free( tmp );
 		tmp = NULL;
 	}
 
 	if( ad->LookupString(ATTR_FILE_SYSTEM_DOMAIN, &tmp) ) {
-		if( fs_domain ) {
-			delete [] fs_domain;
-		}	
-		fs_domain = strnewp( tmp );
 		dprintf( D_SYSCALLS, "  %s = %s\n", ATTR_FILE_SYSTEM_DOMAIN,
 				 tmp );  
 		free( tmp );
@@ -840,20 +829,16 @@ RemoteResource::setStarterInfo( ClassAd* ad )
 		tmp = NULL;
 	}
 
-	if( ad->LookupString(ATTR_VERSION, &tmp) ) {
-		if( starter_version ) {
-			delete [] starter_version;
-		}	
-		starter_version = strnewp( tmp );
-		dprintf( D_SYSCALLS, "  %s = %s\n", ATTR_VERSION, tmp ); 
-		free( tmp );
-		tmp = NULL;
+	char* starter_version;
+	if( ad->LookupString(ATTR_VERSION, &starter_version) ) {
+		dprintf( D_SYSCALLS, "  %s = %s\n", ATTR_VERSION, starter_version ); 
 	}
 
 	if ( starter_version == NULL ) {
 		dprintf( D_ALWAYS, "Can't determine starter version for FileTransfer!\n" );
 	} else {
 		filetrans.setPeerVersion( starter_version );
+		free(starter_version);
 	}
 
 	filetrans.setTransferQueueContactInfo( shadow->getTransferQueueContactInfo() );
@@ -883,28 +868,6 @@ RemoteResource::setMachineName( const char * mName )
 }
 
 void
-RemoteResource::setUidDomain( const char * uidDomain )
-{
-
-	if ( uid_domain )
-		delete [] uid_domain;
-	
-	uid_domain = strnewp ( uidDomain );
-}
-
-
-void
-RemoteResource::setFilesystemDomain( const char * filesystemDomain )
-{
-
-	if ( fs_domain )
-		delete [] fs_domain;
-	
-	fs_domain = strnewp ( filesystemDomain );
-}
-
-
-void
 RemoteResource::setStarterAddress( const char * starterAddr )
 {
 	if( starterAddress ) {
@@ -930,7 +893,12 @@ RemoteResource::setExitReason( int reason )
 	}
 
 	// record that this resource is really finished
-	setResourceState( RR_FINISHED );
+	if( filetrans.transferIsInProgress() ) {
+		setResourceState( RR_PENDING_TRANSFER );
+	}
+	else {
+		setResourceState( RR_FINISHED );
+	}
 }
 
 
@@ -1051,9 +1019,9 @@ RemoteResource::updateFromStarter( ClassAd* update_ad )
 	dprintf( D_FULLDEBUG, "Inside RemoteResource::updateFromStarter()\n" );
 	hadContact();
 
-	if( DebugFlags & D_MACHINE ) {
+	if( IsDebugLevel(D_MACHINE) ) {
 		dprintf( D_MACHINE, "Update ad:\n" );
-		update_ad->dPrint( D_MACHINE );
+		dPrintAd( D_MACHINE, *update_ad );
 		dprintf( D_MACHINE, "--- End of ClassAd ---\n" );
 	}
 
@@ -1076,7 +1044,8 @@ RemoteResource::updateFromStarter( ClassAd* update_ad )
 
 	classad::ExprTree * tree = update_ad->Lookup(ATTR_MEMORY_USAGE);
 	if( tree ) {
-		jobAd->Insert(ATTR_MEMORY_USAGE, tree->Copy());
+		tree = tree->Copy();
+		jobAd->Insert(ATTR_MEMORY_USAGE, tree, false);
 	}
 
 	if( update_ad->LookupFloat(ATTR_JOB_VM_CPU_UTILIZATION, float_value) ) { 
@@ -1180,7 +1149,7 @@ RemoteResource::updateFromStarter( ClassAd* update_ad )
 				// and we don't want to log any events here. 
 		}
 		free( job_state );
-		if( state == RR_PENDING_DEATH ) {
+		if( state == RR_PENDING_DEATH || state == RR_PENDING_TRANSFER ) {
 				// we're trying to shutdown, so don't bother recording
 				// what we just heard from the starter.  we're done
 				// dealing with this update.
@@ -1275,7 +1244,7 @@ RemoteResource::recordSuspendEvent( ClassAd* update_ad )
 	// update the job in the queue
 	sprintf( tmp, "%s = %d", ATTR_JOB_STATUS , SUSPENDED );
 	jobAd->Insert( tmp );
-	shadow->updateJobInQueue(U_PERIODIC);
+	shadow->updateJobInQueue(U_STATUS);
 	
 	return rval;
 }
@@ -1330,7 +1299,7 @@ RemoteResource::recordResumeEvent( ClassAd* /* update_ad */ )
 	// update the job in the queue
 	sprintf( tmp, "%s = %d", ATTR_JOB_STATUS , RUNNING );
 	jobAd->Insert( tmp );
-	shadow->updateJobInQueue(U_PERIODIC);
+	shadow->updateJobInQueue(U_STATUS);
 
 	return rval;
 }
@@ -1875,6 +1844,87 @@ RemoteResource::locateReconnectStarter( void )
 	return false;
 }
 
+void
+RemoteResource::getFileTransferStatus(FileTransferStatus &upload_status,FileTransferStatus &download_status)
+{
+	upload_status = m_upload_xfer_status;
+	download_status = m_download_xfer_status;
+}
+
+int
+RemoteResource::transferStatusUpdateCallback(FileTransfer *transobject)
+{
+	ASSERT(jobAd);
+
+	FileTransfer::FileTransferInfo info = transobject->GetInfo();
+	dprintf(D_FULLDEBUG,"RemoteResource::transferStatusUpdateCallback(in_progress=%d)\n",info.in_progress);
+
+	if( info.type == FileTransfer::DownloadFilesType ) {
+		m_download_xfer_status = info.xfer_status;
+	}
+	else {
+		m_upload_xfer_status = info.xfer_status;
+	}
+	shadow->updateJobInQueue(U_PERIODIC);
+	return 0;
+}
+
+void
+RemoteResource::initFileTransfer()
+{
+		// FileTransfer now makes sure we only do Init() once.
+		//
+		// Tell the FileTransfer object to create a file catalog if
+		// the job's files are spooled. This prevents FileTransfer
+		// from listing unmodified input files as intermediate files
+		// that need to be transferred back from the starter.
+	ASSERT(jobAd);
+	int spool_time = 0;
+	jobAd->LookupInteger(ATTR_STAGE_IN_FINISH,spool_time);
+	filetrans.Init( jobAd, false, PRIV_USER, spool_time != 0 );
+
+	filetrans.RegisterCallback(
+		(FileTransferHandlerCpp)&RemoteResource::transferStatusUpdateCallback,
+		this,
+		true);
+
+	if( !daemonCore->DoFakeCreateThread() ) {
+		filetrans.SetServerShouldBlock(false);
+	}
+
+	int max_upload_mb = -1;
+	int max_download_mb = -1;
+	param_integer("MAX_TRANSFER_INPUT_MB",max_upload_mb,true,-1,false,INT_MIN,INT_MAX,jobAd);
+	param_integer("MAX_TRANSFER_OUTPUT_MB",max_download_mb,true,-1,false,INT_MIN,INT_MAX,jobAd);
+
+		// The job may override the system defaults for max transfer I/O
+	int ad_max_upload_mb = -1;
+	int ad_max_download_mb = -1;
+	if( jobAd->EvalInteger(ATTR_MAX_TRANSFER_INPUT_MB,NULL,ad_max_upload_mb) ) {
+		max_upload_mb = ad_max_upload_mb;
+	}
+	if( jobAd->EvalInteger(ATTR_MAX_TRANSFER_OUTPUT_MB,NULL,ad_max_download_mb) ) {
+		max_download_mb = ad_max_download_mb;
+	}
+
+	filetrans.setMaxUploadBytes(max_upload_mb < 0 ? -1 : ((filesize_t)max_upload_mb)*1024*1024);
+	filetrans.setMaxDownloadBytes(max_download_mb < 0 ? -1 : ((filesize_t)max_download_mb)*1024*1024);
+
+	// Add extra remaps for the canonical stdout/err filenames.
+	// If using the FileTransfer object, the starter will rename the
+	// stdout/err files, and we need to remap them back here.
+	std::string file;
+	if ( jobAd->LookupString( ATTR_JOB_OUTPUT, file ) &&
+		 strcmp( file.c_str(), StdoutRemapName ) ) {
+
+		filetrans.AddDownloadFilenameRemap( StdoutRemapName, file.c_str() );
+	}
+	if ( jobAd->LookupString( ATTR_JOB_ERROR, file ) &&
+		 strcmp( file.c_str(), StderrRemapName ) ) {
+
+		filetrans.AddDownloadFilenameRemap( StderrRemapName, file.c_str() );
+	}
+}
 
 void
 RemoteResource::requestReconnect( void )
@@ -1906,13 +1956,13 @@ RemoteResource::requestReconnect( void )
 		// from listing unmodified input files as intermediate files
 		// that need to be transferred back from the starter.
 	ASSERT(jobAd);
-	int spool_time = 0;
-	jobAd->LookupInteger(ATTR_STAGE_IN_FINISH,spool_time);
-	filetrans.Init( jobAd, true, PRIV_USER, spool_time != 0 );
+
+	initFileTransfer();
+
 	char* value = NULL;
 	jobAd->LookupString(ATTR_TRANSFER_KEY,&value);
 	if (value) {
-		msg.sprintf("%s=\"%s\"",ATTR_TRANSFER_KEY,value);
+		msg.formatstr("%s=\"%s\"",ATTR_TRANSFER_KEY,value);
 		req.Insert(msg.Value());
 		free(value);
 		value = NULL;
@@ -1922,26 +1972,13 @@ RemoteResource::requestReconnect( void )
 	}
 	jobAd->LookupString(ATTR_TRANSFER_SOCKET,&value);
 	if (value) {
-		msg.sprintf("%s=\"%s\"",ATTR_TRANSFER_SOCKET,value);
+		msg.formatstr("%s=\"%s\"",ATTR_TRANSFER_SOCKET,value);
 		req.Insert(msg.Value());
 		free(value);
 		value = NULL;
 	} else {
 		dprintf( D_ALWAYS,"requestReconnect(): failed to determine %s\n",
 			ATTR_TRANSFER_SOCKET );
-	}
-
-	// Add extra remaps for the canonical stdout/err filenames.
-	// If using the FileTransfer object, the starter will rename the
-	// stdout/err files, and we need to remap them back here.
-	std::string file;
-	if ( jobAd->LookupString( ATTR_JOB_OUTPUT, file ) &&
-		 strcmp( file.c_str(), StdoutRemapName ) ) {
-		filetrans.AddDownloadFilenameRemap( StdoutRemapName, file.c_str() );
-	}
-	if ( jobAd->LookupString( ATTR_JOB_ERROR, file ) &&
-		 strcmp( file.c_str(), StderrRemapName ) ) {
-		filetrans.AddDownloadFilenameRemap( StderrRemapName, file.c_str() );
 	}
 
 		// Use 30s timeout, because we don't want to block forever
@@ -2160,7 +2197,7 @@ RemoteResource::checkX509Proxy( void )
 	// this allows us to use the attributes in job policy (periodic_hold, etc.)
 
 	// first, do the DN and expiration time, which all proxies have
-	char* proxy_subject = x509_proxy_subject_name(proxy_path.Value());
+	char* proxy_subject = x509_proxy_identity_name(proxy_path.Value());
 	time_t proxy_expiration_time = x509_proxy_expiration_time(proxy_path.Value());
 	jobAd->Assign(ATTR_X509_USER_PROXY_SUBJECT, proxy_subject);
 	jobAd->Assign(ATTR_X509_USER_PROXY_EXPIRATION, proxy_expiration_time);
@@ -2181,7 +2218,7 @@ RemoteResource::checkX509Proxy( void )
 			&quoted_DN_and_FQAN);
 	if (vomserr == 0) {
 		// VOMS attributes were found
-		if (DebugFlags & D_FULLDEBUG) {
+		if (IsDebugVerbose(D_SECURITY)) {
 			dprintf(D_SECURITY, "VOMS attributes were found\n");
 		}
 		jobAd->Assign(ATTR_X509_USER_PROXY_VONAME, voname);
@@ -2191,7 +2228,7 @@ RemoteResource::checkX509Proxy( void )
 		free(firstfqan);
 		free(quoted_DN_and_FQAN);
 	} else {
-		if (DebugFlags & D_FULLDEBUG) {
+		if (IsDebugVerbose(D_SECURITY)) {
 			dprintf(D_SECURITY, "VOMS attributes were not found\n");
 		}
 	}

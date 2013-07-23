@@ -48,7 +48,7 @@ UniShadow::updateFromStarter(int /* command */, Stream *s)
 
 	// get info from the starter encapsulated in a ClassAd
 	s->decode();
-	if( ! update_ad.initFromStream(*s) ) {
+	if( ! getClassAd(s, update_ad) ) {
 		dprintf( D_ALWAYS, "ERROR in UniShadow::updateFromStarter:"
 				 "Can't read ClassAd, aborting.\n" );
 		return FALSE;
@@ -182,7 +182,6 @@ UniShadow::cleanUp( void )
 		remRes->killStarter();
 	}
 }
-
 
 void
 UniShadow::gracefulShutDown( void )
@@ -336,6 +335,11 @@ UniShadow::bytesReceived()
 	return remRes->bytesReceived();
 }
 
+void
+UniShadow::getFileTransferStatus(FileTransferStatus &upload_status,FileTransferStatus &download_status)
+{
+	remRes->getFileTransferStatus(upload_status,download_status);
+}
 
 struct rusage
 UniShadow::getRUsage( void ) 

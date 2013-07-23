@@ -98,7 +98,13 @@ split_sin( const char *addr, char **host, char **port, char **params )
 
 	if( *addr == ':' ) {
 		addr++;
-		len = strspn(addr,"0123456789");
+		// len = strspn(addr,"0123456789");
+		// Reimplemented without strspn because strspn causes valgrind
+		// errors on RHEL6.
+		const char * addr_ptr = addr;
+		len = 0;
+		while (*addr_ptr && isdigit(*addr_ptr++)) len++;
+
 		if( port ) {
 			*port = (char *)malloc(len+1);
 			memcpy(*port,addr,len);
@@ -1184,9 +1190,9 @@ int generate_sinful(char* buf, int len, const char* ip, int port) {
 MyString generate_sinful(const char* ip, int port) {
 	MyString buf;
 	if (strchr(ip, ':')) {
-		buf.sprintf("<[%s]:%d>", ip, port);
+		buf.formatstr("<[%s]:%d>", ip, port);
 	} else {
-		buf.sprintf("<%s:%d>", ip, port);
+		buf.formatstr("<%s:%d>", ip, port);
 	}
 	return buf;
 }

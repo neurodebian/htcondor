@@ -32,8 +32,6 @@
 #include "gahp-client.h"
 #include "transferrequest.h"
 
-#define JM_COMMIT_TIMEOUT	600
-
 class CreamResource;
 
 void CreamJobInit();
@@ -56,13 +54,10 @@ class CreamJob : public BaseJob
 	BaseResource *GetResource();
 	void SetRemoteJobId( const char *job_id );
 
-	static int probeInterval;
 	static int submitInterval;
 	static int gahpCallTimeout;
 	static int maxConnectFailures;
 
-	static void setProbeInterval( int new_interval )
-		{ probeInterval = new_interval; }
 	static void setSubmitInterval( int new_interval )
 		{ submitInterval = new_interval; }
 	static void setGahpCallTimeout( int new_timeout )
@@ -81,14 +76,12 @@ class CreamJob : public BaseJob
 	std::string remoteState;
 	std::string remoteStateFaultString;
 	CreamResource *myResource;
-	time_t lastProbeTime;
 	bool probeNow;
 	time_t enteredCurrentGmState;
 	time_t enteredCurrentRemoteState;
 	time_t lastSubmitAttempt;
 	int numSubmitAttempts;
 	time_t jmProxyExpireTime;
-	time_t jmLifetime;
 	char *resourceManagerString;
 	char *resourceBatchSystemString;
 	char *resourceQueueString;

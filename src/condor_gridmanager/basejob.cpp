@@ -115,6 +115,7 @@ BaseJob::BaseJob( ClassAd *classad )
 	wantResubmit = 0;	// set if user wants to resubmit job via RESUBMIT_CHECK
 	jobAd->EvalBool(ATTR_GLOBUS_RESUBMIT_CHECK,NULL,wantResubmit);
 
+	jobAd->EnableDirtyTracking();
 	jobAd->ClearAllDirtyFlags();
 
 	jobLeaseSentExpiredTid = TIMER_UNSET;
@@ -673,8 +674,8 @@ void BaseJob::JobAdUpdateFromSchedd( const ClassAd *new_ad, bool full_ad )
 			ExprTree *expr;
 
 			if ( (expr = new_ad->LookupExpr( held_removed_update_attrs[i] )) != NULL ) {
-				jobAd->Insert( held_removed_update_attrs[i],
-							   expr->Copy() );
+				ExprTree * pTree = expr->Copy();
+				jobAd->Insert( held_removed_update_attrs[i], pTree, false );
 			} else {
 				jobAd->Delete( held_removed_update_attrs[i] );
 			}
@@ -970,12 +971,18 @@ WriteUserLog*
 InitializeUserLog( ClassAd *job_ad )
 {
 	int cluster, proc;
-	MyString userLogFile;
+	MyString userLogFile, dagmanNodeLog;
 	std::string gjid;
 	bool use_xml = false;
+	std::vector<const char*> logfiles;
 
-	if( !getPathToUserLog(job_ad, userLogFile) ) {
-		// User doesn't want a log
+	if( getPathToUserLog(job_ad, userLogFile) ) {
+		logfiles.push_back(userLogFile.Value());
+	}
+	if( getPathToUserLog(job_ad, dagmanNodeLog, ATTR_DAGMAN_WORKFLOW_LOG) ) {                   
+		logfiles.push_back(dagmanNodeLog.Value());
+	}
+	if(logfiles.empty()) {
 		return NULL;
 	}
 
@@ -985,7 +992,7 @@ InitializeUserLog( ClassAd *job_ad )
 	job_ad->LookupBool( ATTR_ULOG_USE_XML, use_xml );
 
 	WriteUserLog *ULog = new WriteUserLog();
-	ULog->initialize(userLogFile.Value(), cluster, proc, 0, gjid.c_str());
+	ULog->initialize(logfiles, cluster, proc, 0, gjid.c_str());
 	ULog->setUseXML( use_xml );
 	return ULog;
 }

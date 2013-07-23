@@ -51,9 +51,9 @@ const char * Job::status_t_names[] = {
     "STATUS_READY    ",
     "STATUS_PRERUN   ",
     "STATUS_SUBMITTED",
-	"STATUS_POSTRUN  ",
+    "STATUS_POSTRUN  ",
     "STATUS_DONE     ",
-    "STATUS_ERROR    ",
+    "STATUS_ERROR    "
 };
 
 //---------------------------------------------------------------------------
@@ -77,19 +77,12 @@ Job::~Job() {
 	delete [] _jobName;
 	delete [] _logFile;
 
-	varNamesFromDag->Rewind();
-	MyString *name;
-	while ( (name = varNamesFromDag->Next()) ) {
-		delete name;
+	varsFromDag->Rewind();
+	NodeVar *var;
+	while ( (var = varsFromDag->Next()) ) {
+		delete var;
 	}
-	delete varNamesFromDag;
-
-	varValsFromDag->Rewind();
-	MyString *val;
-	while ( (val = varValsFromDag->Next()) ) {
-		delete val;
-	}
-	delete varValsFromDag;
+	delete varsFromDag;
 
 	delete _scriptPre;
 	delete _scriptPost;
@@ -101,7 +94,7 @@ Job::~Job() {
 Job::Job( const job_type_t jobType, const char* jobName,
 			const char *directory, const char* cmdFile ) :
 	_jobType( jobType ), _preskip( PRE_SKIP_INVALID ),
-			_pre_status( NO_PRE_VALUE ), _final( false )
+			_final( false ), append_default_log(true)
 {
 	ASSERT( jobName != NULL );
 	ASSERT( cmdFile != NULL );
@@ -155,8 +148,7 @@ Job::Job( const job_type_t jobType, const char* jobName,
 	_jobstateSeqNum = 0;
 	_lastEventTime = 0;
 
-	varNamesFromDag = new List<MyString>;
-	varValsFromDag = new List<MyString>;
+	varsFromDag = new List<NodeVar>;
 
 	snprintf( error_text, JOB_ERROR_TEXT_MAXLEN, "unknown" );
 
@@ -204,13 +196,12 @@ bool Job::Remove (const queue_t queue, const JobID_t jobID)
 
 //---------------------------------------------------------------------------
 bool
-Job::CheckForLogFile() const
+Job::CheckForLogFile(bool usingDefault ) const
 {
 	bool tmpLogFileIsXml;
 	MyString logFile = MultiLogFiles::loadLogFileNameFromSubFile( _cmdFile,
-				_directory, tmpLogFileIsXml );
-	bool result = (logFile != "");
-	return result;
+				_directory, tmpLogFileIsXml, usingDefault );
+	return (logFile != "");
 }
 
 //---------------------------------------------------------------------------
@@ -246,7 +237,7 @@ void Job::Dump ( const Dag *dag ) const {
     for (int i = 0 ; i < 3 ; i++) {
         dprintf( D_ALWAYS, "%15s: ", queue_t_names[i] );
 
-		set<JobID_t>::const_iterator qit;
+		std::set<JobID_t>::const_iterator qit;
 		for (qit = _queues[i].begin(); qit != _queues[i].end(); qit++) {
 			Job *node = dag->Dag::FindNodeByNodeID( *qit );
 			dprintf( D_ALWAYS | D_NOHEADER, "%s, ", node->GetJobName() );
@@ -324,11 +315,14 @@ Job::GetStatus() const
 bool
 Job::SetStatus( status_t newStatus )
 {
-	 debug_printf( DEBUG_DEBUG_1, "Job(%s)::SetStatus(%s)\n",
-	 			GetJobName(), status_t_names[newStatus] );
+	debug_printf( DEBUG_DEBUG_1, "Job(%s)::_Status = %s\n",
+		GetJobName(), status_t_names[_Status] );
 
-		// TODO: add some state transition sanity-checking here?
+	debug_printf( DEBUG_DEBUG_1, "Job(%s)::SetStatus(%s)\n",
+		GetJobName(), status_t_names[newStatus] );
+	
 	_Status = newStatus;
+		// TODO: add some state transition sanity-checking here?
 	return true;
 }
 
@@ -401,7 +395,7 @@ Job::CanAddParent( Job* parent, MyString &whynot )
 		// future once we figure out the right way for the DAG to
 		// respond...
 	if( _Status != STATUS_READY && parent->GetStatus() != STATUS_DONE ) {
-		whynot.sprintf( "%s child may not be given a new %s parent",
+		whynot.formatstr( "%s child may not be given a new %s parent",
 						this->GetStatusName(), parent->GetStatusName() );
 		return false;
 	}
@@ -469,21 +463,26 @@ Job::CanAddChild( Job* child, MyString &whynot )
 bool
 Job::TerminateSuccess()
 {
-	_Status = STATUS_DONE;
+	std::vector<unsigned char> s;
+	_onHold.swap(s); // Free memory in _onHold
+
+	SetStatus( STATUS_DONE );
 	return true;
 } 
 
 bool
 Job::TerminateFailure()
 {
-	_Status = STATUS_ERROR;
+	std::vector<unsigned char> s;
+	s.swap(_onHold); // Free memory in _onHold;
+	SetStatus( STATUS_ERROR );
 	return true;
 } 
 
 bool
 Job::Add( const queue_t queue, const JobID_t jobID )
 {
-	pair<set<JobID_t>::iterator, bool> ret;
+	std::pair<std::set<JobID_t>::iterator, bool> ret;
 
 	ret = _queues[queue].insert(jobID);
 
@@ -517,7 +516,7 @@ Job::AddScript( bool post, const char *cmd, MyString &whynot )
 		return false;
 	}
 	if( post ? _scriptPost : _scriptPre ) {
-		whynot.sprintf( "%s script already assigned (%s)",
+		whynot.formatstr( "%s script already assigned (%s)",
 						post ? "POST" : "PRE", GetPreScriptName() );
 		return false;
 	}
@@ -543,7 +542,7 @@ bool
 Job::AddPreSkip( int exitCode, MyString &whynot )
 {
 	if( exitCode < PRE_SKIP_MIN || exitCode > PRE_SKIP_MAX ) {
-		whynot.sprintf( "PRE_SKIP exit code must be between %d and %d\n",
+		whynot.formatstr( "PRE_SKIP exit code must be between %d and %d\n",
 			PRE_SKIP_MIN, PRE_SKIP_MAX );
 		return false;
 	}
@@ -581,7 +580,7 @@ Job::GetStatusName() const
 bool
 Job::HasChild( Job* child ) {
 	JobID_t cid;
-	set<JobID_t>::iterator it;
+	std::set<JobID_t>::iterator it;
 
 	if( !child ) {
 		return false;
@@ -600,7 +599,7 @@ Job::HasChild( Job* child ) {
 bool
 Job::HasParent( Job* parent ) {
 	JobID_t pid;
-	set<JobID_t>::iterator it;
+	std::set<JobID_t>::iterator it;
 
 	if( !parent ) {
 		return false;
@@ -760,14 +759,14 @@ Job::PrefixName(const MyString &prefix)
 void
 Job::ResolveVarsInterpolations(void)
 {
-	MyString *val;
+	NodeVar *var;
 
-	varValsFromDag->Rewind();
-	while( (val = varValsFromDag->Next()) != NULL ) {
+	varsFromDag->Rewind();
+	while( (var = varsFromDag->Next()) != NULL ) {
 		// XXX No way to escape $(JOB) in case, for some crazy reason, you
 		// want a filename component actually to be '$(JOB)'.
 		// It isn't hard to fix, I'll do it later.
-		val->replaceString("$(JOB)", GetJobName());
+		var->_value.replaceString("$(JOB)", GetJobName());
 	}
 }
 
@@ -783,7 +782,7 @@ Job::SetDagFile(const char *dagFile)
 bool
 Job::MonitorLogFile( ReadMultipleUserLogs &condorLogReader,
 			ReadMultipleUserLogs &storkLogReader, bool nfsIsError,
-			bool recovery, const char *defaultNodeLog )
+			bool recovery, const char *defaultNodeLog, bool usingDefault )
 {
 	debug_printf( DEBUG_DEBUG_2,
 				"Attempting to monitor log file for node %s\n",
@@ -798,10 +797,13 @@ Job::MonitorLogFile( ReadMultipleUserLogs &condorLogReader,
 	ReadMultipleUserLogs &logReader = (_jobType == TYPE_CONDOR) ?
 				condorLogReader : storkLogReader;
 
-    MyString logFileStr;
+    std::string logFileStr;
 	if ( _jobType == TYPE_CONDOR ) {
-    	logFileStr = MultiLogFiles::loadLogFileNameFromSubFile( _cmdFile,
-					_directory, _logFileIsXml );
+			// We check to see if the user has specified a log file
+			// If not, we give him a default
+    	MyString templogFileStr = MultiLogFiles::loadLogFileNameFromSubFile( _cmdFile,
+					_directory, _logFileIsXml, usingDefault);
+		logFileStr = templogFileStr.Value();
 	} else {
 		StringList logFiles;
 		MyString tmpResult = MultiLogFiles::loadLogFileNamesFromStorkSubFile(
@@ -823,29 +825,50 @@ Job::MonitorLogFile( ReadMultipleUserLogs &condorLogReader,
 		}
 	}
 
+		// Warn the user if the node's log file is in /tmp.
+	if ( logFileStr.find( "/tmp" ) == 0 ) {
+		debug_printf( DEBUG_QUIET, "Warning: "
+					"Log file %s for node %s is in /tmp\n",
+					logFileStr.c_str(), GetJobName() );
+        check_warning_strictness( usingDefault ? DAG_STRICT_2 : DAG_STRICT_1 );
+	}
+
 	if ( logFileStr == "" ) {
 		logFileStr = defaultNodeLog;
 		_useDefaultLog = true;
+			// Default User log is never XML
+			// This could be specified in the submit file and should be
+			// ignored.
 		_logFileIsXml = false;
 		debug_printf( DEBUG_NORMAL, "Unable to get log file from "
 					"submit file %s (node %s); using default (%s)\n",
-					_cmdFile, GetJobName(), logFileStr.Value() );
+					_cmdFile, GetJobName(), logFileStr.c_str() );
+		append_default_log = false;
+	} else {
+		append_default_log = usingDefault;
+		if( append_default_log ) {
+				// DAGman is not going to look at the user-specified log.
+				// It will look at the defaultNode log.
+			logFileStr = defaultNodeLog;
+			_useDefaultLog = false;
+			_logFileIsXml = false;
+		}
 	}
 
 		// This function returns true if the log file is on NFS and
 		// that is an error.  If the log file is on NFS, but nfsIsError
 		// is false, it prints a warning but returns false.
-	if ( MultiLogFiles::logFileNFSError( logFileStr.Value(),
+	if ( MultiLogFiles::logFileNFSError( logFileStr.c_str(),
 				nfsIsError ) ) {
 		debug_printf( DEBUG_QUIET, "Error: log file %s on NFS\n",
-					logFileStr.Value() );
+					logFileStr.c_str() );
 		LogMonitorFailed();
 		return false;
 	}
 
 	delete [] _logFile;
 		// Saving log file here in case submit file gets changed.
-	_logFile = strnewp( logFileStr.Value() );
+	_logFile = strnewp( logFileStr.c_str() );
 	debug_printf( DEBUG_DEBUG_2, "Monitoring log file <%s> for node %s\n",
 				GetLogFile(), GetJobName() );
 	CondorError errstack;
@@ -853,7 +876,7 @@ Job::MonitorLogFile( ReadMultipleUserLogs &condorLogReader,
 		errstack.pushf( "DAGMan::Job", DAGMAN_ERR_LOG_FILE,
 					"ERROR: Unable to monitor log file for node %s",
 					GetJobName() );
-		debug_printf( DEBUG_QUIET, "%s\n", errstack.getFullText() );
+		debug_printf( DEBUG_QUIET, "%s\n", errstack.getFullText().c_str() );
 		LogMonitorFailed();
 		EXCEPT( "Fatal log file monitoring error!\n" );
 		return false;
@@ -890,7 +913,7 @@ Job::UnmonitorLogFile( ReadMultipleUserLogs &condorLogReader,
 		errstack.pushf( "DAGMan::Job", DAGMAN_ERR_LOG_FILE,
 					"ERROR: Unable to unmonitor log " "file for node %s",
 					GetJobName() );
-		debug_printf( DEBUG_QUIET, "%s\n", errstack.getFullText() );
+		debug_printf( DEBUG_QUIET, "%s\n", errstack.getFullText().c_str() );
 		EXCEPT( "Fatal log file monitoring error!\n" );
 	}
 
@@ -908,7 +931,7 @@ void
 Job::LogMonitorFailed()
 {
 	if ( _Status != Job::STATUS_ERROR ) {
-		_Status = Job::STATUS_ERROR;
+		SetStatus( Job::STATUS_ERROR );
 		snprintf( error_text, JOB_ERROR_TEXT_MAXLEN,
 					"Unable to monitor node job log file" );
 		retval = Dag::DAG_ERROR_LOG_MONITOR_ERROR;
@@ -999,8 +1022,8 @@ Job::GetPreSkip() const
 void
 Job::FixPriority(Dag& dag)
 {
-	set<JobID_t> parents = GetQueueRef(Q_PARENTS);
-	for(set<JobID_t>::iterator p = parents.begin(); p != parents.end(); ++p){
+	std::set<JobID_t> parents = GetQueueRef(Q_PARENTS);
+	for(std::set<JobID_t>::iterator p = parents.begin(); p != parents.end(); ++p){
 		Job* parent = dag.FindNodeByNodeID(*p);
 		if( parent->_hasNodePriority ) {
 			// Nothing to do if parent priority is small
@@ -1010,4 +1033,49 @@ Job::FixPriority(Dag& dag)
 			}
 		}
 	}
+}
+
+bool Job::SetCondorID(const CondorID& cid)
+{
+	bool ret = true;
+	if(GetCluster() != -1) {
+		debug_printf( DEBUG_NORMAL, "Reassigning the id of job %s from (%d.%d.%d) to "
+			"(%d.%d.%d)\n", GetJobName(), GetCluster(), GetProc(), GetSubProc(),
+			cid._cluster, cid._proc,cid._subproc );
+			ret = false;
+	}
+	_CondorID = cid;
+	return ret;	
+}
+
+bool Job::Hold(int proc) 
+{
+	if( proc >= static_cast<int>( _onHold.size() ) ) {
+		_onHold.resize( proc+1, 0 );
+	}
+	if( !_onHold[proc] ) {
+		_onHold[proc] = 1;
+		++_jobProcsOnHold;
+		++_timesHeld;
+		return true;
+	} else {
+		dprintf( D_FULLDEBUG, "Received hold event for node %s, and job %d.%d "
+			"is already on hold!\n", GetJobName(), GetCluster(), proc );
+	}
+	return false;
+}
+
+bool Job::Release(int proc)
+{
+	if( proc >= static_cast<int>( _onHold.size() ) ) {
+		dprintf( D_FULLDEBUG, "Received release event for node %s, but job %d.%d "
+			"is not on hold\n", GetJobName(), GetCluster(), GetProc() );
+		return false; // We never marked this as being on hold
+	}
+	if( _onHold[proc] ) {
+		_onHold[proc] = 0;
+		--_jobProcsOnHold;
+		return true;
+	}
+	return false;
 }

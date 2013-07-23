@@ -42,6 +42,8 @@ typedef set<long unsigned int> HistoryFileListType;
 static HistoryFileListType m_historyFiles;
 MyString m_path;
 
+#define HISTORY_INDEX_SUFFIX ".idx"
+
 // force a reset of history processing
 void plumage::history::initHistoryFiles() {
     m_historyFiles.clear();
@@ -66,16 +68,15 @@ plumage::history::processHistoryDirectory()
     dir.Rewind();
     while ( ( file = dir.Next() ) )
     {
-        // Skip all non-history files, e.g. not history.<datestamp>
-        if ( strncmp ( file, "history.", 8 ) ) {
-            continue;
-        }
+        // Skip all non-history files, e.g. history and history.*.idx
+        if ( strncmp ( file, "history.", 8 ) ||
+                !strncmp ( file + ( strlen ( file ) - 4 ), HISTORY_INDEX_SUFFIX, 4 ) ) continue;
 
         ODSHistoryFile h_file ( ( m_path + DIR_DELIM_STRING + file ).Value() );
         CondorError errstack;
         if ( !h_file.init ( errstack ) )
         {
-            dprintf ( D_ALWAYS, "%s\n", errstack.getFullText() );
+            dprintf ( D_ALWAYS, "%s\n", errstack.getFullText().c_str() );
             return;
         }
         errstack.clear();
@@ -117,7 +118,7 @@ plumage::history::processCurrentHistory(bool force_reset)
     {
         if ( !currentHistory.init ( errstack ) )
         {
-            dprintf ( D_ALWAYS, "%s\n", errstack.getFullText() );
+            dprintf ( D_ALWAYS, "%s\n", errstack.getFullText().c_str() );
             return;
         }
         ASSERT ( currentHistory.getId ( id ) );
@@ -148,7 +149,7 @@ plumage::history::processCurrentHistory(bool force_reset)
         currentHistory = ODSHistoryFile ( currentHistoryFilename.Value() );
         if ( !currentHistory.init ( errstack ) )
         {
-            dprintf ( D_ALWAYS, "%s\n", errstack.getFullText() );
+            dprintf ( D_ALWAYS, "%s\n", errstack.getFullText().c_str() );
             return;
         }
         ASSERT ( currentHistory.getId ( id ) );

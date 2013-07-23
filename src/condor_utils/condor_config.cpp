@@ -38,7 +38,6 @@
       2) /etc/condor/
       3) /usr/local/etc/
       4) ~condor/
-      5) ${GLOBUS_LOCATION}/etc/
 
   If none of the above locations contain a config source, config()
   prints an error message and exits.
@@ -117,6 +116,7 @@ BUCKET	*ConfigTab[TABLESIZE];
 static ExtraParamTable *extra_info = NULL;
 static char* tilde = NULL;
 static bool have_config_source = true;
+static bool continue_if_no_config = false; // so condor_who won't exit if no config found.
 extern bool condor_fsync_on;
 
 MyString global_config_source;
@@ -126,6 +126,13 @@ param_functions config_p_funcs;
 
 static int ParamValueNameAscendingSort(const void *l, const void *r);
 
+
+bool config_continue_if_no_config(bool contin)
+{
+	bool old_contin = continue_if_no_config;
+	continue_if_no_config = contin;
+	return old_contin;
+}
 
 // Function implementations
 
@@ -143,14 +150,14 @@ config_fill_ad( ClassAd* ad, const char *prefix )
 		prefix = get_mySubSystem()->getLocalName();
 	}
 
-	buffer.sprintf( "%s_EXPRS", get_mySubSystem()->getName() );
+	buffer.formatstr( "%s_EXPRS", get_mySubSystem()->getName() );
 	tmp = param( buffer.Value() );
 	if( tmp ) {
 		reqdExprs.initializeFromString (tmp);	
 		free (tmp);
 	}
 
-	buffer.sprintf( "%s_ATTRS", get_mySubSystem()->getName() );
+	buffer.formatstr( "%s_ATTRS", get_mySubSystem()->getName() );
 	tmp = param( buffer.Value() );
 	if( tmp ) {
 		reqdExprs.initializeFromString (tmp);	
@@ -158,14 +165,14 @@ config_fill_ad( ClassAd* ad, const char *prefix )
 	}
 
 	if(prefix) {
-		buffer.sprintf( "%s_%s_EXPRS", prefix, get_mySubSystem()->getName() );
+		buffer.formatstr( "%s_%s_EXPRS", prefix, get_mySubSystem()->getName() );
 		tmp = param( buffer.Value() );
 		if( tmp ) {
 			reqdExprs.initializeFromString (tmp);	
 			free (tmp);
 		}
 
-		buffer.sprintf( "%s_%s_ATTRS", prefix, get_mySubSystem()->getName() );
+		buffer.formatstr( "%s_%s_ATTRS", prefix, get_mySubSystem()->getName() );
 		tmp = param( buffer.Value() );
 		if( tmp ) {
 			reqdExprs.initializeFromString (tmp);	
@@ -179,14 +186,14 @@ config_fill_ad( ClassAd* ad, const char *prefix )
 		while ((tmp = reqdExprs.next())) {
 			expr = NULL;
 			if(prefix) {
-				buffer.sprintf("%s_%s", prefix, tmp);	
+				buffer.formatstr("%s_%s", prefix, tmp);	
 				expr = param(buffer.Value());
 			}
 			if(!expr) {
 				expr = param(tmp);
 			}
 			if(expr == NULL) continue;
-			buffer.sprintf( "%s = %s", tmp, expr );
+			buffer.formatstr( "%s = %s", tmp, expr );
 
 			if( !ad->Insert( buffer.Value() ) ) {
 				dprintf(D_ALWAYS,
@@ -226,7 +233,7 @@ validate_entries( bool ignore_invalid_entry ) {
 			MyString filename;
 			int line_number;
 			param_get_location(name, filename, line_number);
-			tmp.sprintf("   %s (found on line %d of %s)\n", name, line_number, filename.Value());
+			tmp.formatstr("   %s (found on line %d of %s)\n", name, line_number, filename.Value());
 			output += tmp;
 			invalid_entries++;
 		}
@@ -323,6 +330,17 @@ int param_names_matching(Regex & re, ExtArray<const char *>& names)
 	return cAdded;	
 }
 
+int param_names_matching(Regex& re, std::vector<std::string>& names) {
+    const int s0 = names.size();
+    HASHITER it = hash_iter_begin(ConfigTab, TABLESIZE);
+    for (;  !hash_iter_done(it);  hash_iter_next(it)) {
+		const char *name = hash_iter_key(it);
+		if (re.match(name)) names.push_back(name);
+	}
+    hash_iter_delete(&it);
+    return names.size() - s0;
+}
+
 
 static int ParamValueNameAscendingSort(const void *l, const void *r)
 {
@@ -346,7 +364,7 @@ config( int wantsQuiet, bool ignore_invalid_entry, bool wantsExtraInfo )
 {
 #ifdef WIN32
 	char *locale = setlocale( LC_ALL, "English" );
-	dprintf ( D_ALWAYS, "Locale: %s\n", locale );
+	dprintf ( D_FULLDEBUG, "Locale: %s\n", locale );
 #endif
 	real_config( NULL, wantsQuiet, wantsExtraInfo );
 	validate_entries( ignore_invalid_entry );
@@ -424,23 +442,23 @@ condor_auth_config(int is_daemon)
 	if (pbuf) {
 
 		if( !trustedca_buf) {
-			buffer.sprintf( "%s%ccertificates", pbuf, DIR_DELIM_CHAR);
+			buffer.formatstr( "%s%ccertificates", pbuf, DIR_DELIM_CHAR);
 			SetEnv( STR_GSI_CERT_DIR, buffer.Value() );
 		}
 
 		if (!mapfile_buf ) {
-			buffer.sprintf( "%s%cgrid-mapfile", pbuf, DIR_DELIM_CHAR);
+			buffer.formatstr( "%s%cgrid-mapfile", pbuf, DIR_DELIM_CHAR);
 			SetEnv( STR_GSI_MAPFILE, buffer.Value() );
 		}
 
 		if( is_daemon ) {
 			if( !cert_buf ) {
-				buffer.sprintf( "%s%chostcert.pem", pbuf, DIR_DELIM_CHAR);
+				buffer.formatstr( "%s%chostcert.pem", pbuf, DIR_DELIM_CHAR);
 				SetEnv( STR_GSI_USER_CERT, buffer.Value() );
 			}
 	
 			if (!key_buf ) {
-				buffer.sprintf( "%s%chostkey.pem", pbuf, DIR_DELIM_CHAR);
+				buffer.formatstr( "%s%chostkey.pem", pbuf, DIR_DELIM_CHAR);
 				SetEnv( STR_GSI_USER_KEY, buffer.Value() );
 			}
 		}
@@ -479,65 +497,6 @@ condor_auth_config(int is_daemon)
 	(void) is_daemon;	// Quiet 'unused parameter' warnings
 #endif
 }
-
-void
-condor_net_remap_config( bool force_param )
-{
-    char *str = NULL;
-	if( ! force_param && getenv("NET_REMAP_ENABLE") ) {
-			/*
-			  this stuff is already set.  unless the caller is forcing
-			  us to call param() again (e.g. the master is trying to
-			  re-bind() if the CCB broker is down and it's got a list
-			  to try) we should return immediately and leave our
-			  environment alone.  this way, the master can choose what
-			  CCB broker to use for itself and all its children, even
-			  if there's a list and we're using $RANDOM_CHOICE().
-			*/
-		return;
-	}
-		
-		/*
-		  this method is only called if we're enabling a network remap
-		  service.  if we do, we always need to force condor to bind()
-		  to all interfaces (INADDR_ANY).  since we don't want to rely
-		  on users to set this themselves to get CCB working, we'll
-		  set it automatically.  the only harm of setting this is that
-		  we need Condor to automatically handle hostallow stuff for
-		  "localhost", or users need to add localhost to their
-		  hostallow settings as appropriate.  we can't rely on the
-		  later, and the former only works on some platforms.
-		  luckily, the automatic localhost stuff works on all
-		  platforms where CCB works (linux, and we hope, solaris), so
-		  it's safe to turn this on whenever we're using CCB
-		*/
-	insert( "BIND_ALL_INTERFACES", "TRUE", ConfigTab, TABLESIZE );
-	extra_info->AddInternalParam("BIND_ALL_INTERFACES");
-
-    // Env: the type of service
-    SetEnv( "NET_REMAP_ENABLE", "true");
-    str = param("NET_REMAP_SERVICE");
-    if (str) {
-	if (!strcasecmp(str, "DPF")) {
-            SetEnv( "DPF_ENABLE", "true" );
-            free(str);
-            str = NULL;
-            // Env: InAgent
-            if( (str = param("NET_REMAP_INAGENT")) ) {
-                SetEnv( "DPF_INAGENT", str );
-				free(str);
-				str = NULL;
-            }
-            // Env: Routing table
-            if( (str = param("NET_REMAP_ROUTE")) ) {
-                SetEnv( "DPF_ROUTE", str );
-				free(str);
-				str = NULL;
-            }
-        }
-    }
-}
-
 
 void
 real_config(char* host, int wantsQuiet, bool wantExtraInfo)
@@ -605,7 +564,10 @@ real_config(char* host, int wantsQuiet, bool wantExtraInfo)
 		have_config_source = false;
 	}
 
-	if( have_config_source && ! (config_source = find_global()) ) {
+	if( have_config_source && 
+		! (config_source = find_global()) &&
+		! continue_if_no_config)
+	{
 		if( wantsQuiet ) {
 			fprintf( stderr, "%s error: can't find config source.\n",
 					 myDistro->GetCap() );
@@ -638,7 +600,7 @@ real_config(char* host, int wantsQuiet, bool wantExtraInfo)
 	}
 
 		// Read in the global file
-	if( have_config_source ) {
+	if( config_source ) {
 		process_config_source( config_source, "global config source", NULL, true );
 		global_config_source = config_source;
 		free( config_source );
@@ -692,13 +654,6 @@ real_config(char* host, int wantsQuiet, bool wantExtraInfo)
 	if(dirlist) { free(dirlist); dirlist = NULL; }
 	if(newdirlist) { free(newdirlist); newdirlist = NULL; }
 
-	// The following lines should be placed very carefully. Must be after
-	// global and local config sources being processed but before any
-	// call that may be interposed by CCB
-    if ( param_boolean("NET_REMAP_ENABLE", false) ) {
-        condor_net_remap_config();
-    }
-			
 		// Now, insert any macros defined in the environment.
 	char **my_environ = GetEnviron();
 	for( int i = 0; my_environ[i]; i++ ) {
@@ -732,7 +687,7 @@ real_config(char* host, int wantsQuiet, bool wantExtraInfo)
 		// the general mechanism and set START itself --pfc]
 		if( !strcmp( macro_name, "START_owner" ) ) {
 			MyString ownerstr;
-			ownerstr.sprintf( "Owner == \"%s\"", varvalue );
+			ownerstr.formatstr( "Owner == \"%s\"", varvalue );
 			insert( "START", ownerstr.Value(), ConfigTab, TABLESIZE );
 			extra_info->AddEnvironmentParam("START");
 		}
@@ -938,6 +893,7 @@ process_directory( char* dirlist, char* host )
 	while( (dirpath = locals.next()) ) {
 
 		paths = (char **)calloc(65536, sizeof(char *));
+		ASSERT(paths);
 		files = new Directory(dirpath);
 		int i = 0;
 		if(files == NULL) {
@@ -1036,7 +992,7 @@ char*
 find_global()
 {
 	MyString	file;
-	file.sprintf( "%s_config", myDistro->Get() );
+	file.formatstr( "%s_config", myDistro->Get() );
 	return find_file( EnvGetName( ENV_CONFIG), file.Value() );
 }
 
@@ -1097,26 +1053,21 @@ find_file(const char *env_name, const char *file_name)
 	if (!config_source) {
 			// List of condor_config file locations we'll try to open.
 			// As soon as we find one, we'll stop looking.
-		int locations_length = 5;
+		const int locations_length = 4;
 		MyString locations[locations_length];
 			// 1) $HOME/.condor/condor_config
 		struct passwd *pw = getpwuid( geteuid() );
 		if ( !can_switch_ids() && pw && pw->pw_dir ) {
-			sprintf( locations[0], "%s/.%s/%s", pw->pw_dir, myDistro->Get(),
+			formatstr( locations[0], "%s/.%s/%s", pw->pw_dir, myDistro->Get(),
 					 file_name );
 		}
 			// 2) /etc/condor/condor_config
-		locations[1].sprintf( "/etc/%s/%s", myDistro->Get(), file_name );
+		locations[1].formatstr( "/etc/%s/%s", myDistro->Get(), file_name );
 			// 3) /usr/local/etc/condor_config (FreeBSD)
-		locations[2].sprintf( "/usr/local/etc/%s", file_name );
+		locations[2].formatstr( "/usr/local/etc/%s", file_name );
 		if (tilde) {
 				// 4) ~condor/condor_config
-			locations[3].sprintf( "%s/%s", tilde, file_name );
-		}
-			// 5) ${GLOBUS_LOCATION}/etc/condor_config
-		char *globus_location;
-		if ((globus_location = getenv("GLOBUS_LOCATION"))) {
-			locations[4].sprintf( "%s/etc/%s", globus_location, file_name );
+			locations[3].formatstr( "%s/%s", tilde, file_name );
 		}
 
 		int ctr;	
@@ -1263,7 +1214,7 @@ fill_attributes()
 
 		int ver = sysapi_opsys_version();
 		if (ver > 0) {
-			val.sprintf("%d", ver);
+			val.formatstr("%d", ver);
 			insert( "OPSYSVER", val.Value(), ConfigTab, TABLESIZE );
 			extra_info->AddInternalParam("OPSYSVER");
 		}
@@ -1281,7 +1232,7 @@ fill_attributes()
 
 	int major_ver = sysapi_opsys_major_version();
 	if (major_ver > 0) {
-		val.sprintf("%d", major_ver);
+		val.formatstr("%d", major_ver);
 		insert( "OPSYSMAJORVER", val.Value(), ConfigTab, TABLESIZE );
 		extra_info->AddInternalParam("OPSYSMAJORVER");
 	}
@@ -1337,7 +1288,7 @@ fill_attributes()
 	insert( "SUBSYSTEM", get_mySubSystem()->getName(), ConfigTab, TABLESIZE );
 	extra_info->AddInternalParam("SUBSYSTEM");
 
-	val.sprintf("%d",sysapi_phys_memory_raw_no_param());
+	val.formatstr("%d",sysapi_phys_memory_raw_no_param());
 	insert( "DETECTED_MEMORY", val.Value(), ConfigTab, TABLESIZE );
 	extra_info->AddInternalParam("DETECTED_MEMORY");
 
@@ -1352,7 +1303,7 @@ fill_attributes()
 	int num_hyperthread_cpus=0;
 	sysapi_ncpus_raw_no_param(&num_cpus,&num_hyperthread_cpus);
 
-	val.sprintf("%d",num_hyperthread_cpus);
+	val.formatstr("%d",num_hyperthread_cpus);
 	insert( "DETECTED_CORES", val.Value(), ConfigTab, TABLESIZE );
 	extra_info->AddInternalParam("DETECTED_CORES");
 }
@@ -1502,7 +1453,7 @@ param_without_default( const char *name )
 		return NULL;
 	}
 
-	if( DebugFlags & D_CONFIG ) {
+	if( IsDebugLevel( D_CONFIG ) ) {
 		if( strlen(name) < strlen(param_name) ) {
 			param_name[strlen(param_name)-strlen(name)] = '\0';
 			dprintf( D_CONFIG, "Config '%s': using prefix '%s' ==> '%s'\n",
@@ -1853,7 +1804,7 @@ param_double( const char *name, double default_value,
 		// simple literal.  Since that didn't work, now try parsing it
 		// as an expression.
 		ClassAd rhs;
-		float float_result;
+		float float_result = 0.0;
 		if( me ) {
 			rhs = *me;
 		}
@@ -2248,7 +2199,7 @@ init_dynamic_config()
 		// if we're using runtime config, try a subsys-specific config
 		// knob for the root location
 	MyString filename_parameter;
-	filename_parameter.sprintf( "%s_CONFIG", get_mySubSystem()->getName() );
+	filename_parameter.formatstr( "%s_CONFIG", get_mySubSystem()->getName() );
 	tmp = param( filename_parameter.Value() );
 	if( tmp ) {
 		toplevel_persistent_config = tmp;
@@ -2277,7 +2228,7 @@ init_dynamic_config()
 			exit( 1 );
 		}
 	}
-	toplevel_persistent_config.sprintf( "%s%c.config.%s", tmp,
+	toplevel_persistent_config.formatstr( "%s%c.config.%s", tmp,
 										DIR_DELIM_CHAR,
 										get_mySubSystem()->getName() );
 	free(tmp);
@@ -2329,8 +2280,8 @@ set_persistent_config(char *admin, char *config)
 	priv = set_root_priv();
 	if (config && config[0]) {	// (re-)set config
 			// write new config to temporary file
-		filename.sprintf( "%s.%s", toplevel_persistent_config.Value(), admin );
-		tmp_filename.sprintf( "%s.tmp", filename.Value() );
+		filename.formatstr( "%s.%s", toplevel_persistent_config.Value(), admin );
+		tmp_filename.formatstr( "%s.tmp", filename.Value() );
 		do {
 			MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 			unlink( tmp_filename.Value() );
@@ -2384,7 +2335,7 @@ set_persistent_config(char *admin, char *config)
 	}		
 
 	// update admin list on disk
-	tmp_filename.sprintf( "%s.tmp", toplevel_persistent_config.Value() );
+	tmp_filename.formatstr( "%s.tmp", toplevel_persistent_config.Value() );
 	do {
 		MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 		unlink( tmp_filename.Value() );
@@ -2446,7 +2397,7 @@ set_persistent_config(char *admin, char *config)
 
 	// if we removed a config, then we should clean up by removing the file(s)
 	if (!config || !config[0]) {
-		filename.sprintf( "%s.%s", toplevel_persistent_config.Value(), admin );
+		filename.formatstr( "%s.%s", toplevel_persistent_config.Value(), admin );
 		MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 		unlink( filename.Value() );
 		if (PersistAdminList.number() == 0) {
@@ -2537,7 +2488,7 @@ process_persistent_configs()
 	while ((tmp = PersistAdminList.next())) {
 		processed = true;
 		MyString config_source;
-		config_source.sprintf( "%s.%s", toplevel_persistent_config.Value(),
+		config_source.formatstr( "%s.%s", toplevel_persistent_config.Value(),
 							   tmp );
 		rval = Read_config( config_source.Value(), ConfigTab, TABLESIZE,
 							 EXPAND_LAZY, true, extra_info );
@@ -2683,6 +2634,9 @@ bool param(MyString &buf,char const *param_name,char const *default_value)
 	else if( default_value ) {
 		buf = default_value;
 	}
+	else {
+		buf = "";
+	}
 	free( param_value );
 	return found;
 }
@@ -2698,6 +2652,9 @@ bool param(std::string &buf,char const *param_name,char const *default_value)
 	else if( default_value ) {
 		buf = default_value;
 	}
+	else {
+		buf = "";
+	}
 	free( param_value );
 	return found;
 }
@@ -2707,6 +2664,7 @@ param_functions* get_param_functions()
 	config_p_funcs.set_param_func(&param);
 	config_p_funcs.set_param_bool_int_func(&param_boolean_int);
 	config_p_funcs.set_param_wo_default_func(&param_without_default);
+	config_p_funcs.set_param_int_func(&param_integer);
 
 	return &config_p_funcs;
 }

@@ -51,10 +51,10 @@ public:
 	void SetKeypairId( const char *keypair_id );
 	void SetInstanceId( const char *instance_id );
 	void SetClientToken( const char *client_token );
-	void SetRemoteJobId( const char *client_token, const char *instance_id );
+	void EC2SetRemoteJobId( const char *client_token, const char *instance_id );
 	void SetRemoteVMName(const char * name);
+	void SetRequestID( const char * requestID );
 	
-	static int probeInterval;
 	static int submitInterval;
 	static int gahpCallTimeout;
 	static int maxConnectFailures;
@@ -62,7 +62,6 @@ public:
 	static int pendingWaitTime;
 	static int maxRetryTimes;
 	
-	static void setProbeInterval( int new_interval ) 	{ probeInterval = new_interval; }
 	static void setSubmitInterval( int new_interval )	{ submitInterval = new_interval; }
 	static void setGahpCallTimeout( int new_timeout )	{ gahpCallTimeout = new_timeout; }
 	static void setConnectFailureRetry( int count )		{ maxConnectFailures = count; }
@@ -79,6 +78,8 @@ public:
 
 	EC2Resource *myResource;
 	GahpClient *gahp;
+
+    void StatusUpdate( const char * newStatus );
 
 private:
 	// create dynamic input parameters
@@ -110,6 +111,11 @@ private:
 	std::string m_client_token;
 	StringList* m_group_names;
 	
+	std::string m_spot_price;
+	std::string m_spot_request_id;
+	// This is actually a global.
+	const char * m_failure_injection;
+	
 	// remove created temporary keypair file
 	bool remove_keypair_file(const char* filename);
 	
@@ -121,6 +127,8 @@ private:
 
 	// print out error codes returned from grid_manager
 	void print_error_code( const char* error_code, const char* function_name );
+
+    bool probeNow;
 };
 
 #endif

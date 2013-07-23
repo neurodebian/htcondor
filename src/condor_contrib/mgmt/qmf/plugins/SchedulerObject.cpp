@@ -161,7 +161,7 @@ void SchedulerObject::useNewStats(const ClassAd &ad) {
 
     //INTEGER(JobsCompletedCum);
     if (ad.LookupInteger("JobsCompleted", jobs_completed)) {
-        mgmtObject->set_JobsCompletedCum((uint32_t) num);
+        mgmtObject->set_JobsCompletedCum((uint32_t) jobs_completed);
     } else {
         dprintf(D_FULLDEBUG, "Warning: Could not find attr 'JobsCompleted' for 'JobsCompletedCum'\n");
     }
@@ -278,8 +278,8 @@ SchedulerObject::update(const ClassAd &ad)
 	mgmtObject->set_System(mgmtObject->get_Machine());
 
 	// debug
-	if (DebugFlags & D_FULLDEBUG) {
-		const_cast<ClassAd*>(&ad)->dPrint(D_FULLDEBUG|D_NOHEADER);
+	if (IsFulldebug(D_FULLDEBUG)) {
+		dPrintAd(D_FULLDEBUG|D_NOHEADER, const_cast<ClassAd&>(ad));
 	}
 }
 
@@ -431,7 +431,7 @@ SchedulerObject::Submit(Variant::Map &jobAdMap, std::string &id, std::string &te
 		// 7. Return identifier
 		// TODO: dag ids?
 	MyString tmp;
-	tmp.sprintf("%s#%d.%d", Name, cluster, proc);
+	tmp.formatstr("%s#%d.%d", Name, cluster, proc);
 	id = tmp.Value();
 
 	return STATUS_OK;

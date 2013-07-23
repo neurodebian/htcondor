@@ -44,15 +44,15 @@ void ExitSuccess();
 	// Note: these functions are declared 'extern "C"' where they're
 	// implemented; if we don't do that here we get a link failure
 	// (I think because of the name mangling).  wenger 2007-02-09.
-extern "C" void process_config_source( char* file, const char* name,
-			char* host, int required );
+//extern "C" void process_config_source( char* file, const char* name,
+//			char* host, int required );
 extern "C" bool is_piped_command(const char* filename);
 
 static char* lockFileName = NULL;
 
 static Dagman dagman;
 
-strict_level_t Dagman::_strict = DAG_STRICT_0;
+strict_level_t Dagman::_strict = DAG_STRICT_1;
 
 //---------------------------------------------------------------------------
 static void Usage() {
@@ -82,6 +82,8 @@ static void Usage() {
 			"\t\t[-Outfile_dir <directory>]\n"
 			"\t\t[-Update_submit]\n"
 			"\t\t[-Import_env]\n"
+			"\t\t[-Suppress_notification]\n"
+			"\t\t[-Dont_Suppress_notification]\n"
             "\twhere NAME is the name of your DAG.\n"
             "\tdefault -Debug is -Debug %d\n", DEBUG_NORMAL);
 	DC_Exit( EXIT_ERROR );
@@ -131,20 +133,15 @@ Dagman::Dagman() :
 	_maxJobHolds(100),
 	_runPost(true),
 	_defaultPriority(0),
-	_claim_hold_time(20)
+	_claim_hold_time(20),
+	_dagmanClassad(NULL)
 {
     debug_level = DEBUG_VERBOSE;  // Default debug level is verbose output
 }
 
-
 Dagman::~Dagman()
 {
-	// check if dag is NULL, since we may have 
-	// already delete'd it in the dag.CleanUp() method.
-	if ( dag != NULL ) {
-		delete dag;
-		dag = NULL;
-	}
+	CleanUp();
 }
 
 	// 
@@ -230,9 +227,21 @@ Dagman::Config()
 		m_user_log_scan_interval, 1, INT_MAX);
 	debug_printf( DEBUG_NORMAL, "DAGMAN_USER_LOG_SCAN_INTERVAL setting: %d\n",
 				m_user_log_scan_interval );
+
 	_defaultPriority = param_integer("DAGMAN_DEFAULT_PRIORITY", 0, INT_MIN,
 		INT_MAX, false);
+	debug_printf( DEBUG_NORMAL, "DAGMAN_DEFAULT_PRIORITY setting: %d\n",
+				_defaultPriority );
 
+	_submitDagDeepOpts.always_use_node_log = param_boolean( "DAGMAN_ALWAYS_USE_NODE_LOG", true);
+	debug_printf( DEBUG_NORMAL, "DAGMAN_ALWAYS_USE_NODE_LOG setting: %s\n",
+				_submitDagDeepOpts.always_use_node_log ? "True" : "False" );
+
+	_submitDagDeepOpts.suppress_notification = param_boolean(
+		"DAGMAN_SUPPRESS_NOTIFICATION",
+		_submitDagDeepOpts.suppress_notification);
+	debug_printf( DEBUG_NORMAL, "DAGMAN_SUPPRESS_NOTIFICATION setting: %s\n",
+		_submitDagDeepOpts.suppress_notification ? "True" : "False" );
 
 		// Event checking setup...
 
@@ -263,7 +272,7 @@ Dagman::Config()
 		debug_printf( DEBUG_NORMAL, "Warning: "
 				"DAGMAN_IGNORE_DUPLICATE_JOB_EXECUTION "
 				"is deprecated -- used DAGMAN_ALLOW_EVENTS instead\n" );
-		check_warning_strictness( DAG_STRICT_1 );
+		check_warning_strictness( DAG_STRICT_2 );
 	}
 
 		// Now get the new DAGMAN_ALLOW_EVENTS value -- that can override
@@ -404,7 +413,10 @@ Dagman::Config()
 
 	_maxJobHolds = param_integer( "DAGMAN_MAX_JOB_HOLDS", _maxJobHolds,
 				0, 1000000 );
+	debug_printf( DEBUG_NORMAL, "DAGMAN_MAX_JOB_HOLDS setting: %d\n", _maxJobHolds );
+
 	_claim_hold_time = param_integer( "DAGMAN_HOLD_CLAIM_TIME", _claim_hold_time, 0, 3600);
+	debug_printf( DEBUG_NORMAL, "DAGMAN_HOLD_CLAIM_TIME setting: %d\n", _claim_hold_time );
 
 	char *debugSetting = param( "ALL_DEBUG" );
 	debug_printf( DEBUG_NORMAL, "ALL_DEBUG setting: %s\n",
@@ -418,6 +430,16 @@ Dagman::Config()
 				debugSetting ? debugSetting : "" );
 	if ( debugSetting ) {
 		free( debugSetting );
+	}
+
+		// Check for the default/node/workflow log being in /tmp
+	if ( _defaultNodeLog &&
+				strstr( _defaultNodeLog, "/tmp" ) == _defaultNodeLog ) {
+		debug_printf( DEBUG_QUIET, "Warning: "
+					"DAGMAN_DEFAULT_NODE_LOG file %s is in /tmp\n",
+					_defaultNodeLog );
+		check_warning_strictness( _submitDagDeepOpts.always_use_node_log ?
+					DAG_STRICT_1 : DAG_STRICT_2 );
 	}
 
 	// enable up the debug cache if needed
@@ -452,6 +474,7 @@ main_shutdown_fast()
 // this can be called by other functions, or by DC when the schedd is
 // shutdown gracefully
 void main_shutdown_graceful() {
+	print_status();
 	dagman.dag->DumpNodeStatus( true, false );
 	dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_RESTART );
 	dagman.CleanUp();
@@ -467,7 +490,8 @@ void main_shutdown_rescue( int exitVal, Dag::dag_status dagStatus ) {
 	}
 	inShutdownRescue = true;
 
-	dagman.dag->_dagStatus = dagStatus;
+		// If is here in case we get an error during parsing...
+	if ( dagman.dag ) dagman.dag->_dagStatus = dagStatus;
 	debug_printf( DEBUG_QUIET, "Aborting DAG...\n" );
 		// Avoid writing two different rescue DAGs if the "main" DAG and
 		// the final node (if any) both fail.
@@ -509,11 +533,11 @@ void main_shutdown_rescue( int exitVal, Dag::dag_status dagStatus ) {
 			inShutdownRescue = false;
 			return;
 		}
+		print_status();
 		dagman.dag->DumpNodeStatus( false, true );
 		dagman.dag->GetJobstateLog().WriteDagmanFinished( exitVal );
 	}
-	MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-	unlink( lockFileName ); 
+	tolerant_unlink( lockFileName ); 
 	dagman.CleanUp();
 	inShutdownRescue = false;
 	DC_Exit( exitVal );
@@ -529,10 +553,10 @@ int main_shutdown_remove(Service *, int) {
 }
 
 void ExitSuccess() {
+	print_status();
 	dagman.dag->DumpNodeStatus( false, false );
 	dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_OKAY );
-	MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-	unlink( lockFileName ); 
+	tolerant_unlink( lockFileName ); 
 	dagman.CleanUp();
 	DC_Exit( EXIT_OKAY );
 }
@@ -591,6 +615,8 @@ void main_init (int argc, char ** const argv) {
 		// (otherwise it will be set to "-1.-1.-1")
 	dagman.DAGManJobId.SetFromString( getenv( EnvGetName( ENV_ID ) ) );
 
+	dagman._dagmanClassad = new DagmanClassad( dagman.DAGManJobId );
+
 	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 		// Minimum legal version for a .condor.sub file to be compatible
 		// with this condor_dagman binary.
@@ -609,7 +635,7 @@ void main_init (int argc, char ** const argv) {
 
 		// Construct a string of the minimum submit file version.
 	MyString minSubmitVersionStr;
-	minSubmitVersionStr.sprintf( "%d.%d.%d",
+	minSubmitVersionStr.formatstr( "%d.%d.%d",
 				MIN_SUBMIT_FILE_VERSION.majorVer,
 				MIN_SUBMIT_FILE_VERSION.minorVer,
 				MIN_SUBMIT_FILE_VERSION.subMinorVer );
@@ -682,7 +708,7 @@ void main_init (int argc, char ** const argv) {
 			debug_printf( DEBUG_QUIET, "Warning: -NoEventChecks is "
 						"ignored; please use the DAGMAN_ALLOW_EVENTS "
 						"config parameter instead\n");
-			check_warning_strictness( DAG_STRICT_1 );
+			check_warning_strictness( DAG_STRICT_2 );
 
         } else if( !strcasecmp( "-AllowLogError", argv[i] ) ) {
 			dagman.allowLogError = true;
@@ -740,6 +766,12 @@ void main_init (int argc, char ** const argv) {
             }
 			dagman._submitDagDeepOpts.strNotification = argv[i];
 
+		} else if( !strcasecmp( "-suppress_notification",argv[i] ) ) {
+			dagman._submitDagDeepOpts.suppress_notification = true;
+
+		} else if( !strcasecmp( "-dont_suppress_notification",argv[i] ) ) {
+			dagman._submitDagDeepOpts.suppress_notification = false;
+
         } else if( !strcasecmp( "-dagman", argv[i] ) ) {
             i++;
             if( argc <= i || strcmp( argv[i], "" ) == 0 ) {
@@ -769,6 +801,8 @@ void main_init (int argc, char ** const argv) {
 			Usage();
 		}
 		dagman._submitDagDeepOpts.priority = atoi(argv[i]);
+		} else if( !strcasecmp( "-dont_use_default_node_log", argv[i] ) ) {
+			dagman._submitDagDeepOpts.always_use_node_log = false;
         } else {
     		debug_printf( DEBUG_SILENT, "\nUnrecognized argument: %s\n",
 						argv[i] );
@@ -794,7 +828,7 @@ void main_init (int argc, char ** const argv) {
 	if ( !MultiLogFiles::makePathAbsolute( tmpDefaultLog, errstack) ) {
        	debug_printf( DEBUG_QUIET, "Unable to convert default log "
 					"file name to absolute path: %s\n",
-					errstack.getFullText() );
+					errstack.getFullText().c_str() );
 		dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_ERROR );
 		DC_Exit( EXIT_ERROR );
 	}
@@ -822,7 +856,7 @@ void main_init (int argc, char ** const argv) {
 
 		// Just generate this message fragment in one place.
 	MyString versionMsg;
-	versionMsg.sprintf("the version (%s) of this DAG's Condor submit "
+	versionMsg.formatstr("the version (%s) of this DAG's Condor submit "
 				"file (created by condor_submit_dag)", csdVersion );
 
 		// Make sure version in submit file is valid.
@@ -941,7 +975,7 @@ void main_init (int argc, char ** const argv) {
 
 	if ( dagman.doRescueFrom != 0 ) {
 		rescueDagNum = dagman.doRescueFrom;
-		rescueDagMsg.sprintf( "Rescue DAG number %d specified", rescueDagNum );
+		rescueDagMsg.formatstr( "Rescue DAG number %d specified", rescueDagNum );
 		RenameRescueDagsAfter( dagman.primaryDagFile.Value(),
 					dagman.multiDags, rescueDagNum, dagman.maxRescueDagNum );
 
@@ -949,7 +983,7 @@ void main_init (int argc, char ** const argv) {
 		rescueDagNum = FindLastRescueDagNum(
 					dagman.primaryDagFile.Value(),
 					dagman.multiDags, dagman.maxRescueDagNum );
-		rescueDagMsg.sprintf( "Found rescue DAG number %d", rescueDagNum );
+		rescueDagMsg.formatstr( "Found rescue DAG number %d", rescueDagNum );
 	}
 
 		//
@@ -1030,8 +1064,7 @@ void main_init (int argc, char ** const argv) {
 			}
 			
 			dagman.dag->RemoveRunningJobs(dagman, true);
-			MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-			unlink( lockFileName );
+			tolerant_unlink( lockFileName );
 			dagman.CleanUp();
 			
 				// Note: debug_error calls DC_Exit().
@@ -1087,8 +1120,7 @@ void main_init (int argc, char ** const argv) {
 			}
 			
 			dagman.dag->RemoveRunningJobs(dagman, true);
-			MSC_SUPPRESS_WARNING_FIXME(6031) // return falue of unlink ignored.
-			unlink( lockFileName );
+			tolerant_unlink( lockFileName );
 			dagman.CleanUp();
 			
 				// Note: debug_error calls DC_Exit().
@@ -1169,6 +1201,36 @@ void main_init (int argc, char ** const argv) {
 					// We should never get to here!
 				}
 			}
+
+				// Not using the node log is the backward compatible thing to do,
+				// so we do not need to check below.
+			if(dagman._submitDagDeepOpts.always_use_node_log) { 
+				bool has_new_default_log = access(dagman._defaultNodeLog, F_OK) == 0; // Check for existence of the default log file
+				if(!submitFileVersion.built_since_version(7,9,1)) {
+					debug_printf( DEBUG_QUIET, "Submit file version indicates submit is too old. "
+						"Falling back to 7.8 behavior of not using the default node log\n");
+					dagman._submitDagDeepOpts.always_use_node_log = false;
+						// Note:  we have to explicitly turn off the default
+						// log file here because
+						// _submitDagDeepOpts.always_use_node_log is
+						// referenced in the Dag constructor, so just
+						// changing that here won't do us any good.
+					dagman.dag->UseDefaultNodeLog(false);
+				} else {
+					if(!has_new_default_log) {
+							// We are in recovery, but the default log does not exist.
+							// Fall back to 7.8 behavior
+						debug_printf( DEBUG_QUIET, "Default node log does not exist. "
+							"Falling back to 7.8 behavior of not using the default node log\n");
+						dagman._submitDagDeepOpts.always_use_node_log = false;
+						dagman.dag->UseDefaultNodeLog(false);
+					} else if(submitFileVersion.compare_versions("$CondorVersion: 7.9.0 May 2 2012 $") == 0) {
+						debug_printf( DEBUG_QUIET, "WARNING: Submit file version 7.9.0 detected.  Bad behavior "
+							"may occur going forward.  Since you were using a development version of HTCondor, "
+							"you probably know what to do to resolve the problem...\n");
+					}
+				}
+			}
         }
 
 			//
@@ -1182,6 +1244,7 @@ void main_init (int argc, char ** const argv) {
             dagman.dag->PrintReadyQ( DEBUG_DEBUG_1 );
             debug_error( 1, DEBUG_QUIET, "ERROR while bootstrapping\n");
         }
+		print_status();
     }
 
     debug_printf( DEBUG_VERBOSE, "Registering condor_event_timer...\n" );
@@ -1214,6 +1277,12 @@ print_status() {
 	debug_printf( DEBUG_VERBOSE, "%d job proc(s) currently held\n",
 				dagman.dag->NumHeldJobProcs() );
 	dagman.dag->PrintDeferrals( DEBUG_VERBOSE, false );
+
+	if ( dagman._dagmanClassad ) {
+		dagman._dagmanClassad->Update( total, done, pre, submitted, post,
+					ready, failed, unready, dagman.dag->_dagStatus,
+					dagman.dag->Recovery() );
+	}
 }
 
 void condor_event_timer () {

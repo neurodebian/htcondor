@@ -52,6 +52,8 @@
 #include "simplelist.h"
 #include "subsystem_info.h"
 
+#include <sstream>
+
 char	*MyName;
 
 StringList params;
@@ -119,7 +121,8 @@ usage()
 	fprintf( stderr, "   -local-name name\t(Specify a local name for use with the config system)\n" );
 	fprintf( stderr, "   -verbose\t\t(print information about where variables are defined)\n" );
 	fprintf( stderr, "   -dump\t\t(print locally defined variables)\n" );
-	fprintf( stderr, "   -expand\t\t(with -dump, expand macros from config files\n" );
+	fprintf( stderr, "   -expand\t\t(with -dump, expand macros from config files)\n" );
+	fprintf( stderr, "   -evaluate\t\t(when querying <daemon>, evaluate param with respect to classad from <daemon>)\n" );
 	fprintf( stderr, "   -config\t\t(print the locations of found config files)\n" );
 	my_exit( 1 );
 }
@@ -128,6 +131,18 @@ usage()
 char* GetRemoteParam( Daemon*, char* );
 void  SetRemoteParam( Daemon*, char*, ModeType );
 static void PrintConfigSources(void);
+
+
+char* EvaluatedValue(char const* value, ClassAd const* ad) {
+    classad::Value res;
+    ClassAd empty;
+    bool rc = (ad) ? ad->EvaluateExpr(value, res) : empty.EvaluateExpr(value, res);
+    if (!rc) return NULL;
+    std::stringstream ss;
+    ss << res;
+    return strdup(ss.str().c_str());
+}
+
 
 int
 main( int argc, char* argv[] )
@@ -140,10 +155,10 @@ main( int argc, char* argv[] )
 	bool    verbose = false;
 	bool    dump_all_variables = false;
 	bool    expand_dumped_variables = false;
+	bool    evaluate_daemon_vars = false;
 	bool    print_config_sources = false;
 	bool	write_config = false;
 	bool	debug = false;
-	param_functions *p_funcs = NULL;
 	
 	PrintType pt = CONDOR_NONE;
 	ModeType mt = CONDOR_QUERY;
@@ -233,6 +248,8 @@ main( int argc, char* argv[] )
 			dump_all_variables = true;
 		} else if( match_prefix( argv[i], "-expand" ) ) {
 			expand_dumped_variables = true;
+		} else if( match_prefix( argv[i], "-evaluate" ) ) {
+			evaluate_daemon_vars = true;
 		} else if( match_prefix( argv[i], "-writeconfig" ) ) {
 			write_config = true;
 		} else if( match_prefix( argv[i], "-debug" ) ) {
@@ -298,9 +315,7 @@ main( int argc, char* argv[] )
 	}
 
 	if (debug) {
-		p_funcs = get_param_functions();
-		Termlog = 1;
-		dprintf_config( "TOOL", p_funcs );
+		dprintf_set_tool_debug("TOOL", 0);
 	}
 
 	/* XXX -dump only currently spits out variables found through the
@@ -438,6 +453,12 @@ main( int argc, char* argv[] )
 		}
 	}
 
+    if (target && evaluate_daemon_vars && !target->daemonAd()) {
+        // NULL is one possible return value from this method, for example startd
+        fprintf(stderr, "Warning: Classad for %s daemon '%s' is null, will evaluate expressions against empty classad\n", 
+                daemonString(target->type()), target->name());
+    }
+
 	while( (tmp = params.next()) ) {
 		if( mt == CONDOR_SET || mt == CONDOR_RUNTIME_SET ||
 			mt == CONDOR_UNSET || mt == CONDOR_RUNTIME_UNSET ) {
@@ -445,6 +466,15 @@ main( int argc, char* argv[] )
 		} else {
 			if( target ) {
 				value = GetRemoteParam( target, tmp );
+                if (value && evaluate_daemon_vars) {
+                    char* ev = EvaluatedValue(value, target->daemonAd());
+                    if (ev != NULL) {
+                        free(value);
+                        value = ev;
+                    } else {
+                        fprintf(stderr, "Warning: Failed to evaluate '%s', returning it as config value\n", value);
+                    }
+                }
 			} else {
 				value = param( tmp );
 			}

@@ -28,10 +28,9 @@ int
 main(int argc, char** argv)
 {
 	int retval = 0;
-	Termlog = 1;
-	dprintf_config("TOOL", get_param_functions());
+	dprintf_set_tool_debug("TOOL", 0);
 
-	set_debug_flags("D_ALWAYS");
+	set_debug_flags(0, D_ALWAYS);
 	config();
 	retval = sysapi_test_dump_all(argc, argv);
 	printf("Failed tests = %d\n",retval);

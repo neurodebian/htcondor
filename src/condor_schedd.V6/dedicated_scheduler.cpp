@@ -122,8 +122,8 @@ AllocationNode::setClaimId( const char* new_id )
 void
 AllocationNode::display( void )
 {
-	int level = D_FULLDEBUG;
-	if( ! (DebugFlags & level) ) {
+	const int level = D_FULLDEBUG;
+	if( ! IsFulldebug(D_FULLDEBUG) ) {
 		return;
 	}
 	dprintf( level, "Allocation for job %d.0, nprocs: %d\n",
@@ -557,8 +557,8 @@ DedicatedScheduler::initialize( void )
 
 		// Next, fill in the dummy job ad we're going to send to 
 		// startds for claiming them.
-	dummy_job.SetMyTypeName( JOB_ADTYPE );
-	dummy_job.SetTargetTypeName( STARTD_ADTYPE );
+	SetMyTypeName( dummy_job, JOB_ADTYPE );
+	SetTargetTypeName( dummy_job, STARTD_ADTYPE );
 	dummy_job.Assign( ATTR_REQUIREMENTS, true );
 	dummy_job.Assign( ATTR_OWNER, ds_owner );
 	dummy_job.Assign( ATTR_USER, ds_name );
@@ -705,7 +705,7 @@ DedicatedScheddNegotiate::scheduler_handleMatch(PROC_ID job_id,char const *claim
 	Daemon startd(&match_ad,DT_STARTD,NULL);
 	if( !startd.addr() ) {
 		dprintf( D_ALWAYS, "Can't find address of startd in match ad:\n" );
-		match_ad.dPrint(D_ALWAYS);
+		dPrintAd(D_ALWAYS, match_ad);
 		return false;
 	}
 
@@ -859,7 +859,7 @@ DedicatedScheduler::releaseClaim( match_rec* m_rec, bool use_tcp )
 	sock->put( m_rec->claimId() );
 	sock->end_of_message();
 
-	if( DebugFlags & D_FULLDEBUG ) { 
+	if( IsFulldebug(D_FULLDEBUG) ) { 
 		char name_buf[256];
 		name_buf[0] = '\0';
 		m_rec->my_match_ad->LookupString( ATTR_NAME, name_buf, sizeof(name_buf) );
@@ -926,6 +926,8 @@ DedicatedScheduler::sendAlives( void )
 	match_rec	*mrec;
 	int		  	numsent=0;
 
+	BeginTransaction();
+
 	all_matches->startIterations();
 	while( all_matches->iterate(mrec) == 1 ) {
 		if( mrec->m_startd_sends_alives == false &&
@@ -934,7 +936,19 @@ DedicatedScheduler::sendAlives( void )
 				numsent++;
 			}
 		}
+
+		if (mrec->m_startd_sends_alives && (mrec->status == M_ACTIVE)) {
+
+				// in receive_startd_update, we've updated the lease time only in the job ad
+				// actually write it to the job log here in one big transaction.
+			int renew_time = 0;
+			GetAttributeInt(mrec->cluster,mrec->proc, ATTR_LAST_JOB_LEASE_RENEWAL,&renew_time);
+			SetAttributeInt( mrec->cluster, mrec->proc, ATTR_LAST_JOB_LEASE_RENEWAL, renew_time ); 
+		}
 	}
+
+	CommitTransaction();
+
 	if( numsent ) {
 		dprintf( D_PROTOCOL, "## 6. (Done sending alive messages to "
 				 "%d dedicated startds)\n", numsent );
@@ -975,8 +989,7 @@ DedicatedScheduler::reaper( int pid, int status )
 
 	if( GetAttributeInt(srec->job_id.cluster, srec->job_id.proc, 
 						ATTR_JOB_STATUS, &q_status) < 0 ) {
-		EXCEPT( "ERROR no job status for %d.%d in "
-				"DedicatedScheduler::reaper()!",
+		dprintf(D_ALWAYS, "Job (%d.%d) for reaped shadow has already been removed.\n",
 				srec->job_id.cluster, srec->job_id.proc );
 	}
 
@@ -1212,7 +1225,7 @@ DedicatedScheduler::giveMatches( int, Stream* stream )
 			}				
 			//job_ad = new ClassAd( *((*alloc->jobs)[p]) );
 			job_ad = dollarDollarExpand(0,0, (*alloc->jobs)[p], (*matches)[i]->my_match_ad, true);
-			if( ! job_ad->put(*stream) ) {
+			if( ! putClassAd(stream, *job_ad) ) {
 				dprintf( D_ALWAYS, "ERROR in giveMatches: "
 						 "can't send job classad for proc %d\n", p );
 				delete job_ad;
@@ -1314,12 +1327,18 @@ DedicatedScheduler::sortJobs( void )
 		std::string fifoConstraint;
 		// "JobUniverse == PARALLEL_UNIVERSE && JobStatus == HELD && HoldReasonCode == HOLD_SpoolingInput
 
-		sprintf(fifoConstraint, "%s == %d && %s == %d && %s == %d", ATTR_JOB_UNIVERSE, CONDOR_UNIVERSE_PARALLEL, 
+		formatstr(fifoConstraint, "%s == %d && %s == %d && %s == %d", ATTR_JOB_UNIVERSE, CONDOR_UNIVERSE_PARALLEL, 
 																ATTR_JOB_STATUS, HELD, 
 																ATTR_HOLD_REASON_CODE, CONDOR_HOLD_CODE_SpoolingInput);
-		ClassAd *spoolingInJob = GetJobByConstraint(fifoConstraint.c_str());
-		if (spoolingInJob) {
-			spoolingInJob->LookupInteger(ATTR_CLUSTER_ID, cluster_causing_skippage);
+		ClassAd *spoolingInJob = NULL;
+		bool firstTime = true;
+		while ((spoolingInJob = GetNextJobByConstraint(fifoConstraint.c_str(), firstTime))) {
+			firstTime = false;
+			int spooling_cluster_id = INT_MAX;
+			spoolingInJob->LookupInteger(ATTR_CLUSTER_ID, spooling_cluster_id);
+			if (spooling_cluster_id < cluster_causing_skippage) {
+				cluster_causing_skippage = spooling_cluster_id;
+			}
 		}
 	}
 
@@ -1520,7 +1539,7 @@ DedicatedScheduler::getDedicatedResourceInfo( void )
 		// Make a new list to hold our resource classads.
 	resources = new ClassAdList;
 
-    constraint.sprintf("DedicatedScheduler == \"%s\"", name());
+    constraint.formatstr("DedicatedScheduler == \"%s\"", name());
 	query.addORConstraint( constraint.Value() );
 
 		// This should fill in resources with all the classads we care
@@ -1635,7 +1654,7 @@ DedicatedScheduler::sortResources( void )
 
 			// If it is active, or on its way to becoming active,
 			// mark it as busy
-		if( (mrec->status == M_ACTIVE) ){
+		if( mrec->status == M_ACTIVE ){
 			busy_resources->Append( res );
 			continue;
 		}
@@ -1659,7 +1678,7 @@ DedicatedScheduler::sortResources( void )
 
     duplicate_partitionable_res(unclaimed_resources);
 
-	if( DebugFlags & D_FULLDEBUG ) {
+	if( IsFulldebug(D_FULLDEBUG) ) {
 		dprintf(D_FULLDEBUG, "idle resource list\n");
 		idle_resources->display( D_FULLDEBUG );
 
@@ -2333,30 +2352,31 @@ DedicatedScheduler::computeSchedule( void )
 
 				busy_resources->Rewind();
 				while (ClassAd *machine = busy_resources->Next()) {
-					EvalResult result;
+					classad::Value result;
 					bool requirement = false;
 
 						// See if this machine has a true
 						// SCHEDD_PREEMPTION_REQUIREMENT
 					requirement = EvalExprTree( preemption_req, machine, job,
-												&result );
+												result );
 					if (requirement) {
-						if (result.type == LX_INTEGER) {
-							requirement = result.i;
+						bool val;
+						if (result.IsBooleanValue(val)) {
+							requirement = val;
 						}
 					}
 
 						// If it does
 					if (requirement) {
-						float rank = 0.0;
+						double rank = 0.0;
 
 							// Evaluate its SCHEDD_PREEMPTION_RANK in
 							// the context of this job
 						int rval;
 						rval = EvalExprTree( preemption_rank, machine, job,
-											 &result );
-						if( !rval || result.type != LX_FLOAT) {
-								// The result better be a float
+											 result );
+						if( !rval || !result.IsNumber(rank) ) {
+								// The result better be a number
 							const char *s = ExprTreeToString( preemption_rank );
 							char *m = NULL;
 							machine->LookupString( ATTR_NAME, &m );
@@ -2366,7 +2386,6 @@ DedicatedScheduler::computeSchedule( void )
 							free(m);
 							continue;
 						}
-						rank = result.f;
 						preempt_candidate_array[num_candidates].rank = rank;
 						preempt_candidate_array[num_candidates].cluster_id = cluster;
 						preempt_candidate_array[num_candidates].machine_ad = machine;
@@ -2688,19 +2707,6 @@ DedicatedScheduler::removeAllocation( shadow_rec* srec )
 		n = matches->getlast();
 		for( m=0 ; m <= n ; m++ ) {
 			deallocMatchRec( (*matches)[m] );
-		}
-	}
-
-		/* it may be that the mpi shadow crashed and left around a 
-		   file named 'procgroup' in the IWD of the job.  We should 
-		   check and delete it here. */
-	std::string pg_file;
-	((*alloc->jobs)[0])->LookupString( ATTR_JOB_IWD, pg_file );  
-	pg_file += "/procgroup";
-	if ( unlink ( pg_file.c_str() ) == -1 ) {
-		if ( errno != ENOENT ) {
-			dprintf ( D_FULLDEBUG, "Couldn't remove %s. errno %d.\n", 
-					  pg_file.c_str(), errno );
 		}
 	}
 
@@ -3138,8 +3144,8 @@ DedicatedScheduler::publishRequestAd( void )
 
 	dprintf( D_FULLDEBUG, "In DedicatedScheduler::publishRequestAd()\n" );
 
-	ad.SetMyTypeName(SUBMITTER_ADTYPE);
-	ad.SetTargetTypeName(STARTD_ADTYPE);
+	SetMyTypeName(ad, SUBMITTER_ADTYPE);
+	SetTargetTypeName(ad, STARTD_ADTYPE);
 
         // Publish all DaemonCore-specific attributes, which also handles
         // SCHEDD_ATTRS for us.
@@ -3251,7 +3257,7 @@ DedicatedScheduler::makeGenericAdFromJobAd(ClassAd *job)
 		// >= the duration of the job...
 
 	MyString buf;
-	buf.sprintf( "%s = (Target.DedicatedScheduler == \"%s\") && "
+	buf.formatstr( "%s = (Target.DedicatedScheduler == \"%s\") && "
 				 "(Target.RemoteOwner =!= \"%s\") && (%s)", 
 				 ATTR_REQUIREMENTS, name(), name(), rhs );
 	req->InsertOrUpdate( buf.Value() );
@@ -3323,7 +3329,7 @@ DedicatedScheduler::printSatisfaction( int cluster, CAList* idle,
 									   CAList* busy )
 {
 	MyString msg;
-	msg.sprintf( "Satisfied job %d with ", cluster );
+	msg.formatstr( "Satisfied job %d with ", cluster );
 	bool had_one = false;
 	if( idle && idle->Length() ) {
 		msg += idle->Length();
@@ -3821,7 +3827,7 @@ DedicatedScheduler::checkReconnectQueue( void ) {
 						host ? host : "(null host)",
 						remote_hosts ? remote_hosts : "(null)",
 						claims ? claims : "(null)");
-				job->dPrint(D_ALWAYS);
+				dPrintAd(D_ALWAYS, *job);
 					// we will break out of the loop below
 			}
 
@@ -3848,7 +3854,7 @@ DedicatedScheduler::checkReconnectQueue( void ) {
 				Daemon startd(machineAd,DT_STARTD,NULL);
 				if( !startd.addr() ) {
 					dprintf( D_ALWAYS, "Can't find address of startd in ad:\n" );
-					machineAd->dPrint(D_ALWAYS);
+					dPrintAd(D_ALWAYS, *machineAd);
 						// we will break out of the loop below
 				}
 				else {

@@ -77,7 +77,7 @@ ProcFamilyProxy::ProcFamilyProxy(const char* address_suffix) :
 	//
 	MyString procd_addr_base = m_procd_addr;
 	if (address_suffix != NULL) {
-		m_procd_addr.sprintf_cat(".%s", address_suffix);
+		m_procd_addr.formatstr_cat(".%s", address_suffix);
 	}
 
 	// see what log file (if any) the ProcD will be using if we
@@ -89,7 +89,7 @@ ProcFamilyProxy::ProcFamilyProxy(const char* address_suffix) :
 		m_procd_log = procd_log;
 		free(procd_log);
 		if (address_suffix != NULL) {
-			m_procd_log.sprintf_cat(".%s", address_suffix);
+			m_procd_log.formatstr_cat(".%s", address_suffix);
 		}
 	}
 	
@@ -490,7 +490,7 @@ ProcFamilyProxy::start_procd()
 			EXCEPT("GLEXEC_JOB is defined, but LIBEXEC not configured");
 		}
 		MyString glexec_kill;
-		glexec_kill.sprintf("%s/condor_glexec_kill", libexec);
+		glexec_kill.formatstr("%s/condor_glexec_kill", libexec);
 		free(libexec);
 		args.AppendArg(glexec_kill.Value());
 		char* glexec = param("GLEXEC");
@@ -621,7 +621,7 @@ ProcFamilyProxy::stop_procd()
 void
 ProcFamilyProxy::recover_from_procd_error()
 {
-	if (!param_boolean("RESTART_PROCD_ON_ERROR", false)) {
+	if (!param_boolean("RESTART_PROCD_ON_ERROR", true)) {
 		EXCEPT("ProcD has failed");
 	}
 
@@ -629,9 +629,12 @@ ProcFamilyProxy::recover_from_procd_error()
 	//
 	delete m_client;
 	m_client = NULL;
+	int ntries = 5;
 
-	while (m_client == NULL) {
+	while (ntries > 0 && m_client == NULL) {
 	
+		ntries--;
+
 		// the ProcD has failed. we know this either because communication
 		// has failed or the ProcD's reaper has fired
 		//
@@ -667,6 +670,11 @@ ProcFamilyProxy::recover_from_procd_error()
 			delete m_client;
 			m_client = NULL;
 		}
+	}
+
+	if ( m_client == NULL ) {
+		// Ran out of attempts to restart procd
+		EXCEPT("unable to restart the ProcD after several tries");
 	}
 }
 

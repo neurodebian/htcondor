@@ -37,6 +37,9 @@
 using namespace std;
 using namespace glite::ce::cream_client_api::soap_proxy;
 
+// This symbol is necessary to prevent errors when dynamically linking
+SOAP_NMAC struct Namespace namespaces[] = { { NULL, NULL, NULL, NULL } };
+
 #define USE_QUICKLOG 0
 
 #if USE_QUICKLOG
@@ -176,7 +179,7 @@ struct Request {
 	RequestCmp requestcomp;
 };
 
-static char *commands_list =
+static const char *commands_list =
 "COMMANDS "
 "VERSION "
 "INITIALIZE_FROM_FILE "
@@ -205,7 +208,7 @@ static char *commands_list =
 /* The last command in the list should NOT have a space after it */
 
 // GLOBAL VARIABLES
-char *VersionString ="$GahpVersion: CREAM " __DATE__ " UW\\ Gahp $";
+const char *VersionString ="$GahpVersion: CREAM " __DATE__ " UW\\ Gahp $";
 pthread_t *threads;
 string active_proxy;
 bool initialized = false; // Indicates if PROXY INIT has been called

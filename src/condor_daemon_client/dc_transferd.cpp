@@ -90,7 +90,7 @@ DCTransferD::setup_treq_channel(ReliSock **treq_sock_ptr,
 		// First, if we're not already authenticated, force that now. 
 	if (!forceAuthentication( rsock, errstack )) {
 		dprintf( D_ALWAYS, "DCTransferD::setup_treq_channel() authentication "
-				"failure: %s\n", errstack->getFullText() );
+				"failure: %s\n", errstack->getFullText().c_str() );
 		errstack->push("DC_TRANSFERD", 1, 
 			"Failed to authenticate properly.");
 		return false;
@@ -123,12 +123,11 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 	int timeout = 60 * 60 * 8; // transfers take a long time...
 	int i;
 	ClassAd reqad, respad;
-	MyString cap;
+	std::string cap;
 	int ftp;
-	MyString jids;
 	int invalid;
 	int protocol;
-	MyString reason;
+	std::string reason;
 
 	//////////////////////////////////////////////////////////////////////////
 	// Connect to the transferd and authenticate
@@ -150,7 +149,7 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 		// First, if we're not already authenticated, force that now. 
 	if (!forceAuthentication( rsock, errstack )) {
 		dprintf( D_ALWAYS, "DCTransferD::upload_job_files() authentication "
-				"failure: %s\n", errstack->getFullText() );
+				"failure: %s\n", errstack->getFullText().c_str() );
 		errstack->push("DC_TRANSFERD", 1, 
 			"Failed to authenticate properly.");
 		return false;
@@ -172,7 +171,7 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 	// This request ad to the transferd should contain:
 	//	ATTR_TREQ_CAPABILITY
 	//	ATTR_TREQ_FTP
-	reqad.put(*rsock);
+	putClassAd(rsock, reqad);
 	rsock->end_of_message();
 
 	rsock->decode();
@@ -184,7 +183,7 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 	// OR
 	//
 	//	ATTR_TREQ_INVALID_REQUEST (set to false)
-	respad.initFromStream(*rsock);
+	getClassAd(rsock, respad);
 	rsock->end_of_message();
 
 	respad.LookupInteger(ATTR_TREQ_INVALID_REQUEST, invalid);
@@ -193,7 +192,7 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 		// The transferd rejected my attempt to upload the fileset
 		delete rsock;
 		respad.LookupString(ATTR_TREQ_INVALID_REASON, reason);
-		errstack->push("DC_TRANSFERD", 1, reason.Value());
+		errstack->push("DC_TRANSFERD", 1, reason.c_str());
 		return false;
 	}
 
@@ -261,7 +260,7 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 	//////////////////////////////////////////////////////////////////////////
 
 	rsock->decode();
-	respad.initFromStream(*rsock);
+	getClassAd(rsock, respad);
 	rsock->end_of_message();
 
 	// close up shop
@@ -270,7 +269,7 @@ DCTransferD::upload_job_files(int JobAdsArrayLen, ClassAd* JobAdsArray[],
 	respad.LookupInteger(ATTR_TREQ_INVALID_REQUEST, invalid);
 	if ( invalid == TRUE ) {
 		respad.LookupString(ATTR_TREQ_INVALID_REASON, reason);
-		errstack->push("DC_TRANSFERD", 1, reason.Value());
+		errstack->push("DC_TRANSFERD", 1, reason.c_str());
 		return false;
 	}
 
@@ -291,12 +290,11 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 	int timeout = 60 * 60 * 8; // transfers take a long time...
 	int i;
 	ClassAd reqad, respad;
-	MyString cap;
+	std::string cap;
 	int ftp;
-	MyString jids;
 	int invalid;
 	int protocol;
-	MyString reason;
+	std::string reason;
 	int num_transfers;
 	ClassAd jad;
 	const char *lhstr = NULL;
@@ -322,7 +320,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 		// First, if we're not already authenticated, force that now. 
 	if (!forceAuthentication( rsock, errstack )) {
 		dprintf( D_ALWAYS, "DCTransferD::download_job_files() authentication "
-				"failure: %s\n", errstack->getFullText() );
+				"failure: %s\n", errstack->getFullText().c_str() );
 		errstack->push("DC_TRANSFERD", 1, 
 			"Failed to authenticate properly.");
 		return false;
@@ -344,7 +342,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 	// This request ad to the transferd should contain:
 	//	ATTR_TREQ_CAPABILITY
 	//	ATTR_TREQ_FTP
-	reqad.put(*rsock);
+	putClassAd(rsock, reqad);
 	rsock->end_of_message();
 
 	rsock->decode();
@@ -358,7 +356,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 	//	ATTR_TREQ_INVALID_REQUEST (set to false)
 	//	ATTR_TREQ_NUM_TRANSFERS
 	//
-	respad.initFromStream(*rsock);
+	getClassAd(rsock, respad);
 	rsock->end_of_message();
 
 	respad.LookupInteger(ATTR_TREQ_INVALID_REQUEST, invalid);
@@ -367,7 +365,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 		// The transferd rejected my attempt to upload the fileset
 		delete rsock;
 		respad.LookupString(ATTR_TREQ_INVALID_REASON, reason);
-		errstack->push("DC_TRANSFERD", 1, reason.Value());
+		errstack->push("DC_TRANSFERD", 1, reason.c_str());
 		return false;
 	}
 
@@ -388,7 +386,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 
 				// Grab a job ad the server is sending us so we know what
 				// to receive.
-				jad.initFromStream(*rsock);
+				getClassAd(rsock, jad);
 				rsock->end_of_message();
 
 				// translate the job ad by replacing the 
@@ -400,10 +398,12 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 							// this attr name starts with SUBMIT_
 							// compute new lhs (strip off the SUBMIT_)
 						const char *new_attr_name = strchr(lhstr,'_');
+						ExprTree * pTree;
 						ASSERT(new_attr_name);
 						new_attr_name++;
 							// insert attribute
-						jad.Insert(new_attr_name, tree->Copy());
+						pTree = tree->Copy();
+						jad.Insert(new_attr_name, pTree, false);
 					}
 				}	// while next expr
 		
@@ -458,7 +458,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 	//////////////////////////////////////////////////////////////////////////
 
 	rsock->decode();
-	respad.initFromStream(*rsock);
+	getClassAd(rsock, respad);
 	rsock->end_of_message();
 
 	// close up shop
@@ -467,7 +467,7 @@ DCTransferD::download_job_files(ClassAd *work_ad, CondorError * errstack)
 	respad.LookupInteger(ATTR_TREQ_INVALID_REQUEST, invalid);
 	if ( invalid == TRUE ) {
 		respad.LookupString(ATTR_TREQ_INVALID_REASON, reason);
-		errstack->push("DC_TRANSFERD", 1, reason.Value());
+		errstack->push("DC_TRANSFERD", 1, reason.c_str());
 		return false;
 	}
 

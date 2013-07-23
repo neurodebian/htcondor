@@ -25,6 +25,8 @@
 #include "dc_starter.h"
 #include "MyString.h"
 #include "sig_install.h"
+#include "sig_name.h"
+#include "my_popen.h"
 #include "match_prefix.h"
 #include "condor_claimid_parser.h"
 #include "condor_attributes.h"
@@ -40,6 +42,9 @@
 #include "selector.h"
 #include "condor_sockfunc.h"
 #include <sys/un.h>
+
+// globals
+char *g_jobid = NULL;	// the jobid as a string, for use in interrupt_handler()
 
 
 class SSHToJob {
@@ -66,6 +71,12 @@ public:
 		// get the exit status of ssh (encoded as for waitpid())
 	int getSSHExitStatus();
 
+		// return job id as malloced string; caller is responsible for calling free()
+	char* getJobId();
+
+		// should the job be removed on interrupt?
+	bool get_remove_on_interrupt() { return m_remove_on_interrupt; };
+
 private:
 	PROC_ID m_jobid;
 	int m_subproc;
@@ -81,6 +92,7 @@ private:
 	MyString m_shells; // comma-separated list of shells to try
 	bool m_retry_sensible;
 	bool m_auto_retry;
+	bool m_remove_on_interrupt;
 	int m_retry_delay;
 	MyString m_ssh_keygen_args;
 	bool m_x_forwarding;
@@ -98,7 +110,8 @@ SSHToJob::SSHToJob():
 	m_debug(false),
 	m_retry_sensible(false),
 	m_auto_retry(false),
-	m_retry_delay(30),
+	m_remove_on_interrupt(false),
+	m_retry_delay(5),
 	m_x_forwarding(false)
 {
 	m_jobid.cluster = m_jobid.proc = -1;
@@ -115,6 +128,16 @@ SSHToJob::~SSHToJob()
 int SSHToJob::getSSHExitStatus()
 {
 	return m_ssh_exit_status;
+}
+
+char* SSHToJob::getJobId()
+{
+	MyString temp;
+	char *ret_val = NULL;
+
+	temp.formatstr("%d.%d",m_jobid.cluster,m_jobid.proc);
+	ret_val = strdup(temp.Value());
+	return ret_val;
 }
 
 void SSHToJob::logError(char const *fmt,...)
@@ -135,6 +158,7 @@ void SSHToJob::printUsage()
 	fprintf(stderr," -name schedd-name\n");
 	fprintf(stderr," -pool pool-name\n");
 	fprintf(stderr," -auto-retry               (if job not running yet)\n");
+	fprintf(stderr," -remove-on-interrupt      (rm job on ctrl-c)\n");
 	fprintf(stderr," -shells shell1,shell2,... (shells to try)\n");
 	fprintf(stderr," -ssh <alt ssh command>    (e.g. sftp or scp)\n");
 	fprintf(stderr," -keygen-options <keygen options>\n");
@@ -156,9 +180,8 @@ bool SSHToJob::parseArgs(int argc,char **argv)
 
 		if( match_prefix( argv[nextarg], "-debug" ) ) {
 				// dprintf to console
-			Termlog = 1;
-			dprintf_config( "TOOL", get_param_functions() );
-			DebugFlags |= D_FULLDEBUG;
+			dprintf_set_tool_debug("TOOL", 0);
+			set_debug_flags(NULL, D_FULLDEBUG);
 			m_debug = true;
 		} else if( match_prefix( argv[nextarg], "-help" ) ) {
 			printUsage();
@@ -189,6 +212,8 @@ bool SSHToJob::parseArgs(int argc,char **argv)
 			}
 		} else if( match_prefix( argv[nextarg], "-auto-retry") ) {
 			m_auto_retry = true;
+		} else if( match_prefix( argv[nextarg], "-remove-on-interrupt") ) {
+			m_remove_on_interrupt = true;
 		} else if( match_prefix( argv[nextarg], "-shells") ) {
 			if( argv[nextarg + 1] ) {
 				m_shells = argv[++nextarg];
@@ -346,7 +371,14 @@ bool SSHToJob::execute_ssh_retry()
 	int attempt = 0;
 	for(attempt=0; attempt==0 || m_auto_retry; attempt++) {
 		if( attempt > 0 ) {
-			fprintf(stderr,"Will try again in %d seconds.\n",m_retry_delay);
+			// try every 10 seconds for first 5 min, then every 30 seconds
+			if ( m_retry_delay < 30 && ((m_retry_delay * attempt) >= 300) ) {
+				m_retry_delay = 30;
+			}
+			//fprintf(stderr,"Will try again in %d seconds.\n",m_retry_delay);
+			if (attempt==1) {
+				fprintf(stderr,"Waiting for job to start...\n");
+			}
 			sleep(m_retry_delay);
 		}
 		if( execute_ssh() ) {
@@ -424,7 +456,9 @@ bool SSHToJob::execute_ssh()
 	}
 
 	if( !success ) {
-		logError("%s\n",error_msg.Value());
+		if ( !m_retry_sensible ) {
+			logError("%s\n",error_msg.Value());
+		}
 		return false;
 	}
 
@@ -437,7 +471,9 @@ bool SSHToJob::execute_ssh()
 
 	DCStarter starter;
 	if( !starter.initFromClassAd(&starter_ad) ) {
-		logError("Failed to initialize starter object.\n");
+		if ( !m_retry_sensible ) {
+			logError("Failed to initialize starter object.\n");
+		}
 		return false;
 	}
 
@@ -463,7 +499,7 @@ bool SSHToJob::execute_ssh()
 	unsigned int num = 1;
 	for(num=1;num<2000;num++) {
 		unsigned int r = get_random_uint();
-		m_session_dir.sprintf("%s%c%s.condor_ssh_to_job_%x",
+		m_session_dir.formatstr("%s%c%s.condor_ssh_to_job_%x",
 							  temp_dir,DIR_DELIM_CHAR,local_username,r);
 		if( mkdir(m_session_dir.Value(),0700)==0 ) {
 			break;
@@ -483,9 +519,9 @@ bool SSHToJob::execute_ssh()
 
 
 	MyString known_hosts_file;
-	known_hosts_file.sprintf("%s%cknown_hosts",m_session_dir.Value(),DIR_DELIM_CHAR);
+	known_hosts_file.formatstr("%s%cknown_hosts",m_session_dir.Value(),DIR_DELIM_CHAR);
 	MyString private_client_key_file;
-	private_client_key_file.sprintf("%s%cssh_key",m_session_dir.Value(),DIR_DELIM_CHAR);
+	private_client_key_file.formatstr("%s%cssh_key",m_session_dir.Value(),DIR_DELIM_CHAR);
 
 	ReliSock sock;
 	MyString remote_user; // this will be filled in with the remote user name
@@ -509,7 +545,7 @@ bool SSHToJob::execute_ssh()
 
 
 	MyString fdpass_sock_name;
-	fdpass_sock_name.sprintf("%s%cfdpass",m_session_dir.Value(),DIR_DELIM_CHAR);
+	fdpass_sock_name.formatstr("%s%cfdpass",m_session_dir.Value(),DIR_DELIM_CHAR);
 
 	// because newer versions of openssh (e.g. 5.8) close
 	// all file descriptors > 2, we have to pass the ssh connection
@@ -627,9 +663,9 @@ bool SSHToJob::execute_ssh()
 	MyString ssh_cmd;
 	ArgList ssh_arglist;
 	MyString param_name;
-	param_name.sprintf("SSH_TO_JOB_%s_CMD",m_ssh_basename.Value());
+	param_name.formatstr("SSH_TO_JOB_%s_CMD",m_ssh_basename.Value());
 	MyString default_ssh_cmd;
-	default_ssh_cmd.sprintf("\"%s -oUser=%%u -oIdentityFile=%%i -oStrictHostKeyChecking=yes -oUserKnownHostsFile=%%k -oGlobalKnownHostsFile=%%k -oProxyCommand=%%x%s\"",
+	default_ssh_cmd.formatstr("\"%s -oUser=%%u -oIdentityFile=%%i -oStrictHostKeyChecking=yes -oUserKnownHostsFile=%%k -oGlobalKnownHostsFile=%%k -oProxyCommand=%%x%s\"",
 							ssh_options_arglist.GetArg(0),
 							is_scp ? "" : " condor-job.%h");
 	param(ssh_cmd,param_name.Value(),default_ssh_cmd.Value());
@@ -774,11 +810,34 @@ bool SSHToJob::execute_ssh()
 }
 
 
+#if !defined(WIN32)
+void interrupt_handler(int sig)
+{
+
+	fprintf(stderr,"Interrupted by signal %d (%s)",sig,signalName(sig));
+	if (!g_jobid) {
+		fprintf(stderr,"\n");
+		exit(1);
+	}
+
+	// spawn off condor_rm to remove the job
+	fprintf(stderr,", removing job %s...\n",g_jobid);
+	ArgList args;
+	args.AppendArg("condor_rm");
+	args.AppendArg(g_jobid);
+	int ret_val = my_system(args);
+	if (ret_val == -1) {
+		fprintf(stderr,"Failed to exec condor_rm, errno=%d (%s)\n",
+				errno,strerror(errno));
+	}
+	exit(1);	// documentation says exit 1 = exited due to signal 
+}
+
+#endif
+
 int
 main(int argc, char *argv[])
 {
-
-
 	myDistro->Init( argc, argv );
 	config();
 
@@ -790,6 +849,20 @@ main(int argc, char *argv[])
 	if( !ssh_to_job.parseArgs(argc,argv) ) {
 		return 2;
 	}
+
+#if !defined(WIN32)
+	if (ssh_to_job.get_remove_on_interrupt()) {
+		// stash our job id in a buffer the signal handler can access
+		g_jobid = ssh_to_job.getJobId();
+
+		// install signal handlers
+		install_sig_handler(SIGINT, interrupt_handler);
+		install_sig_handler(SIGHUP, interrupt_handler);
+		install_sig_handler(SIGTERM, interrupt_handler);
+		install_sig_handler(SIGQUIT, interrupt_handler);
+	}
+#endif
+
 	if( !ssh_to_job.execute() ) {
 		return 1;
 	}

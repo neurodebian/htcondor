@@ -179,8 +179,8 @@ VMRegister::requestHostClassAds(void)
 	}
 
 	ClassAd query_ad;
-	query_ad.SetMyTypeName(QUERY_ADTYPE);
-	query_ad.SetTargetTypeName(STARTD_ADTYPE);
+	SetMyTypeName(query_ad, QUERY_ADTYPE);
+	SetTargetTypeName(query_ad, STARTD_ADTYPE);
 	query_ad.Assign(ATTR_REQUIREMENTS, true);
 
 	char *addr = m_vm_host_daemon->addr();
@@ -200,7 +200,7 @@ VMRegister::requestHostClassAds(void)
 		return;
 	}
 
-	if( !query_ad.put(ssock) ) {
+	if( !putClassAd(&ssock, query_ad) ) {
 		dprintf(D_FULLDEBUG, "Failed to send query Ad to host startd(%s)\n", addr);
 	}
 
@@ -223,7 +223,7 @@ VMRegister::requestHostClassAds(void)
 
 		if(more) {
 			ad = new ClassAd;
-			if( !ad->initFromStream(ssock) ) {
+			if( !getClassAd(&ssock, *ad) ) {
 				ssock.end_of_message();
 				delete ad;
 				return;
@@ -259,7 +259,8 @@ VMRegister::requestHostClassAds(void)
 		attr += name;
 
 		// Insert or Update an attribute to host_classAd in a VMRegister object
-		host_classad->Insert(attr.Value(), expr->Copy());
+		ExprTree * pTree = expr->Copy();
+		host_classad->Insert(attr.Value(), pTree, true);
 	}
 }
 

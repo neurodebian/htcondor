@@ -29,7 +29,6 @@
 #include "spooled_job_files.h"
 #include "filename_tools.h"
 #include "job_lease.h"
-#include "condor_new_classads.h"
 
 #include "gridmanager.h"
 #include "creamjob.h"
@@ -142,9 +141,6 @@ void CreamJobReconfig()
 {
 	int tmp_int;
 
-	tmp_int = param_integer( "GRIDMANAGER_JOB_PROBE_INTERVAL", 5 * 60 );
-	CreamJob::setProbeInterval( tmp_int );
-
 	tmp_int = param_integer( "GRIDMANAGER_RESOURCE_PROBE_INTERVAL", 5 * 60 );
 	CreamResource::setProbeInterval( tmp_int );
 
@@ -183,7 +179,6 @@ BaseJob *CreamJobCreate( ClassAd *jobad )
 	return (BaseJob *)new CreamJob( jobad );
 }
 
-int CreamJob::probeInterval = 300;			// default value
 int CreamJob::submitInterval = 300;			// default value
 int CreamJob::gahpCallTimeout = 300;		// default value
 int CreamJob::maxConnectFailures = 3;		// default value
@@ -220,7 +215,6 @@ CreamJob::CreamJob( ClassAd *classad )
 	lastSubmitAttempt = 0;
 	numSubmitAttempts = 0;
 	jmProxyExpireTime = 0;
-	jmLifetime = 0;
 	resourceManagerString = NULL;
 	myResource = NULL;
 	jobProxy = NULL;
@@ -248,7 +242,7 @@ CreamJob::CreamJob( ClassAd *classad )
 							 (TimerHandlercpp)&CreamJob::ProxyCallback, this );
 	if ( jobProxy == NULL ) {
 		if ( error_string == "" ) {
-			sprintf( error_string, "%s is not set in the job ad",
+			formatstr( error_string, "%s is not set in the job ad",
 								  ATTR_X509_USER_PROXY );
 		}
 		dprintf(D_ALWAYS, "errorstring %s\n", error_string.c_str());
@@ -284,7 +278,7 @@ CreamJob::CreamJob( ClassAd *classad )
 
 		token = GetNextToken( " ", false );
 		if ( !token || strcasecmp( token, "cream" ) ) {
-			sprintf( error_string, "%s not of type cream", ATTR_GRID_RESOURCE );
+			formatstr( error_string, "%s not of type cream", ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
 
@@ -297,11 +291,11 @@ CreamJob::CreamJob( ClassAd *classad )
 				resourceManagerString = strdup( token );
 			} else {
 				std::string urlbuf;
-				sprintf( urlbuf, "https://%s", token );
+				formatstr( urlbuf, "https://%s", token );
 				resourceManagerString = strdup( urlbuf.c_str() );
 			}
 		} else {
-			sprintf( error_string, "%s missing CREAM Service URL",
+			formatstr( error_string, "%s missing CREAM Service URL",
 								  ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
@@ -310,7 +304,7 @@ CreamJob::CreamJob( ClassAd *classad )
 		if ( token && *token ) {
 			resourceBatchSystemString = strdup( token );
 		} else {
-			sprintf( error_string, "%s missing batch system (LRMS) type.",
+			formatstr( error_string, "%s missing batch system (LRMS) type.",
 								  ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
@@ -319,13 +313,13 @@ CreamJob::CreamJob( ClassAd *classad )
 		if ( token && *token ) {
 			resourceQueueString = strdup( token );
 		} else {
-			sprintf( error_string, "%s missing LRMS queue name.",
+			formatstr( error_string, "%s missing LRMS queue name.",
 								  ATTR_GRID_RESOURCE );
 			goto error_exit;
 		}
 
 	} else {
-		sprintf( error_string, "%s is not set in the job ad",
+		formatstr( error_string, "%s is not set in the job ad",
 							  ATTR_GRID_RESOURCE );
 		goto error_exit;
 	}
@@ -1179,7 +1173,6 @@ void CreamJob::doEvaluateState()
 			SetRemoteJobStatus( NULL );
 			gahpErrorString = "";
 			errorString = "";
-			jmLifetime = 0;
 			UpdateJobLeaseSent( -1 );
 			myResource->CancelSubmit( this );
 			if ( remoteJobId != NULL ) {
@@ -1508,7 +1501,7 @@ char *CreamJob::buildSubmitAd()
 	if( !args.AppendArgsFromClassAd( jobAd, &arg_errors ) ) {
 		dprintf( D_ALWAYS, "(%d.%d) Failed to read job arguments: %s\n",
 				 procID.cluster, procID.proc, arg_errors.Value());
-		sprintf( errorString, "Failed to read job arguments: %s\n",
+		formatstr( errorString, "Failed to read job arguments: %s\n",
 				   arg_errors.Value() );
 		return NULL;
 	}
@@ -1604,41 +1597,42 @@ char *CreamJob::buildSubmitAd()
 		// TODO This needs to be extracted from the VOMS extension in the
 		//   job's credential.
 //	sprintf(buf, "%s = \"%s\"", ATTR_VIR_ORG, "");
-	sprintf(buf, "%s = \"%s\"", ATTR_VIR_ORG, "ignored");
+	formatstr(buf, "%s = \"%s\"", ATTR_VIR_ORG, "ignored");
 	submitAd.Insert(buf.c_str());
 	
 		//BATCHSYSTEM
-	sprintf(buf, "%s = \"%s\"", ATTR_BATCH_SYSTEM, resourceBatchSystemString);
+	formatstr(buf, "%s = \"%s\"", ATTR_BATCH_SYSTEM, resourceBatchSystemString);
 	submitAd.Insert(buf.c_str());
 	
 		//QUEUENAME
-	sprintf(buf, "%s = \"%s\"", ATTR_QUEUE_NAME, resourceQueueString);
+	formatstr(buf, "%s = \"%s\"", ATTR_QUEUE_NAME, resourceQueueString);
 	submitAd.Insert(buf.c_str());
 
 	submitAd.Assign("outputsandboxbasedesturi", "gsiftp://localhost");
 
 	MyString ad_string;
+	std::string ad_str;
 
-	NewClassAdUnparser unparser;
-	unparser.SetUseCompactSpacing( true );
-	unparser.SetOutputType( false );
-	unparser.SetOutputTargetType( false );
-	unparser.Unparse( &submitAd, ad_string );
+	classad::ClassAdUnParser unparser;
+	unparser.Unparse( ad_str, &submitAd );
+	ad_string = ad_str;
+	// TODO Insert following lists directly into classad and unparse
+	//   full ad into std::string and use that.
 
 		// Attributes that use new ClassAd lists have to be manually
 		// inserted after unparsing the ad.
 
 		//INPUT SANDBOX
 	if (isb.number() > 0) {
-		sprintf(buf, "%s = {", ATTR_INPUT_SB);
+		formatstr(buf, "; %s = {", ATTR_INPUT_SB);
 		isb.rewind();
 		for (int i = 0; i < isb.number(); i++) {
 			if (i == 0)
-				sprintf_cat(buf, "\"%s\"", isb.next());
+				formatstr_cat(buf, "\"%s\"", isb.next());
 			else
-				sprintf_cat(buf, ",\"%s\"", isb.next());
+				formatstr_cat(buf, ",\"%s\"", isb.next());
 		}
-		sprintf_cat(buf, "}; ]");
+		formatstr_cat(buf, "} ]");
 
 		int insert_pos = strrchr( ad_string.Value(), ']' ) - ad_string.Value();
 		ad_string.replaceString( "]", buf.c_str(), insert_pos );
@@ -1646,15 +1640,15 @@ char *CreamJob::buildSubmitAd()
 
 		//OUTPUT SANDBOX
 	if (osb.number() > 0) {
-		sprintf(buf, "%s = {", ATTR_OUTPUT_SB);
+		formatstr(buf, "; %s = {", ATTR_OUTPUT_SB);
 		osb.rewind();
 		for (int i = 0; i < osb.number(); i++) {
 			if (i == 0)
-				sprintf_cat(buf, "\"%s\"", osb.next());
+				formatstr_cat(buf, "\"%s\"", osb.next());
 			else
-				sprintf_cat(buf, ",\"%s\"", osb.next());
+				formatstr_cat(buf, ",\"%s\"", osb.next());
 		}
-		sprintf_cat(buf, "}; ]");
+		formatstr_cat(buf, "} ]");
 
 		int insert_pos = strrchr( ad_string.Value(), ']' ) - ad_string.Value();
 		ad_string.replaceString( "]", buf.c_str(), insert_pos );
@@ -1666,23 +1660,23 @@ char *CreamJob::buildSubmitAd()
 	if(!envobj.MergeFrom(jobAd,&env_errors)) {
 		dprintf(D_ALWAYS,"(%d.%d) Failed to read job environment: %s\n",
 				procID.cluster, procID.proc, env_errors.Value());
-		sprintf(errorString,"Failed to read job environment: %s\n",
+		formatstr(errorString,"Failed to read job environment: %s\n",
 							env_errors.Value());
 		return NULL;
 	}
 	char **env_vec = envobj.getStringArray();
 
 	if ( env_vec[0] ) {
-		sprintf( buf, "%s = {", ATTR_JOB_ENVIRONMENT2 );
+		formatstr( buf, "%s = {", ATTR_JOB_ENVIRONMENT2 );
 
 		for ( int i = 0; env_vec[i]; i++ ) {
 			if ( i == 0 ) {
-				sprintf_cat( buf, "\"%s\"", env_vec[i] );
+				formatstr_cat( buf, "\"%s\"", env_vec[i] );
 			} else {
-				sprintf_cat( buf, ",\"%s\"", env_vec[i] );
+				formatstr_cat( buf, ",\"%s\"", env_vec[i] );
 			}
 		}
-		sprintf_cat( buf, "}; ]" );
+		formatstr_cat( buf, "}; ]" );
 
 		int insert_pos = strrchr( ad_string.Value(), ']' ) - ad_string.Value();
 		ad_string.replaceString( "]", buf.c_str(), insert_pos );
@@ -1722,7 +1716,7 @@ std::string CreamJob::getFullJobId(const char * resourceManager, const char * jo
 	ASSERT(resourceManager);
 	ASSERT(job_id);
 	std::string full_job_id;
-	sprintf( full_job_id, "cream %s %s", resourceManager, job_id );
+	formatstr( full_job_id, "cream %s %s", resourceManager, job_id );
 	return full_job_id;
 }
 
@@ -1753,7 +1747,7 @@ TransferRequest *CreamJob::MakeStageInRequest()
 		tmp_str2 = "file://" + tmp_str;
 		local_urls.insert(tmp_str2.c_str());
 
-		sprintf( tmp_str2, "%s/%s", uploadUrl,
+		formatstr( tmp_str2, "%s/%s", uploadUrl,
 				 condor_basename( tmp_str.c_str() ) );
 		remote_urls.insert( tmp_str2.c_str() );
 	}
@@ -1771,7 +1765,7 @@ TransferRequest *CreamJob::MakeStageInRequest()
 
 			local_urls.insert( tmp_str2.c_str() );
 
-			sprintf( tmp_str2, "%s/%s", uploadUrl,
+			formatstr( tmp_str2, "%s/%s", uploadUrl,
 					 condor_basename( tmp_str.c_str() ) );
 			remote_urls.insert( tmp_str2.c_str() );
 		}
@@ -1791,7 +1785,7 @@ TransferRequest *CreamJob::MakeStageInRequest()
 
 			local_urls.insert( tmp_str2.c_str() );
 
-			sprintf( tmp_str2, "%s/%s", uploadUrl,
+			formatstr( tmp_str2, "%s/%s", uploadUrl,
 					 condor_basename( tmp_str.c_str() ) );
 			remote_urls.insert( tmp_str2.c_str() );
 		}
@@ -1830,16 +1824,16 @@ TransferRequest *CreamJob::MakeStageOutRequest()
 		output_files.rewind();
 		while ( (filename = output_files.next()) != NULL ) {
 
-			sprintf( buf, "%s/%s", downloadUrl, filename );
+			formatstr( buf, "%s/%s", downloadUrl, filename );
 			remote_urls.insert( buf.c_str() );
 
 			if ( remaps && filename_remap_find( remaps, filename,
 												new_name ) ) {
-				sprintf( buf, "%s%s",
+				formatstr( buf, "%s%s",
 						 new_name[0] == '/' ? "file://" : iwd_str.c_str(),
 						 new_name.Value() );
 			} else {
-				sprintf( buf, "%s%s",
+				formatstr( buf, "%s%s",
 						 iwd_str.c_str(),
 						 condor_basename( filename ) );
 			}
@@ -1855,11 +1849,11 @@ TransferRequest *CreamJob::MakeStageOutRequest()
 		jobAd->LookupBool(ATTR_TRANSFER_OUTPUT, result);
 
 		if (result) {
-			sprintf( buf, "%s/%s", downloadUrl,
+			formatstr( buf, "%s/%s", downloadUrl,
 					 condor_basename( tmp_str.c_str() ) );
 			remote_urls.insert( buf.c_str() );
 
-			sprintf( buf, "%s%s",
+			formatstr( buf, "%s%s",
 					 tmp_str[0] == '/' ? "file://" : iwd_str.c_str(),
 					 tmp_str.c_str());
 
@@ -1874,11 +1868,11 @@ TransferRequest *CreamJob::MakeStageOutRequest()
 		jobAd->LookupBool( ATTR_TRANSFER_ERROR, result );
 
 		if ( result ) {
-			sprintf( buf, "%s/%s", downloadUrl,
+			formatstr( buf, "%s/%s", downloadUrl,
 					 condor_basename( tmp_str.c_str() ) );
 			remote_urls.insert( buf.c_str() );
 
-			sprintf( buf, "%s%s",
+			formatstr( buf, "%s%s",
 					 tmp_str[0] == '/' ? "file://" : iwd_str.c_str(),
 					 tmp_str.c_str() );
 

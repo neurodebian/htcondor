@@ -31,7 +31,7 @@ $aborted = sub
 	die "Abort event NOT expected\n";
 };
 
-$execute = sub
+$dummy = sub
 {
 };
 
@@ -49,18 +49,36 @@ sub RunCheck
     my $grid_resource = $args{grid_resource} || "";
     my $should_transfer_files = $args{should_transfer_files} || "";
     my $when_to_transfer_output = $args{when_to_transfer_output} || "";
-    my $duration = $args{duration} || "1";
-    my $execute_fn = $args{on_execute} || $execute;
+    my $duration = "1";
+	if(exists $args{duration}) {
+		$duration = $args{duration};
+	}
+	 
+	#print "Checking duration being passsed to RunCheck <$args{duration}>\n";
+    my $execute_fn = $args{on_execute} || $dummy;
+    my $submit_fn = $args{on_submit} || $submitted;
+    my $ulog_fn = $args{on_ulog} || $dummy;
+	# if we want to remove these jobs, better override aborted function
+	# this change is for running forever sleep jobs to test concurrency limits
+	# we'll want to see some running and some waiting to run
+    my $abort = $args{on_abort} || $aborted;
+	my $donewithsuccess = $args{on_success} || $ExitSuccess;
 
-    CondorTest::RegisterAbort( $testname, $aborted );
-    CondorTest::RegisterExitedSuccess( $testname, $ExitSuccess );
+	my $program = $args{runthis} || "x_sleep.pl";
+
+    CondorTest::RegisterAbort( $testname, $abort );
+    CondorTest::RegisterExitedSuccess( $testname, $donewithsuccess );
     CondorTest::RegisterExecute($testname, $execute_fn);
-    CondorTest::RegisterSubmit( $testname, $submitted );
+    CondorTest::RegisterULog($testname, $ulog_fn);
+    CondorTest::RegisterSubmit( $testname, $submit_fn );
+	if(defined $args{on_failure}) {
+		CondorTest::RegisterExitedFailure( $testname, $args{on_failure} );
+	}
 
     my $submit_fname = CondorTest::TempFileName("$testname.submit");
     open( SUBMIT, ">$submit_fname" ) || die "error writing to $submit_fname: $!\n";
     print SUBMIT "universe = $universe\n";
-    print SUBMIT "executable = x_sleep.pl\n";
+    print SUBMIT "executable = $program\n";
     print SUBMIT "log = $user_log\n";
     print SUBMIT "arguments = $duration\n";
     print SUBMIT "notification = never\n";
@@ -76,10 +94,15 @@ sub RunCheck
     if( $append_submit_commands ne "" ) {
         print SUBMIT "\n" . $append_submit_commands . "\n";
     }
-    print SUBMIT "queue\n";
+    print SUBMIT "queue $args{queue_sz}\n";
     close( SUBMIT );
 
-    my $result = CondorTest::RunTest($testname, $submit_fname, 0);
+    my $result = 0;
+	if (defined $args{GetClusterId}) {
+    	$result = CondorTest::RunTest($testname, $submit_fname, 0, $args{GetClusterId});
+	} else {
+    	$result = CondorTest::RunTest($testname, $submit_fname, 0);
+	}
     CondorTest::RegisterResult( $result, %args );
     return $result;
 }

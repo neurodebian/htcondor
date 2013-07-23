@@ -231,13 +231,6 @@ pthread_cond_signal (pthread_cond_t *cv)
 
 #include "threads_implementation.h"
 
-#ifndef WIN32
-	// explicit template instantiation
-	template class HashTable<ThreadInfo,WorkerThreadPtr_t>;
-	template class HashTable<int,WorkerThreadPtr_t>;
-	template class Queue<WorkerThreadPtr_t>;
-#endif
-
 #ifdef WIN32
 	int ThreadImplementation::m_CurrentTid = 0;
 #endif
@@ -813,7 +806,11 @@ ThreadImplementation::ThreadImplementation()
 	switch_callback = NULL;
 	pthread_mutexattr_t mutex_attrs;
 	pthread_mutexattr_init(&mutex_attrs);
+#if defined(PTHREAD_MUTEX_RECURSIVE_NP)
 	pthread_mutexattr_settype(&mutex_attrs,PTHREAD_MUTEX_RECURSIVE_NP);
+#else
+	pthread_mutexattr_settype(&mutex_attrs,PTHREAD_MUTEX_RECURSIVE);
+#endif
 	pthread_mutex_init(&big_lock,&mutex_attrs);
 	pthread_mutex_init(&get_handle_lock,&mutex_attrs);
 	pthread_mutex_init(&set_status_lock,&mutex_attrs);

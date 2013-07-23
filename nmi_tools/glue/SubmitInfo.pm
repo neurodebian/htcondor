@@ -42,26 +42,22 @@ our %build_and_test_sets = (
 	
 	# NOTE: Keep the stable or developer release branches synchronized with
 	# https://condor-wiki.cs.wisc.edu/index.cgi/wiki?p=DeveloperReleasePlan
-	'official_ports' => [
-	],
+	'official_ports' => [],
 	
 	# NMI will need builds on a set of platforms that we do not provide in our
 	# core builds.	These are those platforms.
-	'nmi_one_offs' => [
-	],
+	'nmi_one_offs' => [],
 	
 	# We will build on a set of machines that we want to be sure continue building
 	# but we do not release them so they are not included in the 'official ports' 
 	# section above.  Platforms in this list include things like the latest Fedora
 	# release - a build problem on this platform could indicate problems on a future
 	# release of RHEL.
-	'extra_builds' => [
-	],
+	'extra_builds' => [],
 	
 	'stduniv' => [
 		'x86_64_deb_5.0',
 		'x86_64_rhap_5',
-		'x86_64_rhas_3',
 		'x86_deb_5.0',
 	],
 	);
@@ -87,7 +83,6 @@ my @minimal_build_configure_args =
 	 '-D_VERBOSE:BOOL'			  => 'ON',
 	 '-DCLIPPED:BOOL'			  => 'ON',
 	 '-DWITH_BLAHP:BOOL'		 => 'OFF',
-	 '-DWITH_BOOST:BOOL'		 => 'OFF',
 	 '-DWITH_COREDUMPER:BOOL'	 => 'OFF',
 	 '-DWITH_CREAM:BOOL'		 => 'OFF',
 	 '-DWITH_DRMAA:BOOL'		 => 'OFF',
@@ -138,6 +133,30 @@ my @default_build_configure_args =
 	 #'-DSCRATCH_EXTERNALS:BOOL' => 'ON',
 	);
 
+############################################################
+# Batlab new plaform names
+#
+# x86_64_Debian5
+# x86_64_Debian6
+# x86_64_Fedora15
+# x86_64_Fedora16
+# x86_64_Fedora17
+# x86_64_MacOSX7
+# x86_64_RedHat5
+# x86_64_RedHat6
+# x86_64_SL6
+# x86_64_Solaris11
+# x86_64_Ubuntu10
+# x86_64_Ubuntu12
+# x86_64_Windows7
+# x86_Debian6
+# x86_FreeBSD7
+# x86_RedHat5
+# x86_RedHat6
+# x86_SL5
+# x86_WindowsXP
+##########################################################
+
 ###############################################################################
 # Hash Table of Doom
 #
@@ -180,11 +199,9 @@ our %submit_info = (
 	# Microsoft Windows 6.1/2000/xp/whatever on x86_64
 	# This probably doesn't work--glue scripts do funky things with it.
 	##########################################################################
-	'x86_64_winnt_6.1'		=> {
+	'x86_64_Windows7'		=> {
 		'build' => {
 			'configure_args' => { 
-			 # TJ 10/4/2011 new batlab can't handle quoted strings as args at the moment.
-			 # '-G \"Visual Studio 9 2008\"' => undef,
 			  '-DCMAKE_SUPPRESS_REGENERATION:BOOL' => 'TRUE', # because the windows VM doesn't keep time very well.
             },
 			'prereqs'	=> undef,
@@ -198,90 +215,15 @@ our %submit_info = (
 		},
 	},
 	
-	##########################################################################
-	# Microsoft Windows 6.1/2000/xp/whatever on x86	
-	# This probably doesn't work--glue scripts do funky things with it.
-	##########################################################################
-	'x86_winnt_6.1'		=> {
-		'build' => {
-			'configure_args' => { 
-			 # TJ 10/4/2011 new batlab can't handle quoted strings as args at the moment.
-			 # '-G \"Visual Studio 9 2008\"' => undef,
-			  '-DCMAKE_SUPPRESS_REGENERATION:BOOL' => 'TRUE', # because the windows VM doesn't keep time very well.
-			},
-			'prereqs'	=> undef,
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> undef,
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	##########################################################################
-	# Microsoft Windows 5.1/2000/xp/whatever on x86_64
-	# This probably doesn't work--glue scripts do funky things with it.
-	##########################################################################
-	'x86_64_winnt_5.1'	=> {
-		'build' => {
-			'configure_args' => { '-G \"Visual Studio 9 2008\"' => undef },
-			'prereqs'	=> undef,
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> undef,
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	##########################################################################
-	# Microsoft Windows 5.1/2000/xp/whatever on x86
-	# the official "blessed" windows build configuration
-	##########################################################################
-	'x86_winnt_5.1'		=> {
-		'build' => {
-			'configure_args' => { '-G \"Visual Studio 9 2008\"' => undef },
-			'prereqs'	=> [
-				'cmake-2.8.3', '7-Zip-9.20', 'ActivePerl-5.10.1',
-				'VisualStudio-9.0', 'WindowsSDK-6.1',
-				],
-				'xtests'		=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ ],
-			'testclass' => [ @default_testclass ],
-		},
-	},
+	'x86_64_Windows8'   => 'x86_64_Windows7',
+	'x86_WindowsXP'		=> 'x86_64_Windows7',
+	'x86_64_winnt_6.1'	=> 'x86_64_Windows7',
+	'x86_winnt_5.1'		=> 'x86_64_Windows7',
 	
-	##########################################################################
-	# Microsoft Windows 5.1/2000/xp/whatever on x86
-	# CMake build testing configuration
-	##########################################################################
-	'x86_winnt_5.1-tst' => {
-		'build' => {
-			'configure_args' => { '-G \"Visual Studio 9 2008\"' => undef },
-			'prereqs'	=> undef,
-			# when it works add x86_64_winnt_5.1 to the x_tests
-			'xtests'	=> [ "x86_winnt_5.1", "x86_64_winnt_5.1", "x86_winnt_6.0" ],
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> undef,
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
 	##########################################################################
 	# Platform Debian 5.0 on x86_64
 	##########################################################################
-	'x86_64_deb_5.0'	=> {
+	'x86_64_Debian5'	=> {
 		'build' => {
 			'configure_args' => { @default_build_configure_args,
 								  '-DCLIPPED:BOOL' => 'OFF',
@@ -296,14 +238,33 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
+	'x86_64_deb_5.0'	=> 'x86_64_Debian5',
 
 
 	##########################################################################
 	# Platform DEB 6 on x86_64 
 	##########################################################################
-	# This is the name of the platform in new batlab
-	# It is actually updated, despite what the name says
-	'x86_64_deb_6.0' => {
+	'x86_64_Debian6'	=> {
+		'build' => {
+			'configure_args' => { @default_build_configure_args,
+								  '-DCLIPPED:BOOL' => 'OFF',
+			},
+			'prereqs'	=> [ ],
+			'xtests'	=>	undef,
+		},
+
+		'test' => {
+			'configure_args' => { @default_test_configure_args },
+			'prereqs'	=> [ ],
+			'testclass' => [ @default_testclass ],
+		},
+	},
+	'x86_64_deb_6.0'	=> 'x86_64_Debian6',
+
+	##########################################################################
+	# Platform DEB 7 on x86_64
+	##########################################################################
+	'x86_64_Debian7'	=> {
 		'build' => {
 			'configure_args' => { @default_build_configure_args,
 								  '-DCLIPPED:BOOL' => 'OFF',
@@ -320,37 +281,9 @@ our %submit_info = (
 	},
 
 	##########################################################################
-	# Platform RHEL 6 on x86
+	# Platform RedHat and SL
 	##########################################################################
-	'x86_rhap_6.0'	=> {
-		'build' => {
-			'configure_args' => { @default_build_configure_args,
-				# turn this back on when ready
-				# '-dclipped:bool=off' => undef,
-			 },
-			'prereqs'	=> [ @default_prereqs ],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'testclass'	=> [ @default_testclass ],
-		},
-	},
-	'x86_rhap_6.3' => 'x86_rhap_6.0',
-
-	##########################################################################
-	# Platform RHEL 6 on x86. Unmanaged.
-	##########################################################################
-	'x86_rhap_6.0-updated'	=> 'x86_rhap_6.0',
-	'x86_rhap_6.2'	=> 'x86_rhap_6.0',
-	'x86_rhap_6.3'	=> 'x86_rhap_6.0',
-
-	##########################################################################
-	# Platform RHEL 6 on x86_64
-	##########################################################################
-	'x86_64_rhap_6.0'	=> {
+	'x86_64_RedHat6'	=> {
 		'build' => {
 			'configure_args' => { @default_build_configure_args,
 				'-DCLIPPED:BOOL' => 'OFF',
@@ -365,59 +298,24 @@ our %submit_info = (
 			'testclass'	=> [ @default_testclass ],
 		},
 	},
+	'x86_64_rhap_6.2'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.3'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.4'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.5'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.6'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.7'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.8'	=> 'x86_64_RedHat6',
+	'x86_64_rhap_6.9'	=> 'x86_64_RedHat6',
 
-	'x86_64_rhap_6.0-updated'	=> 'x86_64_rhap_6.0',
-	'x86_64_rhap_6.1-updated'	=> 'x86_64_rhap_6.0',
+	# for now SL6 is the same as RedHat6
+	'x86_64_SL6'	=> 'x86_64_RedHat6',
+	'x86_64_sl_6.0' => 'x86_64_SL6',
+	'x86_64_sl_6.1' => 'x86_64_SL6',
+	'x86_64_sl_6.2' => 'x86_64_SL6',
+	'x86_64_sl_6.3' => 'x86_64_SL6',
 
-	# This is the new batlab one
-	'x86_64_rhap_6.1'	=> {
-		'build' => {
-			'configure_args' => { @default_build_configure_args,
-				'-DCLIPPED:BOOL' => 'OFF',
-			 },
-			'prereqs'	=> [ @default_prereqs ],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'testclass'	=> [ @default_testclass ],
-		},
-	},
-
-    'x86_64_sl_6.0' => 'x86_64_rhap_6.1',
-    'x86_64_sl_6.1' => 'x86_64_rhap_6.1',
-    'x86_64_sl_6.2' => 'x86_64_rhap_6.1',
-    'x86_64_sl_6.3' => 'x86_64_rhap_6.1',
-
-	# And now, 6.1 has become 6.2 through the magic of auto-update
-    'x86_64_rhap_6.2' => 'x86_64_rhap_6.1',
-    'x86_64_rhap_6.3' => 'x86_64_rhap_6.1',
-
-	##########################################################################
-	# Platform RHEL 5 on x86_64
-	##########################################################################
-	'x86_64_rhap_5'		=> {
-		'build' => {
-			'configure_args' => { @default_build_configure_args,
-								  '-DCLIPPED:BOOL' => 'OFF',
-			},
-			'prereqs'	=> [ @default_prereqs ],
-			'xtests'	=> [ 
-				'x86_64_rhap_6.1-updated',
-				],
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	# This is the new batlab one
-	'x86_64_rhap_5.8'		=> {
+	# RedHat5
+	'x86_64_RedHat5'		=> {
 		'build' => {
 			'configure_args' => { @default_build_configure_args,
 								  '-DCLIPPED:BOOL' => 'OFF',
@@ -432,31 +330,80 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
-	'x86_rhap_5.8'	=> 'x86_rhap_5',
+	'x86_64_rhap_5.7'	=> 'x86_64_RedHat5',
+	'x86_64_rhap_5.8'	=> 'x86_64_RedHat5',
+	'x86_64_rhap_5.9'	=> 'x86_64_RedHat5',
+	'x86_64_rhap_5.10'	=> 'x86_64_RedHat5', # dunno if 5.10 will actually be a release
 
-
-	##########################################################################
-	# Platform Debian 5 on x86
-	##########################################################################
-	'x86_deb_5.0'		=> {
+	# 32 bit RedHat 6
+	'x86_RedHat6'		=> {
 		'build' => {
-			'configure_args' => { @default_build_configure_args,
-								  '-DCLIPPED:BOOL' => 'OFF',
-			},
-			'prereqs' => [ ],
+			'configure_args' => { @default_build_configure_args	},
+			'prereqs'	=> [ @default_prereqs ],
 			'xtests'	=> [ ],
 		},
 
 		'test' => {
 			'configure_args' => { @default_test_configure_args },
-			'prereqs'		=> [ ],
-			'testclass'	=> [ @default_testclass ],
+			'prereqs'	=> [ @default_prereqs, ],
+			'testclass' => [ @default_testclass ],
 		},
 	},
+	'x86_rhap_6.2'		=> 'x86_RedHat6',
+	'x86_rhap_6.3'		=> 'x86_RedHat6',
+	'x86_rhap_6.4'		=> 'x86_RedHat6',
+	'x86_rhap_6.5'		=> 'x86_RedHat6',
+	'x86_rhap_6.6'		=> 'x86_RedHat6',
+	'x86_rhap_6.7'		=> 'x86_RedHat6',
+	'x86_rhap_6.8'		=> 'x86_RedHat6',
+	'x86_rhap_6.9'		=> 'x86_RedHat6',
 
+	# 32 bit RedHat 5
+	'x86_RedHat5'		=> {
+		'build' => {
+			'configure_args' => { @default_build_configure_args,
+								  '-DCLIPPED:BOOL' => 'OFF',
+			},
+			'prereqs'	=> [ @default_prereqs ],
+			'xtests'	=> [ ],
+		},
 
-	# This is new batlab macos 10.7 machine
-	'x86_64_macos_10.7' => {
+		'test' => {
+			'configure_args' => { @default_test_configure_args },
+			'prereqs'	=> [ @default_prereqs, ],
+			'testclass' => [ @default_testclass ],
+		},
+	},
+	'x86_rhap_5.8'		=> 'x86_RedHat5',
+	'x86_rhap_5.9'		=> 'x86_RedHat5',
+	'x86_rhap_5.10'		=> 'x86_RedHat5',
+
+	# 32 bit SL 5
+	'x86_SL5' => {
+		'build' => {
+			'configure_args' => { @default_build_configure_args,
+								  '-DCLIPPED:BOOL' => 'OFF',
+			},
+			'prereqs'	=> [ ],
+			'xtests'	=> undef,
+		},
+
+		'test' => {
+			'configure_args' => { @default_test_configure_args },
+			'prereqs'	=> [ ],
+			'testclass' => [ @default_testclass ],
+		},
+	},
+	'x86_sl_5.7'	=> 'x86_SL5',
+	'x86_sl_5.8'	=> 'x86_SL5',
+	'x86_sl_5.9'	=> 'x86_SL5',
+	'x86_sl_5.10'	=> 'x86_SL5',
+
+	##########################################################################
+	# Platform MacOSX
+	##########################################################################
+	
+	'x86_64_MacOSX' => {
 		'build' => {
 			'configure_args' => { @default_build_configure_args },
 			'prereqs'	=> [ ],
@@ -469,13 +416,25 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
+	'x86_64_MacOSX7',	=> 'x86_64_MacOSX',
+	'x86_64_MacOSX8',	=> 'x86_64_MacOSX',
+	'x86_64_MacOSX9',	=> 'x86_64_MacOSX',
+
+
+	# These describe what a human, sadly, had to figure out about certain
+	# ports that we do in a "one off" fashion. These ports are generally
+	# not released to the public, but are often needed by NMI to run their
+	# cluster. If by chance work happens on these ports to make them officially
+	# released, then they will move from this section to the above section, 
+	# and most likely with the above arguments to configure. Most of these
+	# builds of Condor are as clipped as possible to ensure compilation.
+
 	##########################################################################
-	# Platform RHEL 5 on x86
+	# Platform Fedora 15 on x86_64
 	##########################################################################
-	'x86_rhap_5.8'		=> {
+	'x86_64_Fedora'	=> {
 		'build' => {
-			'configure_args' => { @default_build_configure_args,
-								  '-DCLIPPED:BOOL' => 'OFF',
+			'configure_args' => { @minimal_build_configure_args,
 			},
 			'prereqs'	=> [ @default_prereqs ],
 			'xtests'	=> undef,
@@ -487,6 +446,23 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
+	'x86_64_Fedora15'				=> 'x86_64_Fedora',
+	'x86_64_Fedora16'				=> 'x86_64_Fedora',
+	'x86_64_Fedora17'				=> 'x86_64_Fedora',
+	'x86_64_Fedora18'				=> 'x86_64_Fedora',
+	'x86_64_Fedora19'				=> 'x86_64_Fedora',
+	'x86_64_Fedora20'				=> 'x86_64_Fedora',
+	'x86_64_Fedora21'				=> 'x86_64_Fedora',
+	'x86_64_Fedora22'				=> 'x86_64_Fedora',
+	
+	'x86_64_fedora_15'				=> 'x86_64_Fedora',
+	'x86_64_fedora_16'				=> 'x86_64_Fedora',
+	'x86_64_fedora_17'				=> 'x86_64_Fedora',
+	'x86_64_fedora_18'				=> 'x86_64_Fedora',
+	'x86_64_fedora_19'				=> 'x86_64_Fedora',
+	'x86_64_fedora_20'				=> 'x86_64_Fedora',
+	'x86_64_fedora_21'				=> 'x86_64_Fedora',
+	'x86_64_fedora_22'				=> 'x86_64_Fedora',
 
 	##########################################################################
 	# Platform Solaris 11 on x86_64
@@ -495,119 +471,34 @@ our %submit_info = (
 	# problems.	 Since ssh_to_job depends on openssl's base64 functions,
 	# that is also disabled.
 	##########################################################################
-	'x86_64_sol_5.11'	=> {
+	'x86_64_Solaris11'	=> {
 		'build' => {
-			'configure_args' => { @minimal_build_configure_args,
-								  '-DWITH_OPENSSL:BOOL' => 'OFF',
-								  '-DWITH_CURL:BOOL' => 'OFF',
-								  '-DHAVE_SSH_TO_JOB:BOOL' => 'OFF',
-								  '-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
-			},
-			'prereqs'	=> [ @default_prereqs, 'perl-5.8.9', 'binutils-2.15',
-							 'gzip-1.3.3', 'wget-1.9.1', 'coreutils-6.9',
-				],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs, 'perl-5.8.9', 'binutils-2.15',
-							 'gzip-1.3.3', 'wget-1.9.1', 'coreutils-6.9' ],
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	##########################################################################
-	# Platform Solaris 10 on x86_64
-	# Building openssl is problematic on this platform.	 There is
-	# some confusion betwen 64-bit and 32-bit, which causes linkage
-	# problems.	 Since ssh_to_job depends on openssl's base64 functions,
-	# that is also disabled.
-	##########################################################################
-	'x86_64_sol_5.10'	=> {
-		'build' => {
-			'configure_args' => { @minimal_build_configure_args,
-								  '-DWITH_OPENSSL:BOOL' => 'OFF',
-								  '-DWITH_CURL:BOOL' => 'OFF',
-								  '-DHAVE_SSH_TO_JOB:BOOL' => 'OFF',
-								  '-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
-			},
-			'prereqs'	=> [ @default_prereqs, 'perl-5.8.9', 'binutils-2.21',
-							 'gzip-1.3.3', 'wget-1.9.1', 'coreutils-8.9',
-				],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs, 'perl-5.8.9', 'binutils-2.21',
-							 'gzip-1.3.3', 'wget-1.9.1', 'coreutils-8.9' ],
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	##########################################################################
-	# Platform RHEL 5.4 on X86_64
-	# This might work.
-	# I suspect this could be a real port if we bothered.
-	##########################################################################
-	'x86_64_rhap_5.4'	=> {
-		'build' => {
-			'configure_args' => { @minimal_build_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	##########################################################################
-	# Platform SL 5.5 on X86_64
-	# I suspect this could be a real port if we bothered.
-	##########################################################################
-	'x86_64_sl_5.5' => {
-		'build' => {
-			'configure_args' => { @minimal_build_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ @default_prereqs ],
-			'testclass' => [ @default_testclass ],
-		},
-	},
-
-	'x86_sl_5.7' => {
-		'build' => {
+			# we can use ssh_to_job on solaris if we use the proper kerberose
+			# this is OK since we build kerberose only for batlab.
 			'configure_args' => { @default_build_configure_args,
-								  '-DCLIPPED:BOOL' => 'OFF',
+								  '-DWITH_KRB5:BOOL' => 'OFF',
+								  '-DWITH_GSOAP:BOOL' => 'OFF', 
+								  '-DWITH_CURL:BOOL' => 'OFF',
+								  #'-DHAVE_SSH_TO_JOB:BOOL' => 'OFF',
+								  #'-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
 			},
-			'prereqs'	=> [ ],
+			'prereqs'	=> [],
 			'xtests'	=> undef,
-		},
+		},  
 
 		'test' => {
 			'configure_args' => { @default_test_configure_args },
-			'prereqs'	=> [ ],
+			'prereqs'	=> [],
 			'testclass' => [ @default_testclass ],
 		},
 	},
-	'x86_sl_5.8' => 'x86_sl_5.7',
-	'x86_sl_5.9' => 'x86_sl_5.7',
-
-
+	'x86_64_sol_5.11'	=> 'x86_64_Solaris11',
 
 	##########################################################################
 	# Platform Ubuntu 10.04 on x86_64
 	# This might work.
 	##########################################################################
-	'x86_64_ubuntu_10.04'		=> {
+	'x86_64_Ubuntu10'		=> {
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args },
 			'prereqs'	=> [ @default_prereqs ],
@@ -620,13 +511,12 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
+	'x86_64_ubuntu_10.04.4'		=> 'x86_64_Ubuntu10',
 
-	'x86_64_ubuntu_10.04.3'		=> 'x86_64_ubuntu_10.04',
-	'x86_64_ubuntu_10.04.4'		=> 'x86_64_ubuntu_10.04',
 	##########################################################################
 	# Platform Ubuntu 10.04 on x86
 	##########################################################################
-	'x86_ubuntu_10.04' => {
+	'x86_64_Ubuntu10' => {
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args },
 			'prereqs'	=> [ @default_prereqs ],
@@ -639,12 +529,26 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
+	'x86_64_ubuntu_10.04.4' => 'x86_64_Ubuntu10',
+	
+	'x86_64_Ubuntu12' => {
+		'build' => {
+			'configure_args' => { @minimal_build_configure_args },
+			'prereqs'	=> [ @default_prereqs ],
+			'xtests'	=> undef,
+		},
 
-
+		'test' => {
+			'configure_args' => { @default_test_configure_args },
+			'prereqs'	=> [ @default_prereqs ],
+			'testclass' => [ @default_testclass ],
+		},
+	},
+	
 	##########################################################################
-	# Platform openSUSE 11.3 on x86_64 (& updated)
+	# Platform openSUSE
 	##########################################################################
-	'x86_64_opensuse_11.3'				=> {
+	'x86_64_OpenSUSE11'				=> {
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 								  '-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
@@ -665,38 +569,13 @@ our %submit_info = (
 			'testclass'	=> [ @default_testclass ],
 		},
 	},
-	'x86_64_opensuse_11.3-updated'		=> 'x86_64_opensuse_11.3',
-	'x86_64_opensuse_11.4'				=> 'x86_64_opensuse_11.3',
-
-	# This one is for old batlab with java and ruby test prereqs.
-	# Can go away when old batlab does
-	'x86_64_opensuse_11.4-updated'		=> {
-		'build' => {
-			'configure_args' => { @minimal_build_configure_args,
-								  '-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
-								  '-DWITH_CURL:BOOL' => 'ON',
-								  '-DWITH_LIBVIRT:BOOL' => 'ON',
-								  '-DWITH_LIBXML2:BOOL' => 'ON',
-			},
-			'prereqs'	=> [ @default_prereqs ],
-			'xtests'	=> undef,
-		},
-
-		'test' => {
-			'configure_args' => {
-				@default_test_configure_args
-				
-			},
-			'prereqs'	=> [ @default_prereqs ],
-			'testclass'	=> [ @default_testclass ],
-		},
-	},
-
+	'x86_64_opensuse_11.3'		=> 'x86_64_OpenSUSE11',
+	'x86_64_opensuse_11.4'		=> 'x86_64_OpenSUSE11',
 
 	##########################################################################
-	# Platform FreeBSD 7.4 on x86
+	# Platform FreeBSD
 	##########################################################################
-	'x86_freebsd_7.4-updated'		=> {
+	'x86_FreeBSD7'		=> {
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 				'-DWITHOUT_SOAP_TEST:BOOL=ON' => undef,
@@ -705,16 +584,7 @@ our %submit_info = (
 				'-DWITH_LIBVIRT:BOOL=OFF' => undef,
 				'-DWITH_LIBXML2:BOOL=ON' => undef,
 			},
-			'prereqs'	=> [ 'tar-1.14',
-							 'patch-2.6.1',
-							 'cmake-2.8.3',
-							 'flex-2.5.4a',
-							 'make-3.80',
-							 'byacc-1.9',
-							 'bison-1.25',
-							 'wget-1.9.1',
-							 'm4-1.4.1',
-				],
+			'prereqs'	=> [],
 			'xtests'	=> undef,
 		},
 
@@ -723,20 +593,13 @@ our %submit_info = (
 				@default_test_configure_args
 				
 			},
-			'prereqs'	=> [ 'tar-1.14',
-							 'patch-2.6.1',
-							 'cmake-2.8.3',
-							 'flex-2.5.4a',
-							 'make-3.80',
-							 'byacc-1.9',
-							 'bison-1.25',
-							 'wget-1.9.1',
-							 'm4-1.4.1',
-				],
+			'prereqs'	=> [],
 			'testclass'	=> [ @default_testclass ],
 		},
 	},
-	'x86_64_freebsd_8.2'				=> {
+	'x86_freebsd_7.4'		=> 'x86_FreeBSD7',
+	
+	'x86_FreeBSD8'			=> {
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 				'-DWITHOUT_SOAP_TEST:BOOL=ON' => undef,
@@ -758,10 +621,7 @@ our %submit_info = (
 			'testclass'	=> [ @default_testclass ],
 		},
 	},
-	'x86_64_freebsd_7.4-updated'		=> 'x86_freebsd_7.4-updated',
-	'x86_freebsd_8.2-updated'			=> 'x86_freebsd_7.4-updated',
-	'x86_64_freebsd_8.2-updated'		=> 'x86_freebsd_7.4-updated',
-	'x86_64_freebsd_8.3'				=> 'x86_freebsd_7.4-updated',
+	'x86_64_freebsd_8.2'		=> 'x86_FreeBSD8',
 );
 
 while( 1 ) {
