@@ -1,6 +1,7 @@
 # in order of upstream compatibility and invasiveness
 no_java_for_now
 no_compress
+gsoap_symbols
 # should be obsolete in condor 7.7.6+, but cannot confirm
 fix_condor_run
-alpha-fix-getpid.patch
+#alpha-fix-getpid.patch
