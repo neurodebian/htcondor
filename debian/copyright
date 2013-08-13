@@ -93,7 +93,7 @@ License: BSD-4-clause
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-Files: src/condor_rmdir/{tokenize.cpp,bprint.h,harylist.h}
+Files: src/condor_rmdir/{tokenize.cpp bprint.h harylist.h}
 Copyright: 2010, John M. Knoeller
 License: Apache-2.0
 
