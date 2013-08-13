@@ -36,7 +36,7 @@ override_dh_auto_configure:
 		-DHAVE_EXT_OPENSSL:BOOL=ON \
 		-DHAVE_EXT_PCRE:BOOL=ON \
 		-DWITH_LIBCGROUP:BOOL=OFF
-		# upstream says: tests aren't reliablei enough yet
+		# upstream says: tests aren't reliable enough yet
 		#-DBUILD_TESTS:BOOL=OFF \
 		# upstream says: contrib is to unstable for initial packaging
 		#-DWANT_CONTRIB:BOOL=OFF \
@@ -97,7 +97,6 @@ override_dh_auto_install:
 override_dh_install:
 	dh_install
 	# fix permissions
-	chmod -x debian/condor/usr/lib/condor/*.pm
 	chmod -x debian/condor/etc/default/condor
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
@@ -158,6 +157,7 @@ override_dh_installinit:
 override_dh_strip:
 	dh_strip --dbg-package=condor-dbg
 
+override_dh_auto_test:
 
 dfsg-source-tree:
 	-quilt pop -a
