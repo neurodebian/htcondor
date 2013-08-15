@@ -23,20 +23,22 @@ Condor pool. Please see this page for more information on graceful shutdowns:
   https://condor-wiki.cs.wisc.edu/index.cgi/wiki?p=HowToShutDownCondor
 
 
-Snapshotting of vanilla universe jobs
--------------------------------------
+Checkpoint/Migration support
+----------------------------
 
-The Debian package comes with built-in support for snapshotting of vanilla
-universe jobs with DMTCP. This is useful for migrating running jobs between
-machines of a condor pool without having to relink the respective binaries with
-Condor's standard universe LIBC wrapper.  The main advantage of DMTCP over
-Condor's native mechanism is that it also works for scripts (interpreter
-sessions like Python), and closed-source systems (e.g. Matlab). The necessary
-shim script (a wrapper around the actual job executable) is available at
-/usr/lib/condor/shim_dmtcp. The condor-doc package comes with example submit
-files for self-compiled executables and system-wide installed software.  A
-submit configuration for a job with on-demand snapshotting on a Debian cluster
-could look like this:
+At this point Condor's standard universe is not supported by this package.
+
+However, the Debian package comes with built-in support for
+checkpoint/migration of vanilla universe jobs with DMTCP. This is useful for
+migrating running jobs between machines of a condor pool without having to
+relink the respective binaries with Condor's standard universe LIBC wrapper.
+The main advantage of DMTCP over Condor's native mechanism is that it also
+works for scripts (interpreter sessions like Python), and closed-source systems
+(e.g. Matlab). The necessary shim script (a wrapper around the actual job
+executable) is available at /usr/lib/condor/shim_dmtcp. The condor-doc package
+comes with example submit files for self-compiled executables and system-wide
+installed software.  A submit configuration for a job with on-demand
+snapshotting on a Debian cluster could look like this:
 
   # DMTCP checkpointing related boilerplate (should be applicable in most cases)
   universe = vanilla

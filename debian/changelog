@@ -29,26 +29,45 @@ condor (8.0.1~dfsg.1-1) unstable; urgency=low
 
  -- Brian Lin <blin@cs.wisc.edu>  Tue, 23 Jul 2013 19:25:55 -0400
 
-condor (7.8.8~dfsg.1-1) experimental; urgency=low
+condor (7.8.8~dfsg.1-2) unstable; urgency=low
 
+  * Fix corrupted Russian and French debconf template translations.
+    Thanks to David Prévot for the fixes (Closes: #671510, #673138).
+
+ -- Michael Hanke <mih@debian.org>  Sun, 21 Jul 2013 09:23:43 +0200
+
+condor (7.8.8~dfsg.1-1) unstable; urgency=low
+
+  [ Brian Lin ]
   * New upstream bug fix release.
     - Fixed a bug in condor_advertise that could cause failure to publish
     ClassAds to condor_collector daemons other than the first one in the list of
     condor_collector daemons (Ticket #3404).
     - Fixed a bug that could cause HTCondor daemons to abort on condor_reconfig
-    when the value of configuration variable STATISTICS_WINDOW_SECONDS was reduced.
-    (Ticket #3443).
+    when the value of configuration variable STATISTICS_WINDOW_SECONDS was
+    reduced. (Ticket #3443).
     - If condor_shared_port was using a dynamic port and the condor_master was
-    using the shared port, then if condor_shared_port died, all subsequent attempts
-    to restart it on a different port failed. (Ticket #3478).
+    using the shared port, then if condor_shared_port died, all subsequent
+    attempts to restart it on a different port failed. (Ticket #3478).
     - Reduced the likelihood of a problem that caused the condor_master to
     restart some of its children after a recent reconfiguration, because the
     condor_master incorrectly concluded that the children were hung. (Ticket
     #3510)
+    - Now installs the condor_kbdd daemon.
+    - Does no longer provide condor_glidein
+    - Fix a number of bashisms (Closes: #690640)
   * Added patch to automatically retry glexec operations if they exit with an
     error code likely caused by a transient error (Ticket 2415).
 
- -- Brian Lin <blin@vdt-c05.cs.wisc.edu>  Wed, 10 Jul 2013 09:36:40 -0500
+  [ Michael Hanke ]
+  * Add Brian Lin as a maintainer.
+  * Adjust code to determine Condor's upstream version in debian/rules'
+    get-orig-source target.
+  * Add citation information in debian/upstream. Thanks to Andreas Tille.
+  * Add explicit note to README.Debian that the standard universe is not
+    supported at this point (Closes: #717357).
+
+ -- Michael Hanke <mih@debian.org>  Sat, 20 Jul 2013 12:51:53 +0200
 
 condor (7.8.7~dfsg.1-1) experimental; urgency=low
 
