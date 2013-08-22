@@ -26,6 +26,9 @@ condor (8.0.1~dfsg.1-1) unstable; urgency=low
       binary characters. (Ticket #3706).
     - Removed a bug that caused condor_dagman to have problems restarting after
       an upgrade from HTCondor version 7.8. (Ticket #3707).
+  * Add Debconf template translations:
+    - Japanese -- courtesy of victory <victory.deb@gmail.com>.
+      (Closes: #718923)
 
  -- Brian Lin <blin@cs.wisc.edu>  Tue, 23 Jul 2013 19:25:55 -0400
 
