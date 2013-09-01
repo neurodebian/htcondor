@@ -22,6 +22,10 @@
 #include "classad/exprTree.h"
 #include "classad/sink.h"
 
+#ifndef WIN32
+#include <sys/time.h>
+#endif
+
 using namespace std;
 
 namespace classad {
@@ -43,17 +47,26 @@ void ExprTree::debug_print(const char *message) const {
 	}
 }
 
-void ExprTree::debug_format_value(Value &value) const {
+void ExprTree::debug_format_value(Value &value, double time) const {
 		bool boolValue = false;
-		int intValue = 0;
+		long long intValue = 0;
 		double doubleValue = 0;
 		string stringValue = "";
+
+			// Unparsing this of kind CLASSAD_NODE will result in the
+			// entire classad, which is unnecessarily verbose
+		if (CLASSAD_NODE == nodeKind) return;
 
 		PrettyPrint	unp;
 		string		buffer;
 		unp.Unparse( buffer, this );
 
 		std::string result("Classad debug: ");
+		if (time) {
+			char buf[24];
+			snprintf(buf, sizeof(buf), "%5.5fms", time * 1000);
+			result += "["; result += buf; result += "] ";
+		}
 		result += buffer;
 		result += " --> ";
 
@@ -73,8 +86,8 @@ void ExprTree::debug_format_value(Value &value) const {
 				break;
 			case Value::INTEGER_VALUE:
 				if(value.IsIntegerValue(intValue)) {
-					char buf[12];
-					sprintf(buf, "%d", intValue);
+					char buf[32];
+					sprintf(buf, "%lld", intValue);
 					result += buf;
 					result += "\n";
 				}
@@ -82,7 +95,7 @@ void ExprTree::debug_format_value(Value &value) const {
 					
 			case Value::REAL_VALUE:
 				if(value.IsRealValue(doubleValue)) {
-					char buf[24];
+							char buf[24];
 					sprintf(buf, "%g", doubleValue);
 					result += buf;
 					result += "\n";
@@ -105,6 +118,9 @@ void ExprTree::debug_format_value(Value &value) const {
 				break;
 			case Value::LIST_VALUE:
 				result += "LIST\n";
+				break;
+			case Value::SLIST_VALUE:
+				result += "SLIST\n";
 				break;
 		}
 		debug_print(result.c_str());
@@ -135,12 +151,26 @@ CopyFrom(const ExprTree &tree)
 bool ExprTree::
 Evaluate (EvalState &state, Value &val) const
 {
+	double diff = 0;
+#ifndef WIN32
+	struct timeval begin, end;
+	if (state.debug) {
+		gettimeofday(&begin, NULL);
+	}
+#endif
 	bool eval = _Evaluate( state, val );
+#ifndef WIN32
+	if (state.debug) {
+		gettimeofday(&end, NULL);
+		diff = (end.tv_sec + (end.tv_usec * 0.000001)) -
+			(begin.tv_sec + (begin.tv_usec * 0.000001));
+	}
+#endif
 
 	if(state.debug && GetKind() != ExprTree::LITERAL_NODE &&
 			GetKind() != ExprTree::OP_NODE)
 	{
-		debug_format_value(val);
+		debug_format_value(val, diff);
 	}
 
 	return eval;
@@ -149,12 +179,26 @@ Evaluate (EvalState &state, Value &val) const
 bool ExprTree::
 Evaluate( EvalState &state, Value &val, ExprTree *&sig ) const
 {
+	double diff = 0;
+#ifndef WIN32
+	struct timeval begin, end;
+	if (state.debug) {
+		gettimeofday(&begin, NULL);
+	}
+#endif
 	bool eval = _Evaluate( state, val, sig );
+#ifndef WIN32
+	if (state.debug) {
+		gettimeofday(&end, NULL);
+		diff = (end.tv_sec + (end.tv_usec * 0.000001)) -
+			(begin.tv_sec + (begin.tv_usec * 0.000001));
+	}
+#endif
 
 	if(state.debug && GetKind() != ExprTree::LITERAL_NODE &&
 			GetKind() != ExprTree::OP_NODE)
 	{
-		debug_format_value(val);
+		debug_format_value(val, diff);
 	}
 
 	return eval;
@@ -210,6 +254,37 @@ Flatten( EvalState &state, Value &val, ExprTree *&tree, int* op) const
 	return( _Flatten( state, val, tree, op ) );
 }
 
+bool ExprTree::isClassad(ClassAd ** ptr)
+{
+	bool bRet = false;
+	
+	
+	if ( CLASSAD_NODE == nodeKind )
+	{
+		if (ptr){
+			*ptr = (ClassAd *) this;
+		}
+		
+		bRet = true;
+	}
+	
+	return (bRet);
+}
+
+const ExprTree* ExprTree::self() const
+{
+	const ExprTree * pRet=this;
+	return (pRet);
+}
+
+/* This version is for shared-library compatibility.
+ * Remove it the next time we have to bump the ClassAds SO version.
+ */
+const ExprTree* ExprTree::self()
+{
+	const ExprTree * pRet=this;
+	return (pRet);
+}
 
 void ExprTree::
 Puke( ) const
@@ -276,14 +351,14 @@ SetRootScope( )
     if (curAd == NULL) {
         rootAd = NULL;
     } else {
-        const ClassAd *curScope = curAd->parentScope;
+        const ClassAd *curScope = curAd->GetParentScope();
         
         while( curScope ) {
             if( curScope == curAd ) {	// NAC - loop detection
                 return;					// NAC
             }							// NAC
             prevScope = curScope;
-            curScope  = curScope->parentScope;
+            curScope  = curScope->GetParentScope();
         }
         
         rootAd = prevScope;
@@ -291,12 +366,12 @@ SetRootScope( )
     return;
 }
 
-ostream& operator<<(ostream &stream, const ExprTree &expr)
+ostream& operator<<(ostream &stream, const ExprTree *expr)
 {
-	PrettyPrint unparser;
+	ClassAdUnParser unparser;
 	string      string_representation;
 
-	unparser.Unparse(string_representation, &expr);
+	unparser.Unparse(string_representation, expr);
 	stream << string_representation;
 	
 	return stream;

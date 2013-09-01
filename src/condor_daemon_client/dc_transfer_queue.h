@@ -33,6 +33,7 @@
 #include "enum_utils.h"
 #include "daemon.h"
 #include "MyString.h"
+#include "utc_time.h"
 
 enum XFER_QUEUE_ENUM {
 	XFER_QUEUE_NO_GO = 0,
@@ -42,9 +43,9 @@ enum XFER_QUEUE_ENUM {
 // TransferQueueContactInfo is used to pass around information for
 // initializing DCTransferQueue.  For example, the schedd uses this to
 // pass contact information to the shadow.  In addition to an address,
-// this class contains information to optimize unlimited
-// uploads/downloads, which do not require any connection to the
-// manager to be made.
+// this class contains information to optimize the case where
+// uploads and/or downloads are unlimited, which means no connection
+// to the manager is needed.
 
 class TransferQueueContactInfo {
  public:
@@ -57,25 +58,24 @@ class TransferQueueContactInfo {
 
 		// serializes all contact information into a string suitable for
 		// passing on a command line etc.
-	char const *GetStringRepresentation();
+	bool GetStringRepresentation(std::string &str);
 
 		// returns NULL if unlimited, o.w. sinful string of transfer
 		// queue server
-	char const *GetAddress() { return m_addr.Value(); }
+	char const *GetAddress() { return m_addr.c_str(); }
 
 	bool GetUnlimitedUploads() { return m_unlimited_uploads; }
 	bool GetUnlimitedDownloads() { return m_unlimited_downloads; }
 
  private:
-	MyString m_addr;
+	std::string m_addr;
 	bool m_unlimited_uploads;
 	bool m_unlimited_downloads;
-
-	MyString m_str_representation;
 };
 
 class DCTransferQueue : public Daemon {
 public:
+	DCTransferQueue( const class DCSchedd &schedd );
 	DCTransferQueue( TransferQueueContactInfo &contact_info );
 
 		/// Destructor
@@ -86,18 +86,33 @@ public:
 		// to determine actual status.  This function just initiates
 		// the request.  If transfers are unlimited, this does no work.
 		// downloading - true if downloading file, false if uploading
-	bool RequestTransferQueueSlot(bool downloading,char const *fname,char const *jobid,int timeout,MyString &error_desc);
+	bool RequestTransferQueueSlot(bool downloading,char const *fname,char const *jobid,char const *queue_user,int timeout,MyString &error_desc);
 
 		// See if we have been given permission to transfer currently
-		// requested file.  If transfers are unlimited, this does no
-		// work.  Call GoAheadAlways() to confirm whether we have GoAhead
-		// for one file or for unlimited files.
+		// requested file.  If transfers are unlimited, this is a no-op.
+		// Returns true if we have the go-ahead to transfer.
+		//         Call GoAheadAlways() to confirm whether we have GoAhead
+		//         for one file or for unlimited files.
+        // Returns false if we do not have the go-ahead.  Sets
+		// pending=true if we should keep trying.  Otherwise, it
+		// sets pending=false and sets error_desc to a description of
+		// the error that caused the request to fail.
 	bool PollForTransferQueueSlot(int timeout,bool &pending,MyString &error_desc);
 
 		// Remove current request for permission to transfer.
 	void ReleaseTransferQueueSlot();
 
 	bool GoAheadAlways( bool downloading );
+
+	void AddBytesSent(long v)     { if( v>0 ) m_recent_bytes_sent      += v; }
+	void AddBytesReceived(long v) { if( v>0 ) m_recent_bytes_received  += v; }
+	void AddUsecFileRead(long v)  { if( v>0 ) m_recent_usec_file_read  += v; }
+	void AddUsecFileWrite(long v) { if( v>0 ) m_recent_usec_file_write += v; }
+	void AddUsecNetRead(long v)   { if( v>0 ) m_recent_usec_net_read   += v; }
+	void AddUsecNetWrite(long v)  { if( v>0 ) m_recent_usec_net_write  += v; }
+
+	void ConsiderSendingReport()      { if( m_report_interval) ConsiderSendingReport(time(NULL)); }
+	void ConsiderSendingReport(time_t now) { if( now >= m_next_report && m_report_interval ) SendReport(now); }
 
  private:
 		// As an optimization, if up/downloads are unlimited, this class
@@ -109,18 +124,33 @@ public:
 		// as we are in the transfer queue.
 	ReliSock *m_xfer_queue_sock;
 
-	MyString m_xfer_fname;      // name of file involved in current request
-	MyString m_xfer_jobid;      // job id associated with current request
+	std::string m_xfer_fname;      // name of file involved in current request
+	std::string m_xfer_jobid;      // job id associated with current request
 	                            // (for information purposes only)
 
 	bool m_xfer_downloading;    // true if request was for download
 	bool m_xfer_queue_pending;  // true if status of request is pending
 	bool m_xfer_queue_go_ahead; // true if it is ok to go ahead with transfer
 
-	MyString m_xfer_rejected_reason;
+	std::string m_xfer_rejected_reason;
+
+		// i/o statistics
+	UtcTime m_last_report;
+	time_t m_next_report;
+	unsigned m_report_interval;
+	unsigned m_recent_bytes_sent;
+	unsigned m_recent_bytes_received;
+	unsigned m_recent_usec_file_read;
+	unsigned m_recent_usec_file_write;
+	unsigned m_recent_usec_net_read;
+	unsigned m_recent_usec_net_write;
+
+	void Init();
 
 		// Verify that transfer queue server hasn't revoked our slot.
 	bool CheckTransferQueueSlot();
+
+	void SendReport(time_t now,bool disconnect=false);
 };
 
 #endif

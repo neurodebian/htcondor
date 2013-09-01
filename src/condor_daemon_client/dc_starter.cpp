@@ -23,6 +23,7 @@
 #include "condor_config.h"
 #include "condor_string.h"
 #include "condor_ver_info.h"
+#include "condor_version.h"
 #include "condor_attributes.h"
 #include "condor_open.h"
 
@@ -103,14 +104,14 @@ DCStarter::reconnect( ClassAd* req, ClassAd* reply, ReliSock* rsock,
 {
 	setCmdStr( "reconnectJob" );
 
-	MyString line;
+	std::string line;
 
 		// Add our own attributes to the request ad we're sending
 	line = ATTR_COMMAND;
 	line += "=\"";
 	line += getCommandString( CA_RECONNECT_JOB );
 	line += '"';
-	req->Insert( line.Value() );
+	req->Insert( line.c_str() );
 
 	return sendCACmd( req, reply, rsock, false, timeout, sec_session_id );
 	
@@ -133,7 +134,7 @@ DCStarter::updateX509Proxy( const char * filename, char const *sec_session_id)
 	if( ! startCommand(UPDATE_GSI_CRED, &rsock, 0, &errstack, NULL, false, sec_session_id) ) {
 		dprintf( D_ALWAYS, "DCStarter::updateX509Proxy: "
 				 "Failed send command to the starter: %s\n",
-				 errstack.getFullText());
+				 errstack.getFullText().c_str());
 		return XUS_Error;
 	}
 
@@ -179,7 +180,7 @@ DCStarter::delegateX509Proxy( const char * filename, time_t expiration_time, cha
 	if( ! startCommand(DELEGATE_GSI_CRED_STARTER, &rsock, 0, &errstack, NULL, false, sec_session_id) ) {
 		dprintf( D_ALWAYS, "DCStarter::delegateX509Proxy: "
 				 "Failed send command to the starter: %s\n",
-				 errstack.getFullText());
+				 errstack.getFullText().c_str());
 		return XUS_Error;
 	}
 
@@ -268,7 +269,7 @@ DCStarter::createJobOwnerSecSession(int timeout,char const *job_claim_id,char co
 	input.Assign(ATTR_SESSION_INFO,session_info);
 
 	sock.encode();
-	if( !input.put(sock) || !sock.end_of_message() ) {
+	if( !putClassAd(&sock, input) || !sock.end_of_message() ) {
 		error_msg = "Failed to compose CREATE_JOB_OWNER_SEC_SESSION to starter";
 		return false;
 	}
@@ -276,7 +277,7 @@ DCStarter::createJobOwnerSecSession(int timeout,char const *job_claim_id,char co
 	sock.decode();
 
 	ClassAd reply;
-	if( !reply.initFromStream(sock) || !sock.end_of_message() ) {
+	if( !getClassAd(&sock, reply) || !sock.end_of_message() ) {
 		error_msg = "Failed to get response to CREATE_JOB_OWNER_SEC_SESSION from starter";
 		return false;
 	}
@@ -333,14 +334,14 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 	}
 
 	sock.encode();
-	if( !input.put(sock) || !sock.end_of_message() ) {
+	if( !putClassAd(&sock, input) || !sock.end_of_message() ) {
 		error_msg = "Failed to send START_SSHD request to starter";
 		return false;
 	}
 
 	ClassAd result;
 	sock.decode();
-	if( !result.initFromStream(sock) || !sock.end_of_message() ) {
+	if( !getClassAd(&sock, result) || !sock.end_of_message() ) {
 		error_msg = "Failed to read response to START_SSHD from starter";
 		return false;
 	}
@@ -348,9 +349,9 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 	bool success = false;
 	result.LookupBool(ATTR_RESULT,success);
 	if( !success ) {
-		MyString remote_error_msg;
+		std::string remote_error_msg;
 		result.LookupString(ATTR_ERROR_STRING,remote_error_msg);
-		error_msg.sprintf("%s: %s",slot_name,remote_error_msg.Value());
+		error_msg.formatstr("%s: %s",slot_name,remote_error_msg.c_str());
 		retry_is_sensible = false;
 		result.LookupBool(ATTR_RETRY,retry_is_sensible);
 		return false;
@@ -358,12 +359,12 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 
 	result.LookupString(ATTR_REMOTE_USER,remote_user);
 
-	MyString public_server_key;
+	std::string public_server_key;
 	if( !result.LookupString(ATTR_SSH_PUBLIC_SERVER_KEY,public_server_key) ) {
 		error_msg = "No public ssh server key received in reply to START_SSHD";
 		return false;
 	}
-	MyString private_client_key;
+	std::string private_client_key;
 	if( !result.LookupString(ATTR_SSH_PRIVATE_CLIENT_KEY,private_client_key) ) {
 		error_msg = "No ssh client key received in reply to START_SSHD";
 		return false;
@@ -373,27 +374,27 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 		// store the private client key
 	unsigned char *decode_buf = NULL;
 	int length = -1;
-	condor_base64_decode(private_client_key.Value(),&decode_buf,&length);
+	condor_base64_decode(private_client_key.c_str(),&decode_buf,&length);
 	if( !decode_buf ) {
 		error_msg = "Error decoding ssh client key.";
 		return false;
 	}
 	FILE *fp = safe_fcreate_fail_if_exists(private_client_key_file,"a",0400);
 	if( !fp ) {
-		error_msg.sprintf("Failed to create %s: %s",
+		error_msg.formatstr("Failed to create %s: %s",
 						  private_client_key_file,strerror(errno));
 		free( decode_buf );
 		return false;
 	}
 	if( fwrite(decode_buf,length,1,fp)!=1 ) {
-		error_msg.sprintf("Failed to write to %s: %s",
+		error_msg.formatstr("Failed to write to %s: %s",
 						  private_client_key_file,strerror(errno));
 		fclose( fp );
 		free( decode_buf );
 		return false;
 	}
 	if( fclose(fp)!=0 ) {
-		error_msg.sprintf("Failed to close %s: %s",
+		error_msg.formatstr("Failed to close %s: %s",
 						  private_client_key_file,strerror(errno));
 		free( decode_buf );
 		return false;
@@ -405,14 +406,14 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 
 		// store the public server key in the known_hosts file
 	length = -1;
-	condor_base64_decode(public_server_key.Value(),&decode_buf,&length);
+	condor_base64_decode(public_server_key.c_str(),&decode_buf,&length);
 	if( !decode_buf ) {
 		error_msg = "Error decoding ssh server key.";
 		return false;
 	}
 	fp = safe_fcreate_fail_if_exists(known_hosts_file,"a",0600);
 	if( !fp ) {
-		error_msg.sprintf("Failed to create %s: %s",
+		error_msg.formatstr("Failed to create %s: %s",
 						  known_hosts_file,strerror(errno));
 		free( decode_buf );
 		return false;
@@ -423,7 +424,7 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 	fprintf(fp,"* ");
 
 	if( fwrite(decode_buf,length,1,fp)!=1 ) {
-		error_msg.sprintf("Failed to write to %s: %s",
+		error_msg.formatstr("Failed to write to %s: %s",
 						  known_hosts_file,strerror(errno));
 		fclose( fp );
 		free( decode_buf );
@@ -431,7 +432,7 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 	}
 
 	if( fclose(fp)!=0 ) {
-		error_msg.sprintf("Failed to close %s: %s",
+		error_msg.formatstr("Failed to close %s: %s",
 						  known_hosts_file,strerror(errno));
 		free( decode_buf );
 		return false;
@@ -443,3 +444,167 @@ bool DCStarter::startSSHD(char const *known_hosts_file,char const *private_clien
 	return true;
 #endif
 }
+
+bool
+DCStarter::peek(bool transfer_stdout, ssize_t &stdout_offset, bool transfer_stderr, ssize_t &stderr_offset, const std::vector<std::string> &filenames, std::vector<ssize_t> &offsets, size_t max_bytes, bool &retry_sensible, PeekGetFD &next, std::string &error_msg, unsigned timeout, const std::string &sec_session_id, DCTransferQueue *xfer_q)
+{
+	compat_classad::ClassAd ad;
+	ad.InsertAttr(ATTR_JOB_OUTPUT, transfer_stdout);
+	ad.InsertAttr("OutOffset", stdout_offset);
+	ad.InsertAttr(ATTR_JOB_ERROR, transfer_stderr);
+	ad.InsertAttr("ErrOffset", stderr_offset);
+	ad.InsertAttr(ATTR_VERSION, CondorVersion());
+
+	size_t total_files = 0;
+	total_files += transfer_stdout ? 1 : 0;
+	total_files += transfer_stderr ? 1 : 0;
+
+	if (filenames.size())
+	{
+		total_files += filenames.size();
+		std::vector<classad::ExprTree *> filelist; filelist.reserve(filenames.size());
+		std::vector<classad::ExprTree *> offsetlist; offsetlist.reserve(filenames.size());
+		std::vector<ssize_t>::const_iterator it2 = offsets.begin();
+		for (std::vector<std::string>::const_iterator it = filenames.begin();
+			it != filenames.end() && it2 != offsets.end();
+			it++, it2++)
+		{
+			classad::Value value;
+			value.SetStringValue(*it);
+			filelist.push_back(classad::Literal::MakeLiteral(value));
+			value.SetIntegerValue(*it2);
+			offsetlist.push_back(classad::Literal::MakeLiteral(value));
+		}
+		classad::ExprTree *list(classad::ExprList::MakeExprList(filelist));
+		ad.Insert("TransferFiles", list);
+		list = classad::ExprList::MakeExprList(offsetlist);
+		ad.Insert("TransferOffsets", list);
+	}
+
+	ad.InsertAttr(ATTR_MAX_TRANSFER_BYTES, static_cast<long long>(max_bytes));
+
+	ReliSock sock;
+
+	if( !connectSock(&sock, timeout, NULL) ) {
+		error_msg = "Failed to connect to starter";
+		return false;
+	}
+
+	if( !startCommand(STARTER_PEEK, &sock, timeout, NULL, NULL, false, sec_session_id.c_str()) ) {
+		error_msg = "Failed to send START_PEEK to starter";
+		return false;
+	}
+	sock.encode();
+	if (!putClassAd(&sock, ad) || !sock.end_of_message()) {
+		error_msg = "Failed to send request to starter";
+		return false;
+	}
+
+	compat_classad::ClassAd response;
+	sock.decode();
+	if (!getClassAd(&sock, response) || !sock.end_of_message())
+	{
+		error_msg = "Failed to read response for peeking at logs.";
+		return false;
+	}
+	dPrintAd(D_FULLDEBUG, response);
+
+	bool success = false;
+	if (!response.EvaluateAttrBool(ATTR_RESULT, success) || !success)
+	{
+		response.EvaluateAttrBool(ATTR_RETRY, retry_sensible);
+		error_msg = "Remote operation failed.";
+		response.EvaluateAttrString(ATTR_ERROR_STRING, error_msg);
+		return false;
+	}
+	classad::Value valueX;
+	classad_shared_ptr<classad::ExprList> list;
+	if (!response.EvaluateAttr("TransferFiles", valueX) || !valueX.IsSListValue(list))
+	{
+		error_msg = "Unable to evaluate starter response";
+		return false;
+	}
+	classad_shared_ptr<classad::ExprList> offlist;
+	if (!response.EvaluateAttr("TransferOffsets", valueX) || !valueX.IsSListValue(offlist))
+	{
+		error_msg = "Unable to evaluate starter response (missing offsets)";
+		return false;
+	}
+
+	size_t remaining = max_bytes;
+	size_t file_count = 0;
+	classad::ExprList::const_iterator it2 = offlist->begin();
+	for (classad::ExprList::const_iterator it = list->begin();
+		it != list->end() && it2 != offlist->end();
+		it++, it2++)
+	{
+		classad::Value value;
+		(*it2)->Evaluate(value);
+		off_t off = -1;
+		value.IsIntegerValue(off);
+		(*it)->Evaluate(value);
+		std::string filename;
+		int64_t xfer_fd = -1;
+		if (!value.IsStringValue(filename) && value.IsIntegerValue(xfer_fd))
+		{
+			if (xfer_fd == 0) filename = "_condor_stdout";
+			if (xfer_fd == 1) filename = "_condor_stderr";
+		}
+		int fd = next.getNextFD(filename);
+		filesize_t size = -1;
+		int retval;
+		if ((retval = sock.get_file(&size, fd, false, false, remaining, xfer_q)) && (retval != GET_FILE_MAX_BYTES_EXCEEDED))
+		{
+			error_msg = "Internal error when transferring file " + filename;
+		}
+		else if (size >= 0)
+		{
+			remaining -= max_bytes;
+			file_count++;
+			off += size;
+		}
+		else
+		{
+			error_msg = "Failed to transfer file " + filename;
+		}
+		if (xfer_fd == 0)
+		{
+			stdout_offset = off;
+			//dprintf(D_FULLDEBUG, "New stdout offset: %ld\n", stdout_offset);
+		}
+		else if (xfer_fd == 1)
+		{
+			stderr_offset = off;
+		}
+		else
+		{
+			std::vector<ssize_t>::iterator it4 = offsets.begin();
+			for (std::vector<std::string>::const_iterator it3 = filenames.begin();
+				it3 != filenames.end() && it4 != offsets.end();
+				it3++, it4++)
+			{
+				if (*it3 == filename) *it4 = off;
+			}
+		}
+	}
+	size_t remote_file_count;
+	if (!sock.get(remote_file_count) || !sock.end_of_message())
+	{
+		error_msg = "Unable to get remote file count.";
+		return false;
+	}
+	if (file_count != remote_file_count)
+	{
+		std::stringstream ss;
+		ss << "Recieved " << file_count << " files, but remote side thought it sent " << remote_file_count << " files";
+		error_msg = ss.str();
+		return false;
+	}
+	if ((total_files != file_count) && !error_msg.size())
+	{
+		error_msg = "At least one file transfer failed.";
+		return false;
+	}
+	return true;
+}
+

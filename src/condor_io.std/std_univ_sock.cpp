@@ -50,7 +50,7 @@ int StdUnivSock::setsockopt(int level, int optname, const char* optval, int optl
 
 int StdUnivSock::close()
 {
-	if (type() == Stream::reli_sock && (DebugFlags & D_NETWORK)) {
+	if (type() == Stream::reli_sock && IsDebugLevel(D_NETWORK)) {
 		dprintf( D_NETWORK, "CLOSE %s fd=%d\n", 
 						sock_to_string(_sock), _sock );
 	}
@@ -148,7 +148,7 @@ StdUnivSock::get_sinful_peer()
         return _sinful_peer_buf;
     }
 	MyString sinful_string = _who.to_sinful();
-	ASSERT(sinful_string.Length() < sizeof(_sinful_peer_buf));
+	ASSERT(sinful_string.Length() < (int)sizeof(_sinful_peer_buf));
 	strcpy(_sinful_peer_buf, sinful_string.Value());
 	return _sinful_peer_buf;
 }

@@ -99,7 +99,7 @@ classad_visa_write(ClassAd* ad,
 		// unique, e.g. if jobad.0.0 exists then jobad.0.0.0 and if
 		// jobad.0.0.0 exists then jobad.0.0.1 and so on
 	i = 0;
-	filename.sprintf("jobad.%d.%d", cluster, proc);
+	filename.formatstr("jobad.%d.%d", cluster, proc);
 	ASSERT(dir_path != NULL);
 	file_path = dircat(dir_path, filename.Value());
 	while (-1 == (fd = safe_open_wrapper_follow(file_path,
@@ -112,7 +112,7 @@ classad_visa_write(ClassAd* ad,
 		}
 
 		delete[] file_path;
-		filename.sprintf("jobad.%d.%d.%d", cluster, proc, i++);
+		filename.formatstr("jobad.%d.%d.%d", cluster, proc, i++);
 		file_path = dircat(dir_path, filename.Value());
 	}
 
@@ -123,7 +123,7 @@ classad_visa_write(ClassAd* ad,
 		goto EXIT;
 	}
 										   
-	if (!visa_ad.fPrint(file)) {
+	if (!fPrintAd(file, visa_ad)) {
 		dprintf(D_ALWAYS | D_FAILURE,
 		        "classad_visa_write ERROR: Error writing to file '%s'\n",
 		        file_path);

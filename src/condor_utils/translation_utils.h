@@ -34,7 +34,7 @@
 */
 
 struct Translation {
-	const char *name;
+	char name [40];
 	int number;
 };
 

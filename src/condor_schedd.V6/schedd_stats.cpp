@@ -22,11 +22,21 @@
 #include "scheduler.h"
 #include "schedd_stats.h"
 #include "condor_config.h"
+#include "classad_helpers.h"
 
 void ScheddStatistics::Reconfig()
 {
-    this->RecentWindowMax = param_integer("STATISTICS_WINDOW_SECONDS", 1200, 
-                                          schedd_stats_window_quantum, INT_MAX);
+    int quantum = param_integer("STATISTICS_WINDOW_QUANTUM_SCHEDULER", INT_MAX, 1, INT_MAX);
+    if (quantum >= INT_MAX)
+        quantum = param_integer("STATISTICS_WINDOW_QUANTUM_SCHEDD", INT_MAX, 1, INT_MAX);
+    if (quantum >= INT_MAX)
+        quantum = param_integer("STATISTICS_WINDOW_QUANTUM", 4*60, 1, INT_MAX);
+    this->RecentWindowQuantum = quantum;
+
+    this->RecentWindowMax = param_integer("STATISTICS_WINDOW_SECONDS", 1200, quantum, INT_MAX);
+
+
+
     this->PublishFlags    = IF_BASICPUB | IF_RECENTPUB;
     char * tmp = param("STATISTICS_TO_PUBLISH");
     if (tmp) {
@@ -44,7 +54,7 @@ void ScheddStatistics::Reconfig()
 void ScheddStatistics::SetWindowSize(int window)
 {
    this->RecentWindowMax = window;
-   Pool.SetRecentMax(window, schedd_stats_window_quantum);
+   Pool.SetRecentMax(window, this->RecentWindowQuantum);
 }
 
 
@@ -87,11 +97,12 @@ void ScheddStatistics::Init(int fOtherPool)
 
    Clear();
    // default window size to 1 quantum, we may set it to something else later.
-   this->RecentWindowMax = schedd_stats_window_quantum;
+   if ( ! this->RecentWindowQuantum) this->RecentWindowQuantum = 1;
+   this->RecentWindowMax = this->RecentWindowQuantum;
 
    // insert static items into the stats pool so we can use the pool 
    // to Advance and Clear.  these items also publish the overall value
-   if ( ! fOtherPool) { SCHEDD_STATS_ADD_RECENT(Pool, JobsSubmitted,        IF_BASICPUB); }
+   SCHEDD_STATS_ADD_RECENT(Pool, JobsSubmitted,        IF_BASICPUB);
    SCHEDD_STATS_ADD_RECENT(Pool, JobsStarted,          IF_BASICPUB);
    SCHEDD_STATS_ADD_RECENT(Pool, JobsExited,           IF_BASICPUB);
    SCHEDD_STATS_ADD_RECENT(Pool, JobsCompleted,        IF_BASICPUB);
@@ -168,7 +179,7 @@ time_t ScheddStatistics::Tick(time_t now)
    int cAdvance = generic_stats_Tick(
       now,
       this->RecentWindowMax,   // RecentMaxTime
-      schedd_stats_window_quantum, // RecentQuantum
+      this->RecentWindowQuantum, // RecentQuantum
       this->InitTime,
       this->StatsLastUpdateTime,
       this->RecentStatsTickTime,
@@ -214,6 +225,7 @@ void ScheddStatistics::Publish(ClassAd & ad, int flags) const
    Pool.Publish(ad, flags);
 }
 
+#if 0  // obsolete
 void ScheddStatistics::Unpublish(ClassAd & ad) const
 {
    ad.Delete("StatsLifetime");
@@ -222,6 +234,29 @@ void ScheddStatistics::Unpublish(ClassAd & ad) const
    ad.Delete("RecentStatsTickTime");
    ad.Delete("RecentWindowMax");
    Pool.Unpublish(ad);
+}
+#endif
+
+ScheddOtherStats::ScheddOtherStats()
+	: next(NULL)
+	, trigger_expr(NULL)
+	, enabled(false)
+	, by(false)
+	, last_match_time(0)
+	, lifetime(0)
+{
+}
+
+ScheddOtherStats::~ScheddOtherStats()
+{
+	delete trigger_expr; trigger_expr = NULL;
+	for (std::map<std::string, ScheddOtherStats*>::iterator it = sets.begin();
+		 it != sets.end();
+		 ++it) {
+		delete it->second;
+		it->second = NULL;
+	}
+	sets.clear();
 }
 
 void ScheddOtherStatsMgr::Clear()
@@ -232,10 +267,30 @@ void ScheddOtherStatsMgr::Clear()
 time_t ScheddOtherStatsMgr::Tick(time_t now/*=0*/) // call this when time may have changed to update StatsUpdateTime, etc.
 {
 	if ( ! now) now = time(NULL);
+
+	// update deferred counts of submitted jobs by/for expression
+	CountJobsSubmitted();
+
 	ScheddOtherStats* po = NULL;
 	pools.startIterations();
 	while (pools.iterate(po)) {
 		po->stats.Tick(now);
+		if ( ! po->sets.empty()) {
+			for (std::map<std::string, ScheddOtherStats*>::iterator it = po->sets.begin();
+				 it != po->sets.end(); 
+				 ++it) {
+				ScheddOtherStats* po2 = it->second;
+				// if the statistics set has expired, disable it 
+				// otherwise, call its tick method.
+				if ((po2->lifetime > 0) && (po2->last_match_time > 0) &&
+					(po2->last_match_time < now) && 
+					((po2->last_match_time + po2->lifetime) < now)) {
+					po2->enabled = false;
+				} else {
+					po2->stats.Tick(now);
+				}
+			}
+		}
 	}
 	return now;
 }
@@ -246,6 +301,23 @@ void ScheddOtherStatsMgr::Reconfig()
 	pools.startIterations();
 	while (pools.iterate(po)) {
 		po->stats.Reconfig();
+		if ( ! po->sets.empty()) {
+			for (std::map<std::string, ScheddOtherStats*>::iterator it = po->sets.begin();
+				 it != po->sets.end();
+				 ++it) {
+				// don't really want to re-parse the same config knob for each child
+				// so instead, just copy the flags and windows max from the base set.
+				// and resize the recent window arrays if needed.
+				//
+				ScheddOtherStats* po2 = it->second;
+				po2->stats.PublishFlags = po->stats.PublishFlags;
+				if (po2->stats.RecentWindowMax != po->stats.RecentWindowMax ||
+					po2->stats.RecentWindowQuantum != po->stats.RecentWindowQuantum) {
+					po2->stats.RecentWindowQuantum = po->stats.RecentWindowQuantum;
+					po2->stats.SetWindowSize(po->stats.RecentWindowMax);
+				}
+			}
+		}
 	}
 }
 
@@ -254,7 +326,23 @@ void ScheddOtherStatsMgr::Publish(ClassAd & ad)
 	ScheddOtherStats* po = NULL;
 	pools.startIterations();
 	while (pools.iterate(po)) {
+
+		if ( ! po->enabled)
+			continue;
+
 		po->stats.Pool.Publish(ad, po->prefix.Value(), po->stats.PublishFlags);
+		if ( ! po->sets.empty()) {
+			for (std::map<std::string, ScheddOtherStats*>::iterator it = po->sets.begin();
+				 it != po->sets.end();
+				 ++it) {
+
+				ScheddOtherStats* po2 = it->second;
+				if (po2->enabled) {
+					po2->stats.Pool.Publish(ad, po2->prefix.Value(), po->stats.PublishFlags);
+				}
+
+			}
+		}
 	}
 }
 
@@ -263,9 +351,95 @@ void ScheddOtherStatsMgr::Publish(ClassAd & ad, int flags)
 	ScheddOtherStats* po = NULL;
 	pools.startIterations();
 	while (pools.iterate(po)) {
+
+		if ( ! po->enabled)
+			continue;
+
 		po->stats.Pool.Publish(ad, po->prefix.Value(), flags);
+		if ( ! po->sets.empty()) {
+			for (std::map<std::string, ScheddOtherStats*>::iterator it = po->sets.begin();
+				 it != po->sets.end();
+				 ++it) {
+
+				ScheddOtherStats* po2 = it->second;
+				if (po2->enabled) {
+					po2->stats.Pool.Publish(ad, po2->prefix.Value(), flags);
+				}
+
+			}
+		}
 	}
 }
+
+void ScheddOtherStatsMgr::UnpublishDisabled(ClassAd & ad)
+{
+	ScheddOtherStats* po = NULL;
+	pools.startIterations();
+	while (pools.iterate(po)) {
+
+		if ( ! po->enabled) {
+			po->stats.Pool.Unpublish(ad);
+		}
+
+		if ( ! po->sets.empty()) {
+			for (std::map<std::string, ScheddOtherStats*>::iterator it = po->sets.begin();
+				 it != po->sets.end();
+				 ++it) {
+
+				ScheddOtherStats* po2 = it->second;
+				if ( ! po2->enabled || ! po->enabled) {
+					po2->stats.Pool.Unpublish(ad, po2->prefix.Value());
+				}
+
+			}
+		}
+	}
+
+}
+
+
+// keep track of jobs that have been submitted but not yet counted
+void ScheddOtherStatsMgr::DeferJobsSubmitted(int cluster, int proc)
+{
+	// keep track of the last proc seen for each cluster 
+	// since we processed (and cleared) the deferred_jobs set
+	if (pools.getNumElements() > 0) {
+		deferred_jobs_submitted[cluster] = proc;
+	}
+}
+
+// from condor_qmgr.h...
+extern ClassAd *GetJobAd(int cluster_id, int proc_id, bool expStardAttrs = false, bool persist_expansions = true );
+extern void FreeJobAd(ClassAd *&ad);
+
+// finish deferred counting of submitted jobs.
+void ScheddOtherStatsMgr::CountJobsSubmitted()
+{
+	if ( ! deferred_jobs_submitted.empty() &&
+		pools.getNumElements() > 0) {
+		time_t now = time(NULL);
+
+		for (std::map<int, int>::iterator it = deferred_jobs_submitted.begin();
+			 it != deferred_jobs_submitted.end();
+			 ++it) {
+			int cluster = it->first;
+			int last_proc = it->second;
+			for (int proc = 0; proc <= last_proc; ++proc) {
+				ClassAd * job_ad = GetJobAd(cluster, proc);
+				if (job_ad) {
+					ScheddOtherStats *po = Matches(*job_ad, now);
+					while (po) {
+						po->stats.JobsSubmitted += 1;
+						po = po->next;
+					}
+					FreeJobAd(job_ad);
+				}
+			}
+		}
+	}
+	deferred_jobs_submitted.clear();
+}
+
 
 /* don't use these.
 void ScheddOtherStatsMgr::SetWindowSize(int window)
@@ -277,7 +451,11 @@ void Publish(ClassAd & ad, const char * config) const
 }
 */
 
-bool ScheddOtherStatsMgr::Enable(const char * pre, const char * trig)
+bool ScheddOtherStatsMgr::Enable(
+	const char * pre, 
+	const char * trig, 
+	bool stats_by_trig_value, /*=false*/
+	time_t lifetime /*=0*/)
 {
 	ExprTree *tree = NULL;
 	classad::ClassAdParser  parser;
@@ -290,20 +468,24 @@ bool ScheddOtherStatsMgr::Enable(const char * pre, const char * trig)
 	if (pools.lookup(pre, po) < 0) {
 		po = new ScheddOtherStats();
 		ASSERT(po);
-		po->next = NULL;
 		po->prefix = pre;
-		po->trigger = trig;
-		po->trigger_expr = tree;
 		po->stats.Init(true);
-		po->enabled = true;
+		po->stats.Reconfig();
 		pools.insert(pre, po);
 	} else {
 		was_enabled = po->enabled;
-		po->enabled = true;
-		po->trigger = trig; // update trigger.
-		delete po->trigger_expr;
-		po->trigger_expr = tree;
+		if (po->by != stats_by_trig_value ||
+			po->trigger != trig) {
+			po->stats.Clear();
+		}
+		delete po->trigger_expr; po->trigger_expr = NULL;
 	}
+
+	po->enabled = true;
+	po->by = stats_by_trig_value;
+	po->trigger = trig; // update trigger.
+	po->trigger_expr = tree;
+	po->lifetime = lifetime;
 	return was_enabled;
 }
 
@@ -326,12 +508,21 @@ bool ScheddOtherStatsMgr::RemoveDisabled()
 	pools.startIterations();
 	while (pools.iterate(po)) {
 		if ( ! po->enabled) {
-			delete po->trigger_expr;
-			po->trigger_expr = NULL;
 			MyString key;
 			pools.getCurrentKey(key);
 			pools.remove(key);
+			delete po;
 			any_removed = true;
+		} else if ( ! po->sets.empty()) {
+			for (std::map<std::string, ScheddOtherStats*>::iterator it = po->sets.begin();
+				 it != po->sets.end();
+				 ++it) {
+				if ( ! po->enabled) {
+					delete it->second;
+					it->second = NULL;
+					po->sets.erase(it++);
+				}
+			}
 		}
 	}
 	return any_removed;
@@ -339,6 +530,8 @@ bool ScheddOtherStatsMgr::RemoveDisabled()
 
 bool ScheddOtherStatsMgr::AnyEnabled()
 {
+	if (pools.getNumElements() <= 0)
+		return false;
 	ScheddOtherStats* po = NULL;
 	pools.startIterations();
 	while (pools.iterate(po)) {
@@ -348,14 +541,18 @@ bool ScheddOtherStatsMgr::AnyEnabled()
 	return false;
 }
 
-// returns a linked list of matches.
-ScheddOtherStats * ScheddOtherStatsMgr::Matches(ClassAd & ad)
+
+// returns a linked list of matches, the caller does not free
+// the returned list, the returned list is only valid until
+// the next time a method on this class is called.
+ScheddOtherStats * ScheddOtherStatsMgr::Matches(ClassAd & ad, time_t updateTime)
 {
 	ScheddOtherStats* poLast = NULL;
 	ScheddOtherStats* po = NULL;
 	pools.startIterations();
 	while (pools.iterate(po)) {
 
+		// if we have not yet built a parse tree for this expression, do that now.
 		if ( ! po->trigger_expr) {
 			ExprTree *tree = NULL;
 			classad::ClassAdParser  parser;
@@ -368,14 +565,102 @@ ScheddOtherStats * ScheddOtherStatsMgr::Matches(ClassAd & ad)
 		}
 
 		classad::Value val;
-		if (ad.EvaluateExpr(po->trigger_expr, val)) {
+		if ( ! ad.EvaluateExpr(po->trigger_expr, val)) 
+			continue;
+
+		// check to see if this is a _FOR_XXX type or _BY_XXX type. 
+		// if the expression evaluates to a bool, then count it
+		// in the overall stats collection (like it was a _FOR_XXX type)
+		// even if it's a _BY_XXX type.
+		//
+		if ( ! po->by || val.IsBooleanValue()) {
 			bool bb;
 			if (val.IsBooleanValueEquiv(bb) && bb) {
+				po->last_match_time = updateTime;
 				po->next = poLast;
 				poLast = po;
-			};
+			}
+			continue;
+		} 
+
+		// If we get here, this is a _BY_xxx type stats pool. 
+		// for this type we want to separate set of counters for each
+		// unique value that the trigger expression evaluates to
+		//
+		if (val.IsUndefinedValue()) {
+			continue;
 		}
-	}
+
+		// convert the expression result to a string so we 
+		// can use it to do a lookup in the po->sets map
+		//
+		std::string str;
+		if (val.IsStringValue(str)) {
+			// str already has value.
+		} else if (val.IsErrorValue()) {
+			str = "ERROR"; // so that errors become visible
+		} else {
+			classad::Value strVal;
+			if ( ! convertValueToStringValue(val, strVal)) {
+				// ignore things that can't be converted to strings
+				continue;
+			}
+			strVal.IsStringValue(str);
+		}
+
+		// treat empty strings as not matching anything.
+		//
+		if (str.empty())
+			continue;
+
+		// for non-empty strings, we want to add the current
+		// statistics set, and the set at po->sets[str];
+		// we may need to create the set at po->sets[str] if 
+		// this is the first time we have seen this value of str
+
+		// add the current stats pool to the return list
+		// this will accumulate and publish the attributes
+		// that will contain totals for all counters in the stats set for "Prefix"
+		po->last_match_time = updateTime;
+		po->next = poLast;
+		poLast = po;
+
+		// locate or create a stats set for the key str
+		ScheddOtherStats* po2 = NULL;
+		std::map<std::string, ScheddOtherStats*>::const_iterator it = po->sets.find(str);
+		if (it == po->sets.end()) {
+			po2 = new ScheddOtherStats();
+			ASSERT(po2);
+			po->sets[str] = po2;
+
+			po2->prefix.formatstr("%s_%s_", po->prefix.Value(), str.c_str());
+			cleanStringForUseAsAttr(po2->prefix, '_', false);
+
+			po2->stats.Init(true);
+			po2->stats.PublishFlags = po->stats.PublishFlags;
+			po2->stats.RecentWindowQuantum = po->stats.RecentWindowQuantum;
+			po2->stats.SetWindowSize(po->stats.RecentWindowMax);
+			po2->lifetime = po->lifetime;
+
+			po2->enabled = true;
+			po2->by = false;
+			po2->next = NULL;
+			po2->trigger_expr = NULL;
+		} else {
+			po2 = it->second;
+		}
+
+		// add the by<str> stats to the return list.
+		// This will accumulate and publish the "Prefix_str_JobsEtc" attributes
+		if (po2) {
+			po2->last_match_time = updateTime;
+			po2->next = poLast;
+			poLast = po2;
+		}
+
+	} // end while
+
+	// return the linked list of matches
 	return poLast;
 }
 

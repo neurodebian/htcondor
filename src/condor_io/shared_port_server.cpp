@@ -34,7 +34,7 @@ SharedPortServer::~SharedPortServer() {
 	}
 
 	if( !m_shared_port_server_ad_file.IsEmpty() ) {
-		unlink( m_shared_port_server_ad_file.Value() );
+		IGNORE_RETURN unlink( m_shared_port_server_ad_file.Value() );
 	}
 
 	if( m_publish_addr_timer != -1 ) {
@@ -161,7 +161,7 @@ SharedPortServer::HandleConnectRequest(int,Stream *sock)
 	if( client_name[0] ) {
 		MyString client_buf(client_name);
 			// client name is purely for debugging purposes
-		client_buf.sprintf_cat(" on %s",sock->peer_description());
+		client_buf.formatstr_cat(" on %s",sock->peer_description());
 		sock->set_peer_description(client_buf.Value());
 	}
 
@@ -169,8 +169,8 @@ SharedPortServer::HandleConnectRequest(int,Stream *sock)
 	if( deadline >= 0 ) {
 		sock->set_deadline_timeout( deadline );
 
-		if( DebugFlags & D_NETWORK ) {
-			deadline_desc.sprintf(" (deadline %ds)", deadline);
+		if( IsDebugLevel( D_NETWORK ) ) {
+			deadline_desc.formatstr(" (deadline %ds)", deadline);
 		}
 	}
 

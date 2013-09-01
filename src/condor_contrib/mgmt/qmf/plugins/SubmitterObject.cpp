@@ -82,8 +82,8 @@ SubmitterObject::update(const ClassAd &ad)
 	}
 
 	// debug
-	if (DebugFlags & D_FULLDEBUG) {
-		const_cast<ClassAd*>(&ad)->dPrint(D_FULLDEBUG|D_NOHEADER);
+	if (IsFulldebug(D_FULLDEBUG)) {
+		dPrintAd(D_FULLDEBUG|D_NOHEADER, const_cast<ClassAd&>(ad));
 	}
 }
 

@@ -286,6 +286,7 @@ public:
 	SafeSock* safeSock( int timeout = 0, time_t deadline = 0,
 						CondorError* errstack = 0, bool non_blocking = false );
 
+public:
 		/**	Create a new Sock object connected to the daemon.
 		  Callers can optionally specify a timeout to use for the
 		  connect().  If there was a failure in connect(), we delete 
@@ -309,7 +310,6 @@ public:
 		  */
 	bool connectSock(Sock *sock, int sec=0, CondorError* errstack=NULL, bool non_blocking=false, bool ignore_timeout_multiplier=false );
 
-public:
 		/** Send the given command to the daemon.  The caller gives
 		  the command they want to send, the type of Sock they
 		  want to use to send it over, and an optional timeout.  
@@ -361,7 +361,31 @@ public:
 				int sec = 0, CondorError* errstack = NULL,
 				char const *cmd_description = NULL,
 				bool raw_protocol=false, char const *sec_session_id=NULL );
-	
+
+
+		/** Start sending the given command and subcommand to the daemon. The caller
+		  gives the command they want to send, and the type of Sock
+		  they want to use to send it over.  This method will then
+		  allocate a new Sock of the right type, send the command, and
+		  return a pointer to the Sock while it is still in encode()
+		  mode.  If there is a failure, it will return NULL.
+		  THE CALLER IS RESPONSIBLE FOR DELETING THE SOCK.
+		  @param cmd The command you want to send.
+		  @param subcmd The sub command you want to send with DC_AUTHENTICATE
+		  @param st The type of the Sock you want to use.
+		  @param sec The timeout you want to use on your Sock.
+		  @param errstack NULL or error stack to dump errors into.
+		  @param raw_protocol to bypass all security negotiation, set to true
+		  @param sec_session_id use specified session if available
+		  @return NULL on error, or the Sock object to use for the
+		  rest of the command on success.
+		  */
+	Sock* startSubCommand( int cmd, int subcmd,
+				Stream::stream_type st = Stream::reli_sock,
+				int sec = 0, CondorError* errstack = NULL,
+				char const *cmd_description = NULL,
+				bool raw_protocol=false, char const *sec_session_id=NULL );
+
 		/** Start sending the given command to the daemon.  The caller
 		  gives the command they want to send, and a pointer to the
 		  Sock they want us to use to send it over.  This method will
@@ -377,6 +401,26 @@ public:
 		  @return false on error, true on success.
 		*/
 	bool startCommand( int cmd, Sock* sock,
+			int sec = 0, CondorError* errstack = NULL,
+			char const *cmd_description=NULL,
+			bool raw_protocol=false, char const *sec_session_id=NULL );
+
+		/** Start sending the given command and subcommand to the daemon.  The caller
+		  gives the command they want to send, and a pointer to the
+		  Sock they want us to use to send it over.  This method will
+		  then place that Sock in encode() mode, send the command, and
+		  return true on success, false on failure.  See
+		  startCommand_nonblocking for a non-blocking interface.
+		  @param cmd The command you want to send.
+		  @param subcmd The sub command you want to send with DC_AUTHENTICATE
+		  @param sock The Sock you want to use.
+		  @param sec The timeout you want to use on your Sock.
+		  @param errstack NULL or error stack to dump errors into.
+		  @param raw_protocol to bypass all security negotiation, set to true
+		  @param sec_session_id use specified session if available
+		  @return false on error, true on success.
+		*/
+	bool startSubCommand( int cmd, int subcmd, Sock* sock,
 			int sec = 0, CondorError* errstack = NULL,
 			char const *cmd_description=NULL,
 			bool raw_protocol=false, char const *sec_session_id=NULL );
@@ -403,7 +447,6 @@ public:
 			@param st The type of the Sock you want to use.
 			@param sec The timeout you want to use on your Sock.
 			@param errstack NULL or error stack to dump errors into.
-			@param errstack NULL or errstack to dump errors into
 			@param callback_fn function to call when finished
 			                   Must be non-NULL
 			@param misc_data any data caller wants passed to callback_fn
@@ -527,6 +570,7 @@ protected:
 	char* _hostname;
 	char* _full_hostname;
 	char* _addr;
+	char* _alias;
 	bool m_has_udp_command_port;
 	char* _version;
 	char* _platform;
@@ -700,6 +744,7 @@ protected:
 	char* New_platform( char* );
 	void New_addr( char* );
 	char* New_pool( char* );
+	const char* New_alias( char* );
 
 		/**
 		   Set a string so we know what command we're inside for use
@@ -761,7 +806,7 @@ protected:
 		   It may be either blocking or nonblocking, depending on the
 		   nonblocking flag.  This version uses an existing socket.
 		 */
-	static StartCommandResult startCommand( int cmd, Sock* sock, int timeout, CondorError *errstack, StartCommandCallbackType *callback_fn, void *misc_data, bool nonblocking, char const *cmd_description, char *version, SecMan *sec_man, bool raw_protocol, char const *sec_session_id );
+	static StartCommandResult startCommand( int cmd, Sock* sock, int timeout, CondorError *errstack, int subcmd, StartCommandCallbackType *callback_fn, void *misc_data, bool nonblocking, char const *cmd_description, char *version, SecMan *sec_man, bool raw_protocol, char const *sec_session_id );
 
 		/**
 		   Internal function used by public versions of startCommand().
@@ -769,7 +814,7 @@ protected:
 		   nonblocking flag.  This version creates a socket of the
 		   specified type and connects it.
 		 */
-	StartCommandResult startCommand( int cmd, Stream::stream_type st,Sock **sock,int timeout, CondorError *errstack, StartCommandCallbackType *callback_fn, void *misc_data, bool nonblocking, char const *cmd_description=NULL, bool raw_protocol=false, char const *sec_session_id=NULL );
+	StartCommandResult startCommand( int cmd, Stream::stream_type st,Sock **sock,int timeout, CondorError *errstack, int subcmd, StartCommandCallbackType *callback_fn, void *misc_data, bool nonblocking, char const *cmd_description=NULL, bool raw_protocol=false, char const *sec_session_id=NULL );
 
 		/**
 		   Class used internally to handle non-blocking connects for

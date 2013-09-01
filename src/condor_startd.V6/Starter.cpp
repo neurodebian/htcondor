@@ -147,6 +147,14 @@ Starter::satisfies( ClassAd* job_ad, ClassAd* mach_ad )
 	}
 	if( ! job_ad->EvalBool(ATTR_REQUIREMENTS, merged_ad, requirements) ) { 
 		requirements = 0;
+		dprintf( D_ALWAYS, "Failed to find requirements in merged ad?\n" );
+		classad::PrettyPrint pp;
+		std::string szbuff;
+		pp.Unparse(szbuff,job_ad);
+		dprintf( D_ALWAYS, "job_ad\n%s\n",szbuff.c_str());
+		pp.Unparse(szbuff,merged_ad);
+		dprintf( D_ALWAYS, "merged_ad\n%s\n",szbuff.c_str());
+		
 	}
 	delete( merged_ad );
 	return (bool)requirements;
@@ -231,15 +239,17 @@ Starter::publish( ClassAd* ad, amask_t mask, StringList* list )
 		ignored_attr_list->append(ATTR_STARTER_IGNORED_ATTRS);
 	}
 
-	ExprTree *tree;
+	ExprTree *tree, *pCopy;
 	const char *lhstr = NULL;
 	s_ad->ResetExpr();
 	while( s_ad->NextExpr(lhstr, tree) ) {
-
+		pCopy=0;
+	
 		if (ignored_attr_list) {
 				// insert every attr that's not in the ignored_attr_list
 			if (!ignored_attr_list->contains(lhstr)) {
-				ad->Insert(lhstr, tree->Copy());
+				pCopy = tree->Copy();
+				ad->Insert(lhstr, pCopy, false);
 				if (strncasecmp(lhstr, "Has", 3) == MATCH) {
 					list->append(lhstr);
 				}
@@ -248,12 +258,14 @@ Starter::publish( ClassAd* ad, amask_t mask, StringList* list )
 		else {
 				// no list of attrs to ignore - fallback on old behavior
 			if( strncasecmp(lhstr, "Has", 3) == MATCH ) {
-				ad->Insert( lhstr, tree->Copy() );
+				pCopy = tree->Copy();
+				ad->Insert( lhstr, pCopy, false );
 				if( list ) {
 					list->append( lhstr );
 				}
 			} else if( strncasecmp(lhstr, "Java", 4) == MATCH ) {
-				ad->Insert( lhstr, tree->Copy() );
+				pCopy = tree->Copy();
+				ad->Insert( lhstr, pCopy, false);
 			}
 		}
 	}
@@ -414,6 +426,7 @@ Starter::reallykill( int signo, int type )
 				// stale NFS mount.  So, we can at least EXCEPT with a
 				// more specific error message.
 		case ESTALE:
+			(void)first_time; // Shut the compiler up
 			EXCEPT( "Condor binaries are on a stale NFS mount.  Aborting." );
 			break;
 #else
@@ -613,8 +626,8 @@ Starter::exited(int status)
 		// Dummy up an ad
 		int now = (int) time(0);
 		jobAd = new ClassAd();
-		jobAd->SetMyTypeName("Job");
-		jobAd->SetTargetTypeName("Machine");
+		SetMyTypeName(*jobAd, "Job");
+		SetTargetTypeName(*jobAd, "Machine");
 		jobAd->Assign(ATTR_CLUSTER_ID, now);
 		jobAd->Assign(ATTR_PROC_ID, 1);
 		jobAd->Assign(ATTR_OWNER, "boinc");
@@ -623,7 +636,7 @@ Starter::exited(int status)
 		jobAd->Assign(ATTR_IMAGE_SIZE, 0);
 		jobAd->Assign(ATTR_JOB_CMD, "boinc");
 		MyString gjid;
-		gjid.sprintf("%s#%d#%d#%d", get_local_hostname().Value(), 
+		gjid.formatstr("%s#%d#%d#%d", get_local_hostname().Value(), 
 					 now, 1, now);
 		jobAd->Assign(ATTR_GLOBAL_JOB_ID, gjid);
 	}
@@ -793,14 +806,14 @@ Starter::receiveJobClassAdUpdate( Stream *stream )
 
 	stream->decode();
 	if( !stream->get( final_update) ||
-		!update_ad.initFromStream( *stream ) ||
+		!getClassAd( stream, update_ad ) ||
 		!stream->end_of_message() )
 	{
 		final_update = 1;
 	}
 	else {
 		dprintf(D_FULLDEBUG, "Received job ClassAd update from starter.\n");
-		update_ad.dPrint( D_JOB );
+		dPrintAd( D_JOB, update_ad );
 
 		// In addition to new info about the job, the starter also
 		// inserts contact info for itself (important for CCB and
@@ -849,6 +862,29 @@ Starter::execDCStarter( ArgList const &args, Env const *env,
 	new_env.SetEnv( "_CONDOR_EXECUTE", executeDir() );
 
 	env = &new_env;
+
+
+		// Build the affinity string to pass to the starter via env
+
+	std::string affinityString;
+	if (s_claim && s_claim->rip() && s_claim->rip()->get_affinity_set()) {
+		std::list<int> *l = s_claim->rip()->get_affinity_set();
+		bool needComma = false;
+		for (std::list<int>::iterator it = l->begin(); it != l->end(); it++) {
+			if (needComma) {
+				formatstr_cat(affinityString, ", %d", *it);
+			} else {
+				formatstr_cat(affinityString, "%d ", *it);
+				needComma = true;
+			}
+		}
+	}
+
+	if (param_boolean("ASSIGN_CPU_AFFINITY", false)) {
+		new_env.SetEnv("_CONDOR_STARTD_ASSIGNED_AFFINITY", affinityString.c_str());
+		new_env.SetEnv("_CONDOR_ENFORCE_CPU_AFFINITY", "true");
+		dprintf(D_ALWAYS, "Setting affinity env to %s\n", affinityString.c_str());
+	}
 
 
 	ReliSock child_job_update_sock;   // child inherits this socket
@@ -915,7 +951,7 @@ Starter::execDCStarter( ArgList const &args, Env const *env,
 		reaper_id = main_reaper;
 	}
 
-	if(DebugFlags & D_FULLDEBUG) {
+	if(IsFulldebug(D_FULLDEBUG)) {
 		MyString args_string;
 		final_args->GetArgsStringForDisplay(&args_string);
 		dprintf( D_FULLDEBUG, "About to Create_Process \"%s\"\n",
@@ -1107,12 +1143,13 @@ Starter::active()
 void
 Starter::dprintf( int flags, const char* fmt, ... )
 {
+	const DPF_IDENT ident = 0; // REMIND: maybe something useful here??
 	va_list args;
 	va_start( args, fmt );
 	if( s_claim && s_claim->rip() ) {
 		s_claim->rip()->dprintf_va( flags, fmt, args );
 	} else {
-		::_condor_dprintf_va( flags, fmt, args );
+		::_condor_dprintf_va( flags, ident, fmt, args );
 	}
 	va_end( args );
 }
@@ -1155,8 +1192,8 @@ Starter::percentCpuUsage( void )
 		
 	}
 
-	if( (DebugFlags & D_FULLDEBUG) && (DebugFlags & D_LOAD) ) {
-		dprintf( D_FULLDEBUG,
+	if( IsDebugVerbose(D_LOAD) ) {
+		dprintf(D_LOAD,
 		        "Starter::percentCpuUsage(): Percent CPU usage "
 		        "for the family of starter with pid %u is: %f\n",
 		        s_pid,
@@ -1186,7 +1223,7 @@ Starter::printInfo( int debug_level )
 		dprintf( debug_level | D_NOHEADER, 
 				 "No ClassAd available!\n" ); 
 	} else {
-		s_ad->dPrint( debug_level );
+		dPrintAd( debug_level, *s_ad );
 	}
 	dprintf( debug_level | D_NOHEADER, "*** End of starter info ***\n" ); 
 }
@@ -1308,7 +1345,7 @@ Starter::startKillTimer( void )
 		// we keep trying.
 	s_kill_tid = 
 		daemonCore->Register_Timer( tmp_killing_timeout,
-									max(1,tmp_killing_timeout),
+									std::max(1,tmp_killing_timeout),
 						(TimerHandlercpp)&Starter::sigkillStarter,
 						"sigkillStarter", this );
 	if( s_kill_tid < 0 ) {

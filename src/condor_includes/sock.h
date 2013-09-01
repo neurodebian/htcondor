@@ -85,6 +85,7 @@ public:
 	friend class SecMan;
 	friend class SecManStartCommand;
 	friend class SharedPortListener;
+	friend class SharedPortEndpoint;
 
 	/*
 	**	Methods
@@ -278,7 +279,7 @@ public:
 	int get_port();
 
     /// sinful address of mypoint() in the form of "<a.b.c.d:pppp>"
-    char * get_sinful();
+    char const * get_sinful();
 
 	/// Sinful address for access from outside of our private network.
 	/// This takes into account TCP_FORWARDING_HOST.
@@ -325,6 +326,18 @@ public:
 
 	void setFullyQualifiedUser(char const *fqu);
 
+	void setAuthenticationMethodUsed(char const *auth_method);
+	const char *getAuthenticationMethodUsed();
+
+	void setAuthenticationMethodsTried(char const *auth_methods);
+	const char *getAuthenticationMethodsTried();
+
+	void setAuthenticatedName(char const *auth_name);
+	const char *getAuthenticatedName();
+
+	void setCryptoMethodUsed(char const *crypto_method);
+	const char* getCryptoMethodUsed();
+
 		/// True if socket has tried to authenticate or socket is
 		/// using a security session that tried to authenticate.
 		/// Authentication may or may not have succeeded and
@@ -357,6 +370,7 @@ public:
 
 	void invalidateSock();
 
+	unsigned int getUniqueId() { return m_uniqueId; }
 
 //	PRIVATE INTERFACE TO ALL SOCKS
 //
@@ -474,6 +488,10 @@ protected:
 	char *          _fqu;
 	char *          _fqu_user_part;
 	char *          _fqu_domain_part;
+	char *          _auth_method;
+	char *          _auth_methods;
+	char *          _auth_name;
+	char *          _crypto_method;
 	bool            _tried_authentication;
 
 	bool ignore_connect_timeout;	// Used by HA Daemon
@@ -486,6 +504,9 @@ protected:
 	KeyInfo           * mdKey_;
 
 	static bool guess_address_string(char const* host, int port, condor_sockaddr& addr);
+
+	unsigned int m_uniqueId;
+	static unsigned int m_nextUniqueId;
 
 private:
 	bool initialize_crypto(KeyInfo * key);
@@ -506,10 +527,10 @@ private:
 	char _sinful_peer_buf[SINFUL_STRING_BUF_SIZE];
 
 	// Buffer to hold the sinful address of ourself
-	char _sinful_self_buf[SINFUL_STRING_BUF_SIZE];
+	std::string _sinful_self_buf;
 
 	// Buffer to hold the public sinful address of ourself
-	char _sinful_public_buf[SINFUL_STRING_BUF_SIZE];
+	std::string _sinful_public_buf;
 
 	// struct to hold state info for do_connect() method
 	struct connect_state_struct {
@@ -583,5 +604,7 @@ private:
 	//	SOCKET_LENGTH_TYPE len, bool outbound, bool loopback);
 	int _bind_helper(int fd, const condor_sockaddr& addr, bool outbound, bool loopback);
 };
+
+void dprintf ( int flags, Sock & sock, const char *fmt, ... ) CHECK_PRINTF_FORMAT(3,4);
 
 #endif /* SOCK_H */

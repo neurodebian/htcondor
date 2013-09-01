@@ -26,18 +26,36 @@
 #include "dc_transfer_queue.h"
 #include "simplelist.h"
 #include "reli_sock.h"
+#include "generic_stats.h"
+
+class IOStats {
+ public:
+	stats_entry_sum_ema_rate<double> bytes_sent;
+	stats_entry_sum_ema_rate<double> bytes_received;
+	stats_entry_sum_ema_rate<double> file_read;
+	stats_entry_sum_ema_rate<double> file_write;
+	stats_entry_sum_ema_rate<double> net_read;
+	stats_entry_sum_ema_rate<double> net_write;
+
+	void Add(IOStats &s);
+	void ConfigureEMAHorizons(classy_counted_ptr<stats_ema_config> config);
+};
 
 // transfer queue server's representation of a client
 class TransferQueueRequest {
  public:
-	TransferQueueRequest(ReliSock *sock,char const *fname,char const *jobid,bool downloading,time_t max_queue_age);
+	TransferQueueRequest(ReliSock *sock,char const *fname,char const *jobid,char const *queue_user,bool downloading,time_t max_queue_age);
 	~TransferQueueRequest();
 
 	char const *Description();
 
 	bool SendGoAhead(XFER_QUEUE_ENUM go_ahead=XFER_QUEUE_GO_AHEAD,char const *reason=NULL);
 
+	bool ReadReport(class TransferQueueManager *manager);
+
 	ReliSock *m_sock;
+	MyString m_queue_user;   // Name of file transfer queue user. (TRANSFER_QUEUE_USER_EXPR)
+	std::string m_up_down_queue_user; // queue user prefixed by "U" or "D" for upload/download
 	MyString m_jobid;   // For information purposes, the job associated with
 	                    // this file transfer.
 	MyString m_fname;   // File this client originally requested to transfer.
@@ -65,7 +83,7 @@ class TransferQueueManager: public Service {
 
 	int HandleRequest(int cmd,Stream *stream);
 
-	int HandleDisconnect( Stream *sock );
+	int HandleReport( Stream *sock );
 
 		// Iterate through queue, pruning disconnected clients, and
 		// giving the go ahead to those that deserve it.
@@ -74,7 +92,7 @@ class TransferQueueManager: public Service {
 		// This is called to register a future call to CheckTransferQueue.
 	void TransferQueueChanged();
 
-	void GetContactInfo(char const *command_sock_addr,MyString &contact_str);
+	bool GetContactInfo(char const *command_sock_addr, std::string &contact_str);
 
 	int GetNumUploading() { return m_uploading; }
 	int GetNumDownloading() { return m_downloading; }
@@ -84,6 +102,12 @@ class TransferQueueManager: public Service {
 	int GetDownloadWaitTime() { return m_download_wait_time; }
 	int GetMaxUploading() { return m_max_uploads; }
 	int GetMaxDownloading() { return m_max_downloads; }
+
+	void publish(ClassAd *ad);
+	void publish(ClassAd *ad, char const *publish_config);
+	void publish(ClassAd *ad,int pubflags);
+
+	void AddRecentIOStats(IOStats &s,const std::string up_down_queue_user);
  private:
 	SimpleList<TransferQueueRequest *> m_xfer_queue;
 	int m_max_uploads;   // 0 if unlimited
@@ -99,8 +123,52 @@ class TransferQueueManager: public Service {
 	int m_upload_wait_time;
 	int m_download_wait_time;
 
+	stats_entry_abs<int> m_max_uploading_stat;
+	stats_entry_abs<int> m_max_downloading_stat;
+	stats_entry_abs<int> m_uploading_stat;
+	stats_entry_abs<int> m_downloading_stat;
+	stats_entry_abs<int> m_waiting_to_upload_stat;
+	stats_entry_abs<int> m_waiting_to_download_stat;
+	stats_entry_abs<int> m_upload_wait_time_stat;
+	stats_entry_abs<int> m_download_wait_time_stat;
+
+	unsigned int m_round_robin_counter; // increments each time we send GoAhead to a client
+
+	class TransferQueueUser {
+	public:
+		TransferQueueUser(): running(0), idle(0), recency(0) {}
+		bool Stale(unsigned int stale_recency);
+		unsigned int running;
+		unsigned int idle;
+		unsigned int recency; // round robin counter at time of last GoAhead
+		IOStats iostats;
+	};
+	typedef std::map< std::string,TransferQueueUser > QueueUserMap;
+	QueueUserMap m_queue_users;      // key = up_down_queue_user, value = TransferQueueUser record
+
+	unsigned int m_round_robin_garbage_counter;
+	time_t m_round_robin_garbage_time;
+
+	IOStats m_iostats;
+	int m_update_iostats_interval;
+	int m_update_iostats_timer;
+	classy_counted_ptr<stats_ema_config> ema_config;
+	StatisticsPool m_stat_pool;
+	int m_publish_flags;
+
 	bool AddRequest( TransferQueueRequest *client );
 	void RemoveRequest( TransferQueueRequest *client );
+
+	TransferQueueUser &GetUserRec(const std::string &user);
+	void SetRoundRobinRecency(const std::string &user);
+	void CollectUserRecGarbage(ClassAd *unpublish_ad);
+	void ClearRoundRobinRecency();
+	void ClearTransferCounts();
+	void UpdateIOStats();
+	void RegisterStats(char const *user,IOStats &iostats,bool unregister=false,ClassAd *unpublish_ad=NULL);
+	void UnregisterStats(char const *user,IOStats &iostats,ClassAd *unpublish_ad) {
+		RegisterStats(user,iostats,true,unpublish_ad);
+	}
 };
 
 

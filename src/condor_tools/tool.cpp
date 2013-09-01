@@ -66,6 +66,7 @@ daemon_t real_dt = DT_NONE;
 DCCollector* pool = NULL;
 bool fast = false;
 bool peaceful_shutdown = false;
+bool force_shutdown = false;
 bool full = false;
 bool all = false;
 char* constraint = NULL;
@@ -117,6 +118,7 @@ usage( const char *str, int iExitCode )
 				 "(the default)" );
 		fprintf( stderr, "    -fast\t\tquickly shutdown daemons\n" );
 		fprintf( stderr, "    -peaceful\t\twait indefinitely for jobs to finish\n" );
+		fprintf( stderr, "    -force-graceful\t\tupgrade a peaceful shutdown to a graceful shutdown\n" );
 	}
 	if( cmd == VACATE_CLAIM ) {
 		fprintf( stderr, 
@@ -251,6 +253,7 @@ cmdToStr( int c )
 		return "Kill-All-Daemons-Peacefully";
 	case DAEMON_OFF:
 	case DC_OFF_GRACEFUL:
+	case DC_OFF_FORCE:
 		return "Kill-Daemon";
 	case DAEMON_OFF_FAST:
 	case DC_OFF_FAST:
@@ -260,6 +263,8 @@ cmdToStr( int c )
 		return "Kill-Daemon-Peacefully";
 	case DC_SET_PEACEFUL_SHUTDOWN:
 		return "Set-Peaceful-Shutdown";
+	case DC_SET_FORCE_SHUTDOWN:
+		return "Set-Force-Shutdown";
 	case DAEMONS_ON:
 		return "Spawn-All-Daemons";
 	case DAEMON_ON:
@@ -324,7 +329,6 @@ main( int argc, char *argv[] )
 	char *cmd_str, **tmp;
 	int size;
 	int rc;
-	param_functions *p_funcs = NULL;
 
 #ifndef WIN32
 	// Ignore SIGPIPE so if we cannot connect to a daemon we do not
@@ -431,6 +435,7 @@ main( int argc, char *argv[] )
 			if((*tmp)[2] == 'e') { // -peaceful
 				peaceful_shutdown = true;
 				fast = false;
+				force_shutdown = false;
 				switch( cmd ) {
 				case DAEMONS_OFF:
 				case DC_OFF_GRACEFUL:
@@ -476,6 +481,7 @@ main( int argc, char *argv[] )
 				case 'a':
 					fast = true;
 					peaceful_shutdown = false;
+					force_shutdown = false;
 					switch( cmd ) {
 					case DAEMONS_OFF:
 					case DC_OFF_GRACEFUL:
@@ -484,6 +490,19 @@ main( int argc, char *argv[] )
 						break;
 					default:
 						fprintf( stderr, "ERROR: \"-fast\" "
+								 "is not valid with %s\n", MyName );
+						usage( NULL );
+					}
+					break;
+				case 'o': // -force-graceful
+					fast = false;
+					peaceful_shutdown = false;
+					force_shutdown = true;
+					switch( cmd ) {
+					case DAEMONS_OFF:
+						break;
+					default:
+						fprintf( stderr, "ERROR: \"-force-graceful\" "
 								 "is not valid with %s\n", MyName );
 						usage( NULL );
 					}
@@ -506,9 +525,7 @@ main( int argc, char *argv[] )
 			break;
 		case 'd':
 			if (!(*tmp)[2] || (*tmp)[2] == 'e') {
-				Termlog = 1;
-				p_funcs = get_param_functions();
-				dprintf_config ("TOOL", p_funcs);
+				dprintf_set_tool_debug("TOOL", 0);
 			} else if ((*tmp)[2] == 'a')  {
 				subsys_check( MyName );
 					// We got a "-daemon", make sure we've got 
@@ -793,11 +810,11 @@ main( int argc, char *argv[] )
 	// relavent children.  Currently, only the startd and schedd have
 	// special peaceful behavior.
 
-	if( peaceful_shutdown && real_dt == DT_MASTER ) {
+	if( (peaceful_shutdown || force_shutdown ) && real_dt == DT_MASTER ) {
 		if( (real_cmd == DAEMONS_OFF) ||
 			(real_cmd == DAEMON_OFF && subsys && !strcmp(subsys,"startd")) ||
 			(real_cmd == DAEMON_OFF && subsys && !strcmp(subsys,"schedd")) ||
-			(real_cmd == DC_OFF_GRACEFUL) ||
+			(real_cmd == DC_OFF_GRACEFUL) || (real_cmd == DC_OFF_FORCE) || 
 			(real_cmd == RESTART)) {
 
 			// Temporarily override globals so we can send a different command.
@@ -806,8 +823,11 @@ main( int argc, char *argv[] )
 			int orig_cmd = cmd;
 			bool orig_IgnoreMissingDaemon = IgnoreMissingDaemon;
 
-			cmd = real_cmd = DC_SET_PEACEFUL_SHUTDOWN;
-
+			if( peaceful_shutdown ) {
+				cmd = real_cmd = DC_SET_PEACEFUL_SHUTDOWN;
+			} else if( force_shutdown ) {
+				cmd = real_cmd = DC_SET_FORCE_SHUTDOWN;
+			}
 			// do not abort if the child daemon is not there, because
 			// A) we have no reason to beleave that it _should_ be there
 			// B) if it should be there, the user will get an error when
@@ -1035,6 +1055,9 @@ computeRealAction( void )
 				// a DC_OFF_GRACEFUL, not a DAEMON_OFF 
 			if( dt == DT_MASTER ) {
 				real_cmd = DC_OFF_GRACEFUL;
+				if( force_shutdown ) {
+					real_cmd = DC_OFF_FORCE;
+				}
 			} else {
 				real_cmd = DAEMON_OFF;
 			}
@@ -1175,7 +1198,7 @@ resolveNames( DaemonList* daemon_list, StringList* name_list )
 		delete collectors;
 	}
 	if( q_result != Q_OK ) {
-		fprintf( stderr, "%s\n", errstack.getFullText(true) );
+		fprintf( stderr, "%s\n", errstack.getFullText(true).c_str() );
 		fprintf( stderr, "ERROR: can't connect to %s\n",
 				 pool ? pool->idStr() : "local collector" );
 		had_error = true;
@@ -1392,7 +1415,7 @@ doCommand( Daemon* d )
 					my_cmd = VACATE_CLAIM_FAST;
 				}
 				if (!d->startCommand(my_cmd, &sock, 0, &errstack)) {
-					fprintf(stderr, "ERROR\n%s\n", errstack.getFullText(true));
+					fprintf(stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str());
 				}
 				if( !sock.code(name) || !sock.end_of_message() ) {
 					fprintf( stderr, "Can't send %s command to %s\n", 
@@ -1416,7 +1439,7 @@ doCommand( Daemon* d )
 					// we've got a specific slot, so send the claim after
 					// the command.
 				if( !d->startCommand(my_cmd, &sock, 0, &errstack) ) {
-					fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true));
+					fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str());
 				}
 				if( !sock.code(name) || !sock.end_of_message() ) {
 					fprintf( stderr, "Can't send %s command to %s\n",
@@ -1439,7 +1462,7 @@ doCommand( Daemon* d )
 				my_cmd = DAEMON_OFF_PEACEFUL;
 			}
 			if( !d->startCommand( my_cmd, &sock, 0, &errstack) ) {
-				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true) );
+				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str() );
 			}
 			if( !sock.code( psubsys ) || !sock.end_of_message() ) {
 				fprintf( stderr, "Can't send %s command to %s\n",
@@ -1453,7 +1476,7 @@ doCommand( Daemon* d )
 
 		case DAEMON_ON:
 			if( !d->startCommand(my_cmd, &sock, 0, &errstack) ) {
-				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true) );
+				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str() );
 			}
 			if( !sock.code( psubsys ) || !sock.end_of_message() ) {
 				fprintf( stderr, "Can't send %s command to %s\n",
@@ -1487,6 +1510,8 @@ doCommand( Daemon* d )
 					my_cmd = DC_OFF_FAST;
 				} else if( peaceful_shutdown ) {
 					my_cmd = DC_OFF_PEACEFUL;
+				} else if( force_shutdown ) {
+					my_cmd = DC_OFF_FORCE;
 				} else {
 					my_cmd = DC_OFF_GRACEFUL;
 				}
@@ -1509,7 +1534,7 @@ doCommand( Daemon* d )
 		{
 			char	*pexec = const_cast<char *>(exec_program); 
 			if( !d->startCommand(my_cmd, &sock, 0, &errstack) ) {
-				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true) );
+				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str() );
 			}
 			if( !sock.code( pexec ) || !sock.end_of_message() ) {
 				fprintf( stderr, "Can't send %s command to %s\n",
@@ -1528,7 +1553,7 @@ doCommand( Daemon* d )
 
 		if( !done ) {
 			if( !d->sendCommand(my_cmd, &sock, 0, &errstack) ) {
-				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true) );
+				fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str() );
 				fprintf( stderr, "Can't send %s command to %s\n",
 							 cmdToStr(my_cmd), d->idStr() );
 				all_good = false;
@@ -1545,10 +1570,9 @@ doCommand( Daemon* d )
 
 			// now, print out the right thing depending on what we did
 		if( my_cmd == DAEMON_ON || my_cmd == DAEMON_OFF || 
-			my_cmd == DAEMON_OFF_FAST || 
-			((my_cmd == DC_OFF_GRACEFUL || my_cmd == DC_OFF_FAST) && 
-			 real_dt == DT_MASTER) )
-		{
+				my_cmd == DAEMON_OFF_FAST || ((my_cmd == DC_OFF_GRACEFUL ||
+				my_cmd == DC_OFF_FAST || my_cmd == DC_OFF_FORCE) &&
+				real_dt == DT_MASTER) ) {
 			if( d_type == DT_ANY ) {
 				printf( "Sent \"%s\" command to %s\n",
 						cmdToStr(my_cmd), d->idStr() );
@@ -1569,14 +1593,13 @@ doCommand( Daemon* d )
 			printf( "Sent \"%s\" command to %s\n", cmdToStr(my_cmd), d->idStr() );
 		}
 		sock.close();
-	} while(d->nextValidCm() == true);
-	if( error == true ) {
+	} while( d->nextValidCm() );
+	if( error ) {
 		fprintf( stderr, "Can't connect to %s\n", d->idStr() );
 		all_good = false;
 		return;
 	}
 }
-
 
 void
 version()
@@ -1666,13 +1689,13 @@ handleSquawk( char *line, char *addr ) {
 		Daemon d( DT_ANY, addr );
 		CondorError errstack;
         if (!d.startCommand(DUMP_STATE, &sock, 0, &errstack)) {
-			fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true) );
+			fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str() );
 		}
 
 		sock.decode();
 
 		ClassAd ad;
-		ad.initFromStream( sock );
+		getClassAd( &sock, ad );
 		printAdToFile( &ad, NULL );
 		
 		return TRUE;
@@ -1698,7 +1721,7 @@ handleSquawk( char *line, char *addr ) {
 		Daemon d( DT_ANY, addr );
 		CondorError errstack;
 		if (!d.startCommand (DC_RAISESIGNAL, &sock, 0, &errstack)) {
-			fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true) );
+			fprintf( stderr, "ERROR\n%s\n", errstack.getFullText(true).c_str() );
 		}
 
 		sock.encode();
@@ -1723,7 +1746,7 @@ handleSquawk( char *line, char *addr ) {
 		Daemon d( DT_ANY, addr );
 		CondorError errstack;
 		if (!d.startCommand ( command, &sock, 0, &errstack)) {
-			fprintf( stderr, "%s\n", errstack.getFullText(true) );
+			fprintf( stderr, "%s\n", errstack.getFullText(true).c_str() );
 		}
 		sock.encode();
 		while( (token = strtok(NULL, " ")) ) {
@@ -1891,7 +1914,7 @@ printAdToFile(ClassAd *ad, char* filename) {
 		fp = stdout;
 	}
 
-    if (!ad->fPrint(fp)) {
+    if (!fPrintAd(fp, *ad)) {
         printf( "ERROR - failed to write ad to file.\n" );
         if ( filename ) fclose(fp);
         return FALSE;

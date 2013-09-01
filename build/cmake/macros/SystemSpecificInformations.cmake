@@ -91,6 +91,9 @@ if(WIN32)
        if(MSVC_VERSION EQUAL 1500)
 	     set(SPECIFIC_COMPILER_NAME "MSVC-9.0-2008") #Visual Studio 2008
        endif(MSVC_VERSION EQUAL 1500)
+	   if(MSVC_VERSION EQUAL 1600)
+	     set(SPECIFIC_COMPILER_NAME "MSVC-10.0-2008") #Visual Studio 2008
+       endif(MSVC_VERSION EQUAL 1600)
 	endif(MSVC)
 	IF (MINGW)
 	   set(SPECIFIC_COMPILER_NAME "MinGW")
@@ -151,7 +154,7 @@ if(UNIX)
       endif(LINUX_ISSUE MATCHES "Ubuntu")		
       # Debian case
       if(LINUX_ISSUE MATCHES "Debian")
-        string(REGEX MATCH "Debian .*ux ([0-9]+\\.[0-9]+)" DEBIAN "${LINUX_ISSUE}")
+        string(REGEX MATCH "Debian .*ux ([0-9]+(\\.[0-9]+)?)" DEBIAN "${LINUX_ISSUE}")
         set(LINUX_NAME "Debian")
 	set(LINUX_VER "${CMAKE_MATCH_1}")        
 	set(SYSTEM_NAME "Debian-${CMAKE_MATCH_1}")

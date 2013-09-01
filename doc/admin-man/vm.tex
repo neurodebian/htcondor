@@ -20,13 +20,20 @@ Details of configuration variables are in section~\ref{sec:Config-VMs}.
 
 Begin by installing the virtualization package on all execute machines,
 according to the vendor's instructions.
-We have successfully used VMware Server, Xen, and KVM.
+We have successfully used VMware, Xen, and KVM.
 If considering running on a Windows system, 
 a \Prog{Perl} distribution will also need to be installed;
 we have successfully used \Prog{ActivePerl}. 
 
 For VMware, \Prog{VMware Server 1} must be installed
 and running on the execute machine.
+HTCondor also
+supports using \Prog{VMware Workstation} and \Prog{VMware Player}, version 5.
+Earlier versions of these products may also work.  
+HTCondor will attempt to automatically discern which 
+VMware product is installed.
+If using \Prog{Player}, also install the \Prog{VIX API},
+which is freely available from VMware.
 
 For Xen, there are three things that must exist on 
 an execute machine to fully support \SubmitCmd{vm} universe jobs. 
@@ -113,6 +120,17 @@ of the \Condor{master} daemon.
 If this is not the case,
 then a full path to the \Prog{Perl} executable will be required.
 
+If using \Prog{VMware Player}, 
+which does not support snapshots,
+configure the \MacroNI{START} expression to reject
+jobs which require snapshots.
+These are jobs that do not have 
+\SubmitCmd{vmware\_snapshot\_disk} set to \Expr{False}.
+Here is an example modification to the \MacroNI{START} expression. 
+\begin{verbatim}
+START = ($(START)) && (!(TARGET.VMPARAM_VMware_SnapshotDisk =?= TRUE))
+\end{verbatim}
+
 The final required configuration is the location of the VMware control script
 used by the \Condor{vm-gahp} on the execute machine
 to talk to the virtual machine hypervisor.
@@ -125,7 +143,33 @@ VMWARE_SCRIPT = $(SBIN)/condor_vm_vmware
 Note that an execute machine's \MacroNI{EXECUTE} variable should not
 contain any symbolic links in its path,
 if the machine is configured to run VMware \SubmitCmd{vm} universe jobs.
-See the FAQ entry in section~\ref{sec:vmware-symlink-bug} for details.
+Strange behavior has been noted when HTCondor tries to run a 
+\SubmitCmd{vm} universe VMware
+job using a path to a VMX file that contains a symbolic link.
+An example of an error message that may appear in such a job's user log:
+\begin{verbatim}
+Error from starter on master_vmuniverse_strtd@nostos.cs.wisc
+.edu: register(/scratch/gquinn/condor/git/CONDOR_SRC/src/con
+dor_tests/31426/31426vmuniverse/execute/dir_31534/vmN3hylp_c
+ondor.vmx) = 1/Error: Command failed: A file was not found/(
+ERROR) Can't create snapshot for vm(/scratch/gquinn/condor/g
+it/CONDOR_SRC/src/condor_tests/31426/31426vmuniverse/execute
+/dir_31534/vmN3hylp_condor.vmx)
+\end{verbatim}
+To work around this problem:
+\begin{itemize}
+\item If using file transfer
+(the submit description file contains
+\SubmitCmd{vmware\_should\_transfer\_files = true}),
+then modify any
+configuration variable \Macro{EXECUTE} values on all execute machines,
+such that they do not contain symbolic link path components.
+\item If using a shared file system, ensure that the
+submit description file command
+\SubmitCmd{vmware\_dir} does not use
+symbolic link path name components.
+\end{itemize}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{Xen-Specific and KVM-Specific Configuration}

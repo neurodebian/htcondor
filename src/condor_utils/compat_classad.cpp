@@ -23,9 +23,9 @@
 #include "classad_oldnew.h"
 #include "condor_attributes.h"
 #include "classad/xmlSink.h"
-#include "condor_xml_classads.h"
 #include "condor_config.h"
 #include "Regex.h"
+#include "classad/classadCache.h"
 
 using namespace std;
 
@@ -46,159 +46,6 @@ IsStringEnd(const char *str, unsigned off)
 
 namespace compat_classad {
 
-// EvalResult ctor
-EvalResult::EvalResult()
-{
-	type = LX_UNDEFINED;
-	debug = false;
-}
-
-// EvalResult dtor
-EvalResult::~EvalResult()
-{
-	if ((type == LX_STRING || type == LX_TIME) && (s)) {
-		delete [] s;
-	}
-}
-
-void EvalResult::clear()
-{
-	this->~EvalResult();
-	type = LX_UNDEFINED;
-}
-
-void
-EvalResult::deepcopy(const EvalResult & rhs)
-{
-	type = rhs.type;
-	debug = rhs.debug;
-	switch ( type ) {
-		case LX_INTEGER:
-		case LX_BOOL:
-			i = rhs.i;
-			break;
-		case LX_FLOAT:
-			f = rhs.f;
-			break;
-		case LX_STRING:
-				// need to make a deep copy of the string
-			s = strnewp( rhs.s );
-			break;
-		default:
-			break;
-	}
-}
-
-// EvalResult copy ctor
-EvalResult::EvalResult(const EvalResult & rhs)
-{
-	deepcopy(rhs);
-}
-
-// EvalResult assignment op
-EvalResult & EvalResult::operator=(const EvalResult & rhs)
-{
-	if ( this == &rhs )	{	// object assigned to itself
-		return *this;		// all done.
-	}
-
-		// deallocate any state in this object by invoking dtor
-	this->~EvalResult();
-
-		// call copy ctor to make a deep copy of data
-	deepcopy(rhs);
-
-		// return reference to invoking object
-	return *this;
-}
-
-
-void EvalResult::fPrintResult(FILE *fi)
-{
-    switch(type)
-    {
-	case LX_INTEGER :
-
-	     fprintf(fi, "%d", this->i);
-	     break;
-
-	case LX_FLOAT :
-
-	     fprintf(fi, "%f", this->f);
-	     break;
-
-	case LX_STRING :
-
-	     fprintf(fi, "%s", this->s);
-	     break;
-
-	case LX_NULL :
-
-	     fprintf(fi, "NULL");
-	     break;
-
-	case LX_UNDEFINED :
-
-	     fprintf(fi, "UNDEFINED");
-	     break;
-
-	case LX_ERROR :
-
-	     fprintf(fi, "ERROR");
-	     break;
-
-	default :
-
-	     fprintf(fi, "type unknown");
-	     break;
-    }
-    fprintf(fi, "\n");
-}
-
-void EvalResult::toString(bool force)
-{
-	switch(type) {
-		case LX_STRING:
-			break;
-		case LX_FLOAT: {
-			MyString buf;
-			buf.sprintf("%lf",f);
-			s = strnewp(buf.Value());
-			type = LX_STRING;
-			break;
-		}
-		case LX_BOOL:	
-			type = LX_STRING;
-			if (i) {
-				s = strnewp("TRUE");
-			} else {
-				s = strnewp("FALSE");
-			}	
-			break;
-		case LX_INTEGER: {
-			MyString buf;
-			buf.sprintf("%d",i);
-			s = strnewp(buf.Value());
-			type = LX_STRING;
-			break;
-		}
-		case LX_UNDEFINED:
-			if( force ) {
-				s = strnewp("UNDEFINED");
-				type = LX_STRING;
-			}
-			break;
-		case LX_ERROR:
-			if( force ) {
-				s = strnewp("ERROR");
-				type = LX_STRING;
-			}
-			break;
-		default:
-			ASSERT("Unknown classad result type");
-	}
-}
-
 static StringList ClassAdUserLibs;
 
 bool ClassAd::m_initConfig = false;
@@ -209,6 +56,8 @@ Reconfig()
 {
 	m_strictEvaluation = param_boolean( "STRICT_CLASSAD_EVALUATION", false );
 	classad::_useOldClassAdSemantics = !m_strictEvaluation;
+
+	classad::ClassAdSetExpressionCaching( param_boolean( "ENABLE_CLASSAD_CACHING", false ) );
 
 	char *new_libs = param( "CLASSAD_USER_LIBS" );
 	if ( new_libs ) {
@@ -229,19 +78,21 @@ Reconfig()
 	}
 }
 
-static classad::AttributeReference *the_my_ref = NULL;
+// TSTCLAIR: this really needs to be killed off now.
+// static classad::AttributeReference *the_my_ref = NULL;
 static bool the_my_ref_in_use = false;
 void getTheMyRef( classad::ClassAd *ad )
 {
 	ASSERT( !the_my_ref_in_use );
 	the_my_ref_in_use = true;
 
-	if( !the_my_ref ) {
-		the_my_ref = classad::AttributeReference::MakeAttributeReference( NULL, "self" );
-	}
+	//if( !the_my_ref ) {
+	//	the_my_ref = classad::AttributeReference::MakeAttributeReference( NULL, "self" );
+	//}
 
 	if ( !ClassAd::m_strictEvaluation ) {
-		ad->Insert( "my", the_my_ref );
+		ExprTree * pExpr=classad::AttributeReference::MakeAttributeReference( NULL, "self" );
+		ad->Insert( "my", pExpr );
 	}
 }
 
@@ -250,7 +101,7 @@ void releaseTheMyRef( classad::ClassAd *ad )
 	ASSERT( the_my_ref_in_use );
 
 	if ( !ClassAd::m_strictEvaluation ) {
-		ad->Remove( "my" );
+		ad->Delete("my"); //Remove( "my" ); 
 		ad->MarkAttributeClean( "my" );
 	}
 
@@ -433,7 +284,7 @@ bool stringListSummarize_func( const char *name,
 	if ( is_real ) {
 		result.SetRealValue( accumulator );
 	} else {
-		result.SetIntegerValue( (int)accumulator );
+		result.SetIntegerValue( (long long)accumulator );
 	}
 
 	return true;
@@ -631,10 +482,91 @@ bool splitAt_func( const char * name,
 		second.SetStringValue(str.substr(ix+1));
 	}
 
-	classad::ExprList *lst = new classad::ExprList();
+	classad_shared_ptr<classad::ExprList> lst( new classad::ExprList() );
 	ASSERT(lst);
 	lst->push_back(classad::Literal::MakeLiteral(first));
 	lst->push_back(classad::Literal::MakeLiteral(second));
+
+	result.SetListValue(lst);
+
+	return true;
+}
+
+// split using arbitrary separator characters
+static
+bool splitArb_func( const char * /*name*/,
+	const classad::ArgumentList &arg_list,
+	classad::EvalState &state, 
+	classad::Value &result )
+{
+	classad::Value arg0;
+
+	// Must have one or 2 arguments
+	if ( arg_list.size() != 1 && arg_list.size() != 2) {
+		result.SetErrorValue();
+		return true;
+	}
+
+	// Evaluate the first argument
+	if( !arg_list[0]->Evaluate( state, arg0 )) {
+		result.SetErrorValue();
+		return false;
+	}
+
+	// if we have 2 arguments, the second argument is a set of
+	// separator characters, the default set of separators is , and whitespace
+	std::string seps = ", \t";
+	classad::Value arg1;
+	if (arg_list.size() >= 2 && ! arg_list[1]->Evaluate( state, arg1 )) {
+		result.SetErrorValue();
+		return false;
+	}
+
+	// If either argument isn't a string, then the result is
+	// an error.
+	std::string str;
+	if( !arg0.IsStringValue(str) ) {
+		result.SetErrorValue();
+		return true;
+	}
+	if (arg_list.size() >= 2 && ! arg1.IsStringValue(seps)) {
+		result.SetErrorValue();
+		return true;
+	}
+
+	classad::ExprList *lst = new classad::ExprList();
+	ASSERT(lst);
+
+	// walk the input string, splitting at each instance of a separator
+	// character and discarding empty strings.  Thus leading and trailing
+	// separator characters are ignored, and runs of multiple separator
+	// characters have special treatment, multiple whitespace seps are
+	// treated as a single sep, as are single separators mixed with whitespace.
+	// but runs of a single separator are handled individually, thus
+	// "foo, bar" is the same as "foo ,bar" and "foo,bar".  But not the same as
+	// "foo,,bar", which produces a list of 3 items rather than 2.
+	unsigned int ixLast = 0;
+	classad::Value val;
+	if (seps.length() > 0) {
+		unsigned int ix = str.find_first_of(seps, ixLast);
+		int      ch = -1;
+		while (ix < str.length()) {
+			if (ix - ixLast > 0) {
+				val.SetStringValue(str.substr(ixLast, ix - ixLast));
+				lst->push_back(classad::Literal::MakeLiteral(val));
+			} else if (!isspace(ch) && ch == str[ix]) {
+				val.SetStringValue("");
+				lst->push_back(classad::Literal::MakeLiteral(val));
+			}
+			if (!isspace(str[ix])) ch = str[ix];
+			ixLast = ix+1;
+			ix = str.find_first_of(seps, ixLast);
+		}
+	}
+	if (str.length() > ixLast) {
+		val.SetStringValue(str.substr(ixLast));
+		lst->push_back(classad::Literal::MakeLiteral(val));
+	}
 
 	result.SetListValue(lst);
 
@@ -675,6 +607,8 @@ void registerStrlistFunctions()
 	classad::FunctionCall::RegisterFunction( name, splitAt_func );
 	name = "splitslotname";
 	classad::FunctionCall::RegisterFunction( name, splitAt_func );
+	name = "split";
+	classad::FunctionCall::RegisterFunction( name, splitArb_func );
 	//name = "splitsinful";
 	//classad::FunctionCall::RegisterFunction( name, splitSinful_func );
 }
@@ -693,8 +627,6 @@ ClassAd::ClassAd()
 		m_initConfig = true;
 	}
 
-	m_privateAttrsAreInvisible = false;
-
 		// Compatibility ads are born with this to emulate the special
 		// CurrentTime in old ClassAds. We don't protect it afterwards,
 		// but that shouldn't be problem unless someone is deliberately
@@ -706,7 +638,7 @@ ClassAd::ClassAd()
 	ResetName();
     ResetExpr();
 
-	EnableDirtyTracking();
+	DisableDirtyTracking();
 }
 
 ClassAd::ClassAd( const ClassAd &ad ) : classad::ClassAd(ad)
@@ -727,12 +659,9 @@ ClassAd::ClassAd( const ClassAd &ad ) : classad::ClassAd(ad)
 		AssignExpr( ATTR_CURRENT_TIME, "time()" );
 	}
 
-	m_privateAttrsAreInvisible = false;
-
 	ResetName();
     ResetExpr();
 
-	EnableDirtyTracking();
 }
 
 ClassAd::ClassAd( const classad::ClassAd &ad )
@@ -753,12 +682,9 @@ ClassAd::ClassAd( const classad::ClassAd &ad )
 		AssignExpr( ATTR_CURRENT_TIME, "time()" );
 	}
 
-	m_privateAttrsAreInvisible = false;
-
 	ResetName();
     ResetExpr();
 
-	EnableDirtyTracking();
 }
 
 ClassAd::~ClassAd()
@@ -774,8 +700,6 @@ ClassAd( FILE *file, const char *delimitor, int &isEOF, int&error, int &empty )
 		m_initConfig = true;
 	}
 
-	m_privateAttrsAreInvisible = false;
-
 		// Compatibility ads are born with this to emulate the special
 		// CurrentTime in old ClassAds. We don't protect it afterwards,
 		// but that shouldn't be problem unless someone is deliberately
@@ -787,7 +711,6 @@ ClassAd( FILE *file, const char *delimitor, int &isEOF, int&error, int &empty )
 	ResetName();
     ResetExpr();
 
-	EnableDirtyTracking();
 
 	nodeKind = CLASSAD_NODE;
 
@@ -847,7 +770,124 @@ ClassAd( FILE *file, const char *delimitor, int &isEOF, int&error, int &empty )
 	}
 }
 
-bool ClassAd::
+// this method is called before each line is parsed. 
+// return 0 to skip (is_comment), 1 to parse line, 2 for end-of-classad, -1 for abort
+int CondorClassAdFileParseHelper::PreParse(std::string & line, ClassAd & /*ad*/, FILE* /*file*/)
+{
+	// if this line matches the ad delimitor, tell the parser to stop parsing
+	if (starts_with(line, ad_delimitor))
+		return 2; //end-of-classad
+
+	// check for blank lines or lines whose first character is #
+	// tell the parse to skip those lines, otherwise tell the parser to
+	// parse the line.
+	for (size_t ix = 0; ix < line.size(); ++ix) {
+		if (line[ix] == '#' || line[ix] == '\n')
+			return 0; // skip this line, but don't stop parsing.
+		if (line[ix] != ' ' && line[ix] != '\t')
+			return 1; // parse this line
+	}
+	return 1; // parse this line.
+}
+
+// this method is called when the parser encounters an error
+// return 0 to skip and continue, 1 to re-parse line, 2 to quit parsing with success, -1 to abort parsing.
+int CondorClassAdFileParseHelper::OnParseError(std::string & line, ClassAd & /*ad*/, FILE* file)
+{
+		// print out where we barfed to the log file
+	dprintf(D_ALWAYS,"failed to create classad; bad expr = '%s'\n",
+			line.c_str());
+
+	// read until delimitor or EOF; whichever comes first
+	line = "";
+	while ( ! starts_with(line, ad_delimitor)) {
+		if (feof(file))
+			break;
+		if ( ! readLine(line, file, false))
+			break;
+	}
+	return -1; // abort
+}
+
+// returns number of attributes added to the ad
+int ClassAd::
+InsertFromFile(FILE* file, /*out*/ bool& is_eof, /*out*/ int& error, ClassAdFileParseHelper* phelp /*=NULL*/)
+{
+	int cAttrs = 0;
+	std::string buffer;
+
+	while( 1 ) {
+
+			// get a line from the file
+		if ( ! readLine(buffer, file, false)) {
+			is_eof = feof(file);
+			error = is_eof ? 0 : errno;
+			return cAttrs;
+		}
+
+		// if there is a helper, give the helper first crack at the line
+		// otherwise set ee to decide what to do with this line.
+		int ee = 1;
+		if (phelp) {
+			ee = phelp->PreParse(buffer, *this, file);
+		} else {
+			// default is to skip blank lines and comment lines
+			for (size_t ix = 0; ix < buffer.size(); ++ix) {
+				if (buffer[ix] == '#' || buffer[ix] == '\n') {
+					ee = 0; // skip blank line or comment
+					break;
+				}
+				// ignore leading whitespace.
+				if (buffer[ix] == ' ' || buffer[ix] == '\t') {
+					continue;
+				}
+				ee = 1; // 1 is parse
+				break;
+			}
+		}
+		if (ee == 0) // comment or blank line, skip it and read the next
+			continue;
+		if (ee != 1) { // 1 is parse, <0, is abort, >1 is end_of_ad
+			error = (ee < 0) ? ee : 0;
+			is_eof = feof(file);
+			return cAttrs;
+		}
+
+		// Insert the string into the classad
+		if (Insert(buffer.c_str()) !=  0) {
+			++cAttrs;
+		} else {
+			ee = -1;
+			if (phelp) {
+				ee = phelp->OnParseError(buffer, *this, file);
+				if (1 == ee) {
+					// buffer has (presumably) been modified, re-try parsing.
+					// but only retry once.
+					if (Insert(buffer.c_str()) != 0) {
+						++cAttrs;
+					} else {
+						ee = phelp->OnParseError(buffer, *this, file);
+						if (1 == ee) ee = -1;  // treat another attempt to reparse as a failure.
+					}
+				}
+			}
+
+			// the value of ee tells us whether to quit or keep going or
+			// < 0 is abort
+			//   0 is skip line - keep going
+			//   1 is line was parsed, keep going
+			// > 1 is end-of-ad, quit the loop
+			if (ee < 0 || ee > 1) {
+				error = ee > 1 ? 0 : ee;
+				is_eof = feof(file);
+				return cAttrs;
+			}
+		}
+	}
+}
+
+
+bool
 ClassAdAttributeIsPrivate( char const *name )
 {
 	if( strcasecmp(name,ATTR_CLAIM_ID) == 0 ) {
@@ -869,65 +909,34 @@ ClassAdAttributeIsPrivate( char const *name )
 	return false;
 }
 
-bool ClassAd::
-Insert( const std::string &attrName, classad::ExprTree *expr )
+bool ClassAd::Insert( const std::string &attrName, classad::ExprTree *& expr, bool bCache )
 {
-	return classad::ClassAd::Insert( attrName, expr );
+	return classad::ClassAd::Insert( attrName, expr, bCache );
 }
 
-int ClassAd::
-Insert( const char *name, classad::ExprTree *expr )
+int ClassAd::Insert( const char *name, classad::ExprTree *& expr, bool bCache )
 {
 	string str = name;
-	return Insert( str, expr ) ? TRUE : FALSE;
+	return Insert( str, expr, bCache ) ? TRUE : FALSE;
 }
 
 int
 ClassAd::Insert( const char *str )
 {
 	classad::ClassAdParser parser;
-	classad::ClassAd *newAd;
 
 		// String escaping is different between new and old ClassAds.
 		// We need to convert the escaping from old to new style before
 		// handing the expression to the new ClassAds parser.
-	string newAdStr = "[";
-	for ( int i = 0; str[i] != '\0'; i++ ) {
-        if (str[i] == '\\') {
-			if ( ( str[i + 1] != '"') ||
-				 ((str[i + 1] == '"') && IsStringEnd(str + i,2) )  )
-			{
-				newAdStr.append( 1, '\\' );
-			}
-		}
-		newAdStr.append( 1, str[i] );
-	}
-	newAdStr += "]";
-	newAd = parser.ParseClassAd( newAdStr );
-	if ( newAd == NULL ) {
-		return FALSE;
-	}
-	if ( newAd->size() != 1 ) {
-		delete newAd;
-		return FALSE;
+	string newAdStr;
+	ConvertEscapingOldToNew( str, newAdStr );
+	
+	if (!classad::ClassAd::Insert(newAdStr))
+	{
+	  return FALSE;
 	}
 	
-	iterator itr = newAd->begin();
-	if ( !classad::ClassAd::Insert( itr->first, itr->second->Copy() ) ) {
-		delete newAd;
-		return FALSE;
-	}
-	delete newAd;
 	return TRUE;
-}
-
-int ClassAd::
-Insert(char const *expr,bool /*unused*/)
-{
-	dprintf(D_ALWAYS,"ERROR: Insert(expr,bool) called!\n");
-	dprintf_dump_stack();
-
-	return Insert( expr );
 }
 
 int ClassAd::
@@ -942,7 +951,7 @@ AssignExpr(char const *name,char const *value)
 	if ( !par.ParseExpression( ConvertEscapingOldToNew( value ), expr, true ) ) {
 		return FALSE;
 	}
-	if ( !Insert( name, expr ) ) {
+	if ( !Insert( name, expr, false ) ) {
 		delete expr;
 		return FALSE;
 	}
@@ -1059,12 +1068,32 @@ LookupInteger( const char *name, int &value ) const
 }
 
 int ClassAd::
-LookupInteger( const char *name, int64_t &value ) const
+LookupInteger( const char *name, long &value ) const 
 {
 	bool    boolVal;
 	int     haveInteger;
 	string  sName(name);
-	int		tmp_val;
+	long	tmp_val;
+
+	if( EvaluateAttrInt(sName, tmp_val ) ) {
+		value = tmp_val;
+		haveInteger = TRUE;
+	} else if( EvaluateAttrBool(sName, boolVal ) ) {
+		value = boolVal ? 1 : 0;
+		haveInteger = TRUE;
+	} else {
+		haveInteger = FALSE;
+	}
+	return haveInteger;
+}
+
+int ClassAd::
+LookupInteger( const char *name, long long &value ) const 
+{
+	bool    boolVal;
+	int     haveInteger;
+	string  sName(name);
+	long long	tmp_val;
 
 	if( EvaluateAttrInt(sName, tmp_val ) ) {
 		value = tmp_val;
@@ -1082,7 +1111,7 @@ int ClassAd::
 LookupFloat( const char *name, float &value ) const
 {
 	double  doubleVal;
-	int     intVal;
+	long long intVal;
 	int     haveFloat;
 
 	if(EvaluateAttrReal( string( name ), doubleVal ) ) {
@@ -1098,9 +1127,28 @@ LookupFloat( const char *name, float &value ) const
 }
 
 int ClassAd::
+LookupFloat( const char *name, double &value ) const
+{
+	double  doubleVal;
+	long long intVal;
+	int     haveFloat;
+
+	if(EvaluateAttrReal( string( name ), doubleVal ) ) {
+		haveFloat = TRUE;
+		value = doubleVal;
+	} else if(EvaluateAttrInt( string( name ), intVal ) ) {
+		haveFloat = TRUE;
+		value = (double)intVal;
+	} else {
+		haveFloat = FALSE;
+	}
+	return haveFloat;
+}
+
+int ClassAd::
 LookupBool( const char *name, int &value ) const
 {
-	int   intVal;
+	long long intVal;
 	bool  boolVal;
 	int haveBool;
 	string sName;
@@ -1122,7 +1170,7 @@ LookupBool( const char *name, int &value ) const
 int ClassAd::
 LookupBool( const char *name, bool &value ) const
 {
-	int   intVal;
+	long long intVal;
 	bool  boolVal;
 	int haveBool;
 	string sName;
@@ -1139,6 +1187,34 @@ LookupBool( const char *name, bool &value ) const
 		haveBool = false;
 	}
 	return haveBool;
+}
+
+int ClassAd::
+EvalAttr( const char *name, classad::ClassAd *target, classad::Value & value)
+{
+	int rc = 0;
+
+	if( target == this || target == NULL ) {
+		getTheMyRef( this );
+		if( EvaluateAttr( name, value ) ) {
+			rc = 1;
+		}
+		releaseTheMyRef( this );
+		return rc;
+	}
+
+	getTheMatchAd( this, target );
+	if( this->Lookup( name ) ) {
+		if( this->EvaluateAttr( name, value ) ) {
+			rc = 1;
+		}
+	} else if( target->Lookup( name ) ) {
+		if( target->EvaluateAttr( name, value ) ) {
+			rc = 1;
+		}
+	}
+	releaseTheMatchAd();
+	return rc;
 }
 
 int ClassAd::
@@ -1251,7 +1327,7 @@ EvalString(const char *name, classad::ClassAd *target, std::string & value)
 }
 
 int ClassAd::
-EvalInteger (const char *name, classad::ClassAd *target, int &value)
+EvalInteger (const char *name, classad::ClassAd *target, long long &value)
 {
 	int rc = 0;
 	classad::Value val;
@@ -1283,17 +1359,17 @@ EvalInteger (const char *name, classad::ClassAd *target, int &value)
 	if ( 1 == rc ) 
 	{
 	  double doubleVal;
-	  int intVal;
+	  long long intVal;
 	  bool boolVal;
 
 	  if( val.IsRealValue( doubleVal ) ) {
-	    value = ( int )doubleVal;
+	    value = ( long long )doubleVal;
 	  }
 	  else if( val.IsIntegerValue( intVal ) ) {
 	    value = intVal;
 	  }
 	  else if( val.IsBooleanValue( boolVal ) ) {
-	    value = ( int )boolVal;
+	    value = ( long long )boolVal;
 	  }
 	  else 
 	  { 
@@ -1312,7 +1388,7 @@ EvalFloat (const char *name, classad::ClassAd *target, double &value)
 	int rc = 0;
 	classad::Value val;
 	double doubleVal;
-	int intVal;
+	long long intVal;
 	bool boolVal;
 
 	if( target == this || target == NULL ) {
@@ -1380,7 +1456,7 @@ EvalBool  (const char *name, classad::ClassAd *target, int &value)
 	int rc = 0;
 	classad::Value val;
 	double doubleVal;
-	int intVal;
+	long long intVal;
 	bool boolVal;
 
 	if( target == this || target == NULL ) {
@@ -1471,7 +1547,7 @@ initFromString( char const *str,MyString *err_msg )
 
 		if (!Insert(exprbuf)) {
 			if( err_msg ) {
-				err_msg->sprintf("Failed to parse ClassAd expression: '%s'",
+				err_msg->formatstr("Failed to parse ClassAd expression: '%s'",
 					exprbuf);
 			} else {
 				dprintf(D_ALWAYS,"Failed to parse ClassAd expression: '%s'\n",
@@ -1486,29 +1562,11 @@ initFromString( char const *str,MyString *err_msg )
 	return succeeded;
 }
 
-        // shipping functions
-int ClassAd::
-put( Stream &s )
-{
-	if( !putOldClassAd( &s, *this, m_privateAttrsAreInvisible ) ) {
-		return FALSE;
-	}
-	return TRUE;
-}
-
-int ClassAd::
-put( Stream &s, StringList *attr_whitelist )
-{
-	if( !putOldClassAd( &s, *this, m_privateAttrsAreInvisible, attr_whitelist ) ) {
-		return FALSE;
-	}
-	return TRUE;
-}
 
 int ClassAd::
 initFromStream(Stream& s)
 {
-	if( !getOldClassAd( &s, *this ) ) {
+	if( !getClassAd( &s, *this ) ) {
 		return FALSE;
 	}
 
@@ -1522,18 +1580,9 @@ initFromStream(Stream& s)
 }
 
 int ClassAd::
-putAttrList( Stream &s )
-{
-	if( !putOldClassAdNoTypes( &s, *this, m_privateAttrsAreInvisible ) ) {
-		return FALSE;
-	}
-	return TRUE;
-}
-
-int ClassAd::
 initAttrListFromStream(Stream& s)
 {
-	if( !getOldClassAdNoTypes( &s, *this ) ) {
+	if( !getClassAdNoTypes( &s, *this ) ) {
 		return FALSE;
 	}
 
@@ -1547,31 +1596,29 @@ initAttrListFromStream(Stream& s)
 }
 
 		// output functions
-int	ClassAd::
-fPrint( FILE *file, StringList *attr_white_list )
+int
+fPrintAd( FILE *file, classad::ClassAd &ad, bool exclude_private, StringList *attr_white_list )
 {
 	MyString buffer;
 
-	sPrint( buffer, attr_white_list );
+	sPrintAd( buffer, ad, exclude_private, attr_white_list );
 	fprintf( file, "%s", buffer.Value() );
 
 	return TRUE;
 }
 
-void ClassAd::
-dPrint( int level )
+void
+dPrintAd( int level, classad::ClassAd &ad )
 {
 	MyString buffer;
 
-	SetPrivateAttributesInvisible( true );
-	sPrint( buffer );
-	SetPrivateAttributesInvisible( false );
+	sPrintAd( buffer, ad, true );
 
 	dprintf( level|D_NOHEADER, "%s", buffer.Value() );
 }
 
-int ClassAd::
-sPrint( MyString &output, StringList *attr_white_list )
+int
+sPrintAd( MyString &output, classad::ClassAd &ad, bool exclude_private, StringList *attr_white_list )
 {
 	classad::ClassAd::iterator itr;
 
@@ -1579,32 +1626,32 @@ sPrint( MyString &output, StringList *attr_white_list )
 	unp.SetOldClassAd( true );
 	string value;
 
-	classad::ClassAd *parent = GetChainedParentAd();
+	classad::ClassAd *parent = ad.GetChainedParentAd();
 
 	if ( parent ) {
 		for ( itr = parent->begin(); itr != parent->end(); itr++ ) {
 			if ( attr_white_list && !attr_white_list->contains_anycase(itr->first.c_str()) ) {
 				continue; // not in white-list
 			}
-			if ( !m_privateAttrsAreInvisible ||
+			if ( !exclude_private ||
 				 !ClassAdAttributeIsPrivate( itr->first.c_str() ) ) {
 				value = "";
 				unp.Unparse( value, itr->second );
-				output.sprintf_cat( "%s = %s\n", itr->first.c_str(),
+				output.formatstr_cat( "%s = %s\n", itr->first.c_str(),
 									value.c_str() );
 			}
 		}
 	}
 
-	for ( itr = this->begin(); itr != this->end(); itr++ ) {
+	for ( itr = ad.begin(); itr != ad.end(); itr++ ) {
 		if ( attr_white_list && !attr_white_list->contains_anycase(itr->first.c_str()) ) {
 			continue; // not in white-list
 		}
-		if ( !m_privateAttrsAreInvisible ||
+		if ( !exclude_private ||
 			 !ClassAdAttributeIsPrivate( itr->first.c_str() ) ) {
 			value = "";
 			unp.Unparse( value, itr->second );
-			output.sprintf_cat( "%s = %s\n", itr->first.c_str(),
+			output.formatstr_cat( "%s = %s\n", itr->first.c_str(),
 								value.c_str() );
 		}
 	}
@@ -1612,31 +1659,32 @@ sPrint( MyString &output, StringList *attr_white_list )
 	return TRUE;
 }
 
-int ClassAd::
-sPrint( std::string &output, StringList *attr_white_list )
+int
+sPrintAd( std::string &output, classad::ClassAd &ad, bool exclude_private, StringList *attr_white_list )
 {
 	MyString myout = output;
-	int rc = sPrint( myout, attr_white_list );
+	int rc = sPrintAd( myout, ad, exclude_private, attr_white_list );
 	output += myout;
 	return rc;
 }
+
 // Taken from the old classad's function. Got rid of incorrect documentation. 
 ////////////////////////////////////////////////////////////////////////////////// Print an expression with a certain name into a buffer. 
-// The caller should pass the size of the buffer in buffersize.
-// If buffer is NULL, then space will be allocated with malloc(), and it needs
+// The returned buffer will be allocated with malloc(), and it needs
 // to be free-ed with free() by the user.
 ////////////////////////////////////////////////////////////////////////////////
-char* ClassAd::
-sPrintExpr(char* buffer, unsigned int buffersize, const char* name)
+char*
+sPrintExpr(const classad::ClassAd &ad, const char* name)
 {
-
+	char *buffer = NULL;
+	int buffersize = 0;
 	classad::ClassAdUnParser unp;
     string parsedString;
 	classad::ExprTree* expr;
 
 	unp.SetOldClassAd( true );
 
-    expr = Lookup(name); 
+    expr = ad.Lookup(name);
 
     if(!expr)
     {
@@ -1645,15 +1693,11 @@ sPrintExpr(char* buffer, unsigned int buffersize, const char* name)
 
     unp.Unparse(parsedString, expr);
 
-    if(!buffer)
-    {
-
-        buffersize = strlen(name) + parsedString.length() +
-                        3 +     // " = "
-                        1;      // null termination
-        buffer = (char*) malloc(buffersize);
-        ASSERT( buffer != NULL );
-    } 
+    buffersize = strlen(name) + parsedString.length() +
+                    3 +     // " = "
+                    1;      // null termination
+    buffer = (char*) malloc(buffersize);
+    ASSERT( buffer != NULL );
 
     snprintf(buffer, buffersize, "%s = %s", name, parsedString.c_str() );
     buffer[buffersize - 1] = '\0';
@@ -1664,41 +1708,41 @@ sPrintExpr(char* buffer, unsigned int buffersize, const char* name)
 // ClassAd methods
 
 		// Type operations
-void ClassAd::
-SetMyTypeName( const char *myType )
+void
+SetMyTypeName( classad::ClassAd &ad, const char *myType )
 {
 	if( myType ) {
-		InsertAttr( ATTR_MY_TYPE, string( myType ) );
+		ad.InsertAttr( ATTR_MY_TYPE, string( myType ) );
 	}
 
 	return;
 }
 
-const char*	ClassAd::
-GetMyTypeName( ) const
+const char*
+GetMyTypeName( const classad::ClassAd &ad )
 {
 	static string myTypeStr;
-	if( !EvaluateAttrString( ATTR_MY_TYPE, myTypeStr ) ) {
+	if( !ad.EvaluateAttrString( ATTR_MY_TYPE, myTypeStr ) ) {
 		return "";
 	}
 	return myTypeStr.c_str( );
 }
 
-void ClassAd::
-SetTargetTypeName( const char *targetType )
+void
+SetTargetTypeName( classad::ClassAd &ad, const char *targetType )
 {
 	if( targetType ) {
-		InsertAttr( ATTR_TARGET_TYPE, string( targetType ) );
+		ad.InsertAttr( ATTR_TARGET_TYPE, string( targetType ) );
 	}
 
 	return;
 }
 
-const char*	ClassAd::
-GetTargetTypeName( ) const
+const char*
+GetTargetTypeName( const classad::ClassAd &ad )
 {
 	static string targetTypeStr;
-	if( !EvaluateAttrString( ATTR_TARGET_TYPE, targetTypeStr ) ) {
+	if( !ad.EvaluateAttrString( ATTR_TARGET_TYPE, targetTypeStr ) ) {
 		return "";
 	}
 	return targetTypeStr.c_str( );
@@ -1764,9 +1808,10 @@ void ClassAd::AddExplicitTargetRefs(  )
 	}
 	
 	for( classad::AttrList::iterator a = begin( ); a != end( ); a++ ) {
-		if ( a->second->GetKind() != classad::ExprTree::LITERAL_NODE ) {
-			this->Insert( a->first,
-						  compat_classad::AddExplicitTargetRefs( a->second, definedAttrs )) ;
+		if ( a->second->GetKind() != classad::ExprTree::LITERAL_NODE ) 
+		{
+		  classad::ExprTree * pTree = compat_classad::AddExplicitTargetRefs( a->second, definedAttrs );
+			this->Insert( a->first, pTree ) ;
 		}
 	}
 }
@@ -1774,9 +1819,10 @@ void ClassAd::AddExplicitTargetRefs(  )
 void ClassAd::RemoveExplicitTargetRefs( )
 {
 	for( classad::AttrList::iterator a = begin( ); a != end( ); a++ ) {
-		if ( a->second->GetKind() != classad::ExprTree::LITERAL_NODE ) {
-			this->Insert( a->first, 
-						  compat_classad::RemoveExplicitTargetRefs( a->second ) );
+		if ( a->second->GetKind() != classad::ExprTree::LITERAL_NODE ) 
+		{
+		  classad::ExprTree * pTree = compat_classad::RemoveExplicitTargetRefs( a->second );
+			this->Insert( a->first, pTree );
 		}
 	}
 }  
@@ -1842,6 +1888,8 @@ AddExplicitConditionals( classad::ExprTree *expr )
 										 condExpr2, NULL, NULL );
 		return parenExpr2;
 	}
+	case classad::ExprTree::EXPR_ENVELOPE:
+		return ( AddExplicitConditionals( ( (classad::CachedExprEnvelope*)expr )->get() ) );
 	case classad::ExprTree::FN_CALL_NODE:
 	case classad::ExprTree::CLASSAD_NODE:
 	case classad::ExprTree::EXPR_LIST_NODE: {
@@ -1974,7 +2022,7 @@ AddExplicitConditionals( classad::ExprTree *expr )
 // Determine if a value is valid to be written to the log. The value
 // is a RHS of an expression. According to LogSetAttribute::WriteBody,
 // the only invalid character is a '\n'.
-bool ClassAd::
+bool
 IsValidAttrValue(const char *value)
 {
     //NULL value is not invalid, may translate to UNDEFINED
@@ -2003,8 +2051,8 @@ IsValidAttrValue(const char *value)
 //  Attribute names are sequences of alphabetic characters, digits and 
 //  underscores, and may not begin with a digit
 
-/* static */ bool
-ClassAd::IsValidAttrName(const char *name) {
+bool
+IsValidAttrName(const char *name) {
 		// NULL pointer certainly false
 	if (!name) {
 		return false;
@@ -2132,7 +2180,8 @@ CopyAttribute( char const *target_attr, char const *source_attr,
 
 	classad::ExprTree *e = source_ad->Lookup( source_attr );
 	if ( e ) {
-		Insert( target_attr, e->Copy() );
+		e = e->Copy();
+		Insert( target_attr, e, false );
 	} else {
 		Delete( target_attr );
 	}
@@ -2140,39 +2189,55 @@ CopyAttribute( char const *target_attr, char const *source_attr,
 
 //////////////XML functions///////////
 
-int ClassAd::
-fPrintAsXML(FILE *fp, StringList *attr_white_list)
+int
+fPrintAdAsXML(FILE *fp, classad::ClassAd &ad, StringList *attr_white_list)
 {
     if(!fp)
     {
         return FALSE;
     }
 
-    MyString out;
-    sPrintAsXML(out,attr_white_list);
-    fprintf(fp, "%s", out.Value());
+    std::string out;
+    sPrintAdAsXML(out,ad,attr_white_list);
+    fprintf(fp, "%s", out.c_str());
     return TRUE;
 }
 
-int ClassAd::
-sPrintAsXML(MyString &output, StringList *attr_white_list)
+int
+sPrintAdAsXML(MyString &output, classad::ClassAd &ad, StringList *attr_white_list)
 {
-	ClassAdXMLUnparser  unparser;
-	MyString            xml;
-	unparser.SetUseCompactSpacing(false);
-	unparser.Unparse(this, xml, attr_white_list);
-	output += xml;
-	return TRUE;
+	std::string std_output;
+	int rc = sPrintAdAsXML(std_output, ad, attr_white_list);
+	output += std_output;
+	return rc;
 }
 
-int ClassAd::
-sPrintAsXML(std::string &output, StringList *attr_white_list)
+int
+sPrintAdAsXML(std::string &output, classad::ClassAd &ad, StringList *attr_white_list)
 {
-	ClassAdXMLUnparser  unparser;
-	MyString            xml;
-	unparser.SetUseCompactSpacing(false);
-	unparser.Unparse(this, xml, attr_white_list);
-	output += xml.Value();
+	classad::ClassAdXMLUnParser unparser;
+	std::string xml;
+
+	unparser.SetCompactSpacing(false);
+	if ( attr_white_list ) {
+		classad::ClassAd tmp_ad;
+		classad::ExprTree *expr;
+		const char *attr;
+		attr_white_list->rewind();
+		while( (attr = attr_white_list->next()) ) {
+			if ( (expr = ad.Lookup( attr )) ) {
+				tmp_ad.Insert( attr, expr, false );
+			}
+		}
+		unparser.Unparse( xml, &tmp_ad );
+		attr_white_list->rewind();
+		while( (attr = attr_white_list->next()) ) {
+			tmp_ad.Remove( attr );
+		}
+	} else {
+		unparser.Unparse( xml, &ad );
+	}
+	output += xml;
 	return TRUE;
 }
 ///////////// end XML functions /////////
@@ -2228,8 +2293,8 @@ void ClassAd::ChainCollapse()
             tmpExprTree = tmpExprTree->Copy(); 
             ASSERT(tmpExprTree); 
 
-            //K, it's clear. Insert it!
-            Insert((*itr).first, tmpExprTree);
+            //K, it's clear. Insert it, but don't try to 
+            Insert((*itr).first, tmpExprTree, false);
         }
     }
 }
@@ -2316,7 +2381,7 @@ _GetReferences(classad::ExprTree *tree,
 	}
 	if( !ok ) {
 		dprintf(D_FULLDEBUG,"warning: failed to get all attribute references in ClassAd (perhaps caused by circular reference).\n");
-		dPrint(D_FULLDEBUG);
+		dPrintAd(D_FULLDEBUG, *this);
 		dprintf(D_FULLDEBUG,"End of offending ad.\n");
 	}
 
@@ -2898,7 +2963,7 @@ static void InitTargetAttrLists()
 
 	tmp = param( "STARTD_RESOURCE_PREFIX" );
 	if ( tmp ) {
-		buff.sprintf( "%s*", tmp );
+		buff.formatstr( "%s*", tmp );
 		machine_attrs_strlist.append( buff.Value() );
 		free( tmp );
 	} else {
@@ -2931,10 +2996,10 @@ static void InitTargetAttrLists()
 		tmp_strlist.clearAll();
 	}
 
-	buff.sprintf( "%s*", ATTR_LAST_MATCH_LIST_PREFIX );
+	buff.formatstr( "%s*", ATTR_LAST_MATCH_LIST_PREFIX );
 	job_attrs_strlist.append( buff.Value() );
 
-	buff.sprintf( "%s*", ATTR_NEGOTIATOR_MATCH_EXPR );
+	buff.formatstr( "%s*", ATTR_NEGOTIATOR_MATCH_EXPR );
 	job_attrs_strlist.append( buff.Value() );
 
 	tmp = param( "TARGET_JOB_ATTRS" );
@@ -2956,8 +3021,7 @@ static void InitTargetAttrLists()
 }
 #endif
 
-classad::ExprTree *AddTargetRefs( classad::ExprTree *tree,
-								  TargetAdType /*target_type*/ )
+classad::ExprTree *AddTargetRefs( classad::ExprTree *tree, TargetAdType /*target_type*/ )
 {
 	// Disable AddTargetRefs for now
 	return tree->Copy();
@@ -3073,12 +3137,21 @@ void ConvertEscapingOldToNew( const char *str, std::string &buffer )
 			buffer.append( 1, '\\' );
 			str++;
 			if(  (str[0] != '"') ||
-				 ( (str[0] == '"') && IsStringEnd(str, 1) )   )
+				 ( /*(str[0] == '"') && */ IsStringEnd(str, 1) )   )
 			{
 				buffer.append( 1, '\\' );
 			}
 		}
 	}
+		// remove trailing whitespace
+	int ix = (int)buffer.size();
+	while (ix > 1) {
+		char ch = buffer[ix-1];
+		if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n')
+			break;
+		--ix;
+	}
+	buffer.resize(ix);
 }
 
 // end functions

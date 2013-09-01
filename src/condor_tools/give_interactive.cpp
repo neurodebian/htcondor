@@ -107,7 +107,8 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 	bool			newBestFound;
 		// to store results of evaluations
 	char			remoteUser[128];
-	EvalResult		result;
+	classad::Value	result;
+	bool			val;
 	float			tmp;
 	
 
@@ -122,9 +123,9 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 		if( !IsAMatch( &request, candidate ) ) {
 				// they don't match; continue
 			//printf("DEBUG: MATCH FAILED\n\nCANDIDATE:\n");
-			//candidate->fPrint(stdout);
+			//fPrintAd(stdout, *candidate);
 			//printf("\nDEBUG: REQUEST:\n");
-			//request.fPrint(stdout);
+			//fPrintAd(stdout, request);
 			continue;
 		}
 
@@ -134,8 +135,8 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 			candidate->LookupString (ATTR_REMOTE_USER, remoteUser, sizeof(remoteUser))) 
 		{
 				// check if we are preempting for rank or priority
-			if( EvalExprTree( rankCondStd, candidate, &request, &result ) &&
-					result.type == LX_INTEGER && result.i == TRUE ) {
+			if( EvalExprTree( rankCondStd, candidate, &request, result ) &&
+				result.IsBooleanValue( val ) && val ) {
 					// offer strictly prefers this request to the one
 					// currently being serviced; preempt for rank
 				candidatePreemptState = RANK_PREEMPTION;
@@ -147,15 +148,15 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 					// (1) we need to make sure that PreemptionReq's hold (i.e.,
 					// if the PreemptionReq expression isn't true, dont preempt)
 				if (PreemptionReq && 
-					!(EvalExprTree(PreemptionReq,candidate,&request,&result) &&
-						result.type == LX_INTEGER && result.i == TRUE) ) {
+					!(EvalExprTree(PreemptionReq,candidate,&request,result) &&
+					  result.IsBooleanValue(val) && val) ) {
 					continue;
 				}
 					// (2) we need to make sure that the machine ranks the job
 					// at least as well as the one it is currently running 
 					// (i.e., rankCondPrioPreempt holds)
-				if(!(EvalExprTree(rankCondPrioPreempt,candidate,&request,&result)&&
-						result.type == LX_INTEGER && result.i == TRUE ) ) {
+				if(!(EvalExprTree(rankCondPrioPreempt,candidate,&request,result)&&
+					 result.IsBooleanValue(val) && val ) ) {
 						// machine doesn't like this job as much -- find another
 					continue;
 				}
@@ -187,10 +188,12 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 		candidatePreemptRankValue = -(FLT_MAX);
 		if( candidatePreemptState != NO_PREEMPTION ) {
 			// calculate the preemption rank
+			double rval;
 			if( PreemptionRank &&
-				EvalExprTree(PreemptionRank,candidate,&request,&result) &&
-					result.type == LX_FLOAT) {
-				candidatePreemptRankValue = result.f;
+				EvalExprTree(PreemptionRank,candidate,&request,result) &&
+				result.IsNumber(rval)) {
+
+				candidatePreemptRankValue = rval;
 			} else if( PreemptionRank ) {
 				dprintf(D_ALWAYS, "Failed to evaluate PREEMPTION_RANK "
 					"expression to a float.\n");
@@ -245,8 +248,8 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 void
 make_request_ad(ClassAd & requestAd, const char *rank)
 {
-	requestAd.SetMyTypeName (JOB_ADTYPE);
-	requestAd.SetTargetTypeName (STARTD_ADTYPE);
+	SetMyTypeName (requestAd, JOB_ADTYPE);
+	SetTargetTypeName (requestAd, STARTD_ADTYPE);
 
 	get_mySubSystem()->setTempName( "SUBMIT" );
 	config_fill_ad( &requestAd );
@@ -342,7 +345,7 @@ fetchSubmittorPrios()
 
 	sock->end_of_message();
 	sock->decode();
-	if( !al.initAttrListFromStream(*sock) || !sock->end_of_message() ) {
+	if( !getClassAdNoTypes(sock, al) || !sock->end_of_message() ) {
 		fprintf( stderr, 
 				 "Error:  Could not get priorities from negotiator (%s)\n",
 				 negotiator.fullHostname() );

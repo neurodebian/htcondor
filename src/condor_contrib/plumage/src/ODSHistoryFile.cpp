@@ -104,7 +104,7 @@ ODSHistoryFile::operator=(const ODSHistoryFile &base)
 		if (!init(errstack)) {
 			// XXX: Should throw an exception here
 			dprintf ( D_ALWAYS, "ODSHistoryFile::operator=: %s\n",
-					errstack.getFullText(true));		
+					errstack.getFullText(true).c_str());		
 		}
 	}
 
@@ -201,6 +201,10 @@ ODSHistoryFile::poll(CondorError &/*errstack*/)
         string gjid;
         if (ad.LookupString(ATTR_GLOBAL_JOB_ID,gjid)) {
             key.append(ATTR_GLOBAL_JOB_ID, gjid);
+        }
+        else {
+            dprintf(D_ALWAYS, "ODSHistoryFile::poll: skipping suspicious ad in '%s', at line %lu\n",m_name.c_str(),stop);
+            continue;
         }
 
         ODSMongodbOps* my_writer = getWriter();

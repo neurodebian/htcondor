@@ -160,7 +160,7 @@ void AppendHistory(ClassAd* ad)
   // history file. 
   MyString ad_string;
   int ad_size;
-  ad->sPrint(ad_string);
+  sPrintAd(ad_string, *ad);
   ad_size = ad_string.Length();
 
   MaybeRotateHistory(ad_size);
@@ -172,7 +172,7 @@ void AppendHistory(ClassAd* ad)
 	  failed = true;
   } else {
 	  int offset = findHistoryOffset(LogFile);
-	  if (!ad->fPrint(LogFile)) {
+	  if (!fPrintAd(LogFile, *ad)) {
 		  dprintf(D_ALWAYS, 
 				  "ERROR: failed to write job class ad to history file %s\n",
 				  JobHistoryFileName);
@@ -556,9 +556,9 @@ void WritePerJobHistoryFile(ClassAd* ad, bool useGjid)
 	if (useGjid) {
 		MyString gjid;
 		ad->LookupString(ATTR_GLOBAL_JOB_ID, gjid);
-		file_name.sprintf("%s/history.%s", PerJobHistoryDir, gjid.Value());
+		file_name.formatstr("%s/history.%s", PerJobHistoryDir, gjid.Value());
 	} else {
-		file_name.sprintf("%s/history.%d.%d", PerJobHistoryDir, cluster, proc);
+		file_name.formatstr("%s/history.%d.%d", PerJobHistoryDir, cluster, proc);
 	}
 
 	// write out the file
@@ -577,7 +577,7 @@ void WritePerJobHistoryFile(ClassAd* ad, bool useGjid)
 		close(fd);
 		return;
 	}
-	if (!ad->fPrint(fp)) {
+	if (!fPrintAd(fp, *ad)) {
 		dprintf(D_ALWAYS | D_FAILURE,
 		        "error writing per-job history file for job %d.%d\n",
 		        cluster, proc);

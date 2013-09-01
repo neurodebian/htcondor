@@ -41,7 +41,9 @@ int vmgahp_mode = VMGAHP_TEST_MODE;
 
 PBuffer vmgahp_stderr_buffer;
 int vmgahp_stderr_tid = -1;
+#ifndef vmprintf
 int	oriDebugFlags = 0;
+#endif
 
 MyString workingdir;
 
@@ -80,8 +82,13 @@ void Reconfig()
 
 	// If we use Termlog,
 	// we don't want logs from DaemonCore
+#ifdef vmprintf
+	if (dprintf_to_term_check()) {
+		set_debug_flags(NULL, D_NOHEADER);
+	}
+#else // the old way
 	oriDebugFlags = DebugFlags;
-	if( Termlog ) {
+	if( dprintf_to_term_check() ) {
 		DebugFlags = 0;
 	}
 
@@ -97,6 +104,7 @@ void Reconfig()
 			free(gahp_log_file);
 		}
 	}
+#endif
 }
 
 void
@@ -231,8 +239,13 @@ void main_init(int argc, char *argv[])
 	MyString vmtype;
 	MyString matchstring;
 
+#ifdef vmprintf
+	// use D_PID to prefix log lines with (pid:NNN), note that vmprintf output "VMGAHP[NNN]" instead
+	set_debug_flags(NULL, D_PID);
+#else
 	// save DebugFlags for vmprintf
 	oriDebugFlags = DebugFlags;
+#endif
 
 	// handle specific command line args
 	if( argc < 3 ) {
@@ -262,7 +275,7 @@ void main_init(int argc, char *argv[])
 			DC_Exit(1);
 	}
 
-	if( Termlog && (vmgahp_mode != VMGAHP_TEST_MODE ) &&
+	if( dprintf_to_term_check() && (vmgahp_mode != VMGAHP_TEST_MODE ) &&
 			(vmgahp_mode != VMGAHP_KILL_MODE )) {
 		// Initialize pipe for stderr
 		vmgahp_stderr_pipe = daemonCore->Inherit_Pipe(fileno(stderr),

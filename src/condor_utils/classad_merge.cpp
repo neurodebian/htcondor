@@ -23,7 +23,8 @@
 #include "classad_merge.h"
 
 void MergeClassAds(ClassAd *merge_into, ClassAd *merge_from, 
-				   bool merge_conflicts, bool mark_dirty)
+				   bool merge_conflicts, bool mark_dirty,
+				   bool keep_clean_when_possible)
 {
 
 	if (!merge_into || !merge_from) {
@@ -39,10 +40,30 @@ void MergeClassAds(ClassAd *merge_into, ClassAd *merge_from,
 	while ( merge_from->NextExpr(name, expression) ) {
 
 		if (merge_conflicts || !merge_into->LookupExpr(name)) {
+			if( keep_clean_when_possible ) {
+				char *from_expr = NULL;
+				char *to_expr = NULL;
+				bool equiv=false;
+
+				if( (from_expr=sPrintExpr(*merge_from,name)) &&
+					(to_expr=sPrintExpr(*merge_into,name)) )
+				{
+					if( from_expr && to_expr && strcmp(from_expr,to_expr)==0 ) {
+						equiv=true;
+					}
+				}
+				if( from_expr ) { free( from_expr ); from_expr = NULL; }
+				if( to_expr ) { free( to_expr ); to_expr = NULL; }
+
+				if( equiv ) {
+					continue;
+				}
+			}
+
 			ExprTree  *copy_expression;
 
 			copy_expression = expression->Copy();
-			merge_into->Insert(name, copy_expression);
+			merge_into->Insert(name, copy_expression,false);
 			if ( !mark_dirty ) {
 				merge_into->SetDirtyFlag(name, false);
 			}
@@ -50,4 +71,9 @@ void MergeClassAds(ClassAd *merge_into, ClassAd *merge_from,
 	}
 
 	return;
+}
+
+void MergeClassAdsCleanly(ClassAd *merge_into, ClassAd *merge_from)
+{
+	return MergeClassAds(merge_into,merge_from,true,true,true);
 }

@@ -91,7 +91,7 @@ CCBListener::RegisterWithCCBServer(bool blocking)
 
 		// for debugging purposes only, identify ourselves to the CCB server
 	MyString name;
-	name.sprintf("%s %s",get_mySubSystem()->getName(),daemonCore->publicNetworkIpAddr());
+	name.formatstr("%s %s",get_mySubSystem()->getName(),daemonCore->publicNetworkIpAddr());
 	msg.Assign( ATTR_NAME, name.Value() );
 
 	bool success = SendMsgToCCB(msg,blocking);
@@ -167,7 +167,7 @@ CCBListener::WriteMsgToCCB(ClassAd &msg)
 	}
 
 	m_sock->encode();
-	if( !msg.put( *m_sock ) || !m_sock->end_of_message() ) {
+	if( !putClassAd( m_sock, msg ) || !m_sock->end_of_message() ) {
 		Disconnected();
 		return false;
 	}
@@ -354,7 +354,7 @@ CCBListener::ReadMsgFromCCB()
 	}
 	m_sock->timeout(CCB_TIMEOUT);
 	ClassAd msg;
-	if( !msg.initFromStream( *m_sock ) || !m_sock->end_of_message() ) {
+	if( !getClassAd( m_sock, msg ) || !m_sock->end_of_message() ) {
 		dprintf(D_ALWAYS,
 				"CCBListener: failed to receive message from CCB server %s\n",
 				m_ccb_address.Value());
@@ -378,7 +378,7 @@ CCBListener::ReadMsgFromCCB()
 	}
 
 	MyString msg_str;
-	msg.sPrint(msg_str);
+	sPrintAd(msg_str, msg);
 	dprintf( D_ALWAYS,
 			 "CCBListener: Unexpected message received from CCB "
 			 "server: %s\n",
@@ -391,7 +391,7 @@ CCBListener::HandleCCBRegistrationReply( ClassAd &msg )
 {
 	if( !msg.LookupString(ATTR_CCBID,m_ccbid) ) {
 		MyString msg_str;
-		msg.sPrint(msg_str);
+		sPrintAd(msg_str, msg);
 		EXCEPT("CCBListener: no ccbid in registration reply: %s\n",
 			   msg_str.Value() );
 	}
@@ -421,7 +421,7 @@ CCBListener::HandleCCBRequest( ClassAd &msg )
 		!msg.LookupString( ATTR_REQUEST_ID, request_id) )
 	{
 		MyString msg_str;
-		msg.sPrint(msg_str);
+		sPrintAd(msg_str, msg);
 		EXCEPT("CCBListener: invalid CCB request from %s: %s\n",
 			   m_ccb_address.Value(),
 			   msg_str.Value() );
@@ -430,7 +430,7 @@ CCBListener::HandleCCBRequest( ClassAd &msg )
 	msg.LookupString( ATTR_NAME, name );
 
 	if( name.find(address.Value())<0 ) {
-		name.sprintf_cat(" with reverse connect address %s",address.Value());
+		name.formatstr_cat(" with reverse connect address %s",address.Value());
 	}
 	dprintf(D_FULLDEBUG|D_NETWORK,
 			"CCBListener: received request to connect to %s, request id %s.\n",
@@ -466,7 +466,7 @@ CCBListener::DoReversedCCBConnect( char const *address, char const *connect_id, 
 		char const *peer_ip = sock->peer_ip_str();
 		if( peer_ip && !strstr(peer_description,peer_ip)) {
 			MyString desc;
-			desc.sprintf("%s at %s",peer_description,sock->get_sinful_peer());
+			desc.formatstr("%s at %s",peer_description,sock->get_sinful_peer());
 			sock->set_peer_description(desc.Value());
 		}
 		else {
@@ -521,7 +521,7 @@ CCBListener::ReverseConnected(Stream *stream)
 		sock->encode();
 		int cmd = CCB_REVERSE_CONNECT;
 		if( !sock->put(cmd) ||
-			!msg_ad->put( *sock ) ||
+			!putClassAd( sock, *msg_ad ) ||
 			!sock->end_of_message() )
 		{
 			ReportReverseConnectResult(msg_ad,false,"failure writing reverse connect command");
@@ -596,8 +596,11 @@ CCBListeners::GetCCBListener(char const *address)
 		return NULL;
 	}
 
-	m_ccb_listeners.Rewind();
-	while( m_ccb_listeners.Next(ccb_listener) ) {
+	for(CCBListenerList::iterator itr = m_ccb_listeners.begin();
+		itr != m_ccb_listeners.end();
+		itr++)
+	{
+		ccb_listener = (*itr);
 		if( !strcmp(address,ccb_listener->getAddress()) ) {
 			return ccb_listener.get();
 		}
@@ -610,8 +613,11 @@ CCBListeners::GetCCBContactString(MyString &result)
 {
 	classy_counted_ptr<CCBListener> ccb_listener;
 
-	m_ccb_listeners.Rewind();
-	while( m_ccb_listeners.Next(ccb_listener) ) {
+	for(CCBListenerList::iterator itr = m_ccb_listeners.begin();
+		itr != m_ccb_listeners.end();
+		itr++)
+	{
+		ccb_listener = (*itr);
 		char const *ccbid = ccb_listener->getCCBID();
 		if( ccbid && *ccbid ) {
 			if( !result.IsEmpty() ) {
@@ -628,9 +634,11 @@ CCBListeners::RegisterWithCCBServer(bool blocking)
 	bool result = true;
 
 	classy_counted_ptr<CCBListener> ccb_listener;
-
-	m_ccb_listeners.Rewind();
-	while( m_ccb_listeners.Next(ccb_listener) ) {
+	for(CCBListenerList::iterator itr = m_ccb_listeners.begin();
+		itr != m_ccb_listeners.end();
+		itr++)
+	{
+		ccb_listener = (*itr);
 		if( !ccb_listener->RegisterWithCCBServer(blocking) && blocking ) {
 			result = false;
 		}
@@ -643,7 +651,7 @@ CCBListeners::Configure(char const *addresses)
 {
 	StringList addrlist(addresses," ,");
 
-	SimpleList< classy_counted_ptr<CCBListener> > new_ccbs;
+	CCBListenerList new_ccbs;
 
 	char const *address;
 	addrlist.rewind();
@@ -673,19 +681,22 @@ CCBListeners::Configure(char const *addresses)
 			listener = new CCBListener(address);
 		}
 
-		new_ccbs.Append( listener );
+		new_ccbs.push_back( listener );
 	}
 
-	m_ccb_listeners.Clear();
-	classy_counted_ptr<CCBListener> ccb_listener;
+	m_ccb_listeners.clear();
 
-	new_ccbs.Rewind();
-	while( new_ccbs.Next(ccb_listener) ) {
+	classy_counted_ptr<CCBListener> ccb_listener;
+	for(CCBListenerList::iterator itr = new_ccbs.begin();
+		itr != new_ccbs.end();
+		itr++)
+	{
+		ccb_listener = (*itr);
 		if( GetCCBListener( ccb_listener->getAddress() ) ) {
 				// ignore duplicate entries with same address
 			continue;
 		}
-		m_ccb_listeners.Append( ccb_listener );
+		m_ccb_listeners.push_back( ccb_listener );
 
 		ccb_listener->InitAndReconfig();
 	}

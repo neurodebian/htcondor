@@ -29,24 +29,19 @@ static char *_sysapi_vsyscall_gate_addr = NULL;
 
 #define BUFFER_SIZE 2048
 
+#if defined(LINUX)
 /* The memory returned from here must be freed */
-static char* find_ckpt_probe(void);
-
 static char* find_ckpt_probe(void)
 {
 	return param("CKPT_PROBE");
 }
+#endif
 
 /* the raw version */
 /* Do not free the returned pointer */
 const char *
 sysapi_vsyscall_gate_addr_raw(void)
 {
-	char *tmp;
-	FILE *fin;
-	char buf[BUFFER_SIZE];
-	char addr[BUFFER_SIZE];
-
 	/* immediately set this up if it isn't already */
 	if (_sysapi_vsyscall_gate_addr == NULL) {
 		/* Set this up immediately for the rest of the algorithm */
@@ -54,6 +49,11 @@ sysapi_vsyscall_gate_addr_raw(void)
 	}
 
 #if defined(LINUX)
+	char *tmp;
+	FILE *fin;
+	char buf[BUFFER_SIZE];
+	char addr[BUFFER_SIZE];
+
 	if (strcmp(_sysapi_vsyscall_gate_addr, "N/A") == MATCH) {
 
 		/* get the probe process executable */

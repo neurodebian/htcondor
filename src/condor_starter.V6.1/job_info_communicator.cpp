@@ -421,7 +421,7 @@ JobInfoCommunicator::writeOutputAdFile( ClassAd* ad )
 		}
 	}
 		// append a delimiter?
-	ad->fPrint( fp );
+	fPrintAd( fp, *ad );
 
 	if( job_output_ad_is_stdout ) {
 		fflush( fp );
@@ -568,7 +568,7 @@ JobInfoCommunicator::checkDedicatedExecuteAccounts( char const *name )
 
 		// force the matching of the whole string
 	MyString full_pattern;
-	full_pattern.sprintf("^%s$",pattern_string);
+	full_pattern.formatstr("^%s$",pattern_string);
 
 	Regex re;
 	char const *errstr = NULL;
@@ -666,13 +666,10 @@ JobInfoCommunicator::initUserPrivWindows( void )
 	}
 
 	if ( !name ) {
-		char slot_user[255];
-		MyString slotName = "";
-		slotName = Starter->getMySlotName();
-
+		MyString slotName = Starter->getMySlotName();
 		slotName.upper_case();
-		sprintf(slot_user, "%s_USER", slotName);
-		char *run_jobs_as = param(slot_user);
+		slotName += "_USER";
+		char *run_jobs_as = param(slotName.Value());
 		if (run_jobs_as) {		
 			getDomainAndName(run_jobs_as, domain, name);
 				/* 
@@ -762,9 +759,10 @@ JobInfoCommunicator::checkForStarterDebugging( void )
 		// For debugging, see if there's a special attribute in the
 		// job ad that sends us into an infinite loop, waiting for
 		// someone to attach with a debugger
-	int starter_should_wait = 0;
-	job_ad->LookupInteger( ATTR_STARTER_WAIT_FOR_DEBUG,
-						  starter_should_wait );
+	volatile int starter_should_wait = 0;
+	int tmp = 0; // Can't pass volatile int into LookupInteger
+	job_ad->LookupInteger( ATTR_STARTER_WAIT_FOR_DEBUG, tmp );
+	starter_should_wait = tmp;
 	if( starter_should_wait ) {
 		dprintf( D_ALWAYS, "Job requested starter should wait for "
 				 "debugger with %s=%d, going into infinite loop\n",
@@ -778,9 +776,9 @@ JobInfoCommunicator::checkForStarterDebugging( void )
 
 		// Also, if the starter has D_JOB turned on, we want to dump
 		// out the job ad to the log file...
-	if( DebugFlags & D_JOB ) {
+	if( IsDebugLevel( D_JOB ) ) {
 		dprintf( D_JOB, "*** Job ClassAd ***\n" );  
-		job_ad->dPrint( D_JOB );
+		dPrintAd( D_JOB, *job_ad );
         dprintf( D_JOB, "--- End of ClassAd ---\n" );
 	}
 }

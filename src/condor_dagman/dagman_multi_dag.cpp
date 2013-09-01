@@ -188,7 +188,7 @@ RescueDagName(const char *primaryDagFile, bool multiDags,
 		fileName += "_multi";
 	}
 	fileName += ".rescue";
-	fileName.sprintf_cat( "%.3d", rescueDagNum );
+	fileName.formatstr_cat( "%.3d", rescueDagNum );
 
 	return fileName;
 }
@@ -230,4 +230,22 @@ HaltFileName( const MyString &primaryDagFile )
 	MyString haltFile = primaryDagFile + ".halt";
 
 	return haltFile;
+}
+
+//-------------------------------------------------------------------------
+void
+tolerant_unlink( const char *pathname )
+{
+	if ( unlink( pathname ) != 0 ) {
+		if ( errno == ENOENT ) {
+			dprintf( D_SYSCALLS,
+						"Warning: failure (%d (%s)) attempting to unlink file %s\n",
+						errno, strerror( errno ), pathname );
+		} else {
+			dprintf( D_ALWAYS,
+						"Error (%d (%s)) attempting to unlink file %s\n",
+						errno, strerror( errno ), pathname );
+
+		}
+	}
 }

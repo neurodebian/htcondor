@@ -45,6 +45,7 @@
 
 #define _NO_EXTERN_DAEMON_CORE 1	
 #include "condor_daemon_core.h"
+#include "classad/classadCache.h"
 
 #ifdef WIN32
 #include "exception_handling.WINDOWS.h"
@@ -82,6 +83,8 @@ char*	logDir = NULL;
 char*	pidFile = NULL;
 char*	addrFile = NULL;
 static	char*	logAppend = NULL;
+
+static int Termlog = 0;	//Replacing the Termlog in dprintf for daemons that use it
 
 static char *core_dir = NULL;
 
@@ -196,7 +199,7 @@ void clean_files()
 					 "DaemonCore: ERROR: Can't delete pid file %s\n",
 					 pidFile );
 		} else {
-			if( DebugFlags & (D_FULLDEBUG | D_DAEMONCORE) ) {
+			if( IsDebugVerbose( D_DAEMONCORE ) ) {
 				dprintf( D_DAEMONCORE, "Removed pid file %s\n", pidFile );
 			}
 		}
@@ -208,7 +211,7 @@ void clean_files()
 					 "DaemonCore: ERROR: Can't delete address file %s\n",
 					 addrFile );
 		} else {
-			if( DebugFlags & (D_FULLDEBUG | D_DAEMONCORE) ) {
+			if( IsDebugVerbose( D_DAEMONCORE ) ) {
 				dprintf( D_DAEMONCORE, "Removed address file %s\n", 
 						 addrFile );
 			}
@@ -224,7 +227,7 @@ void clean_files()
 						 "DaemonCore: ERROR: Can't delete classad file %s\n",
 						 daemonCore->localAdFile );
 			} else {
-				if( DebugFlags & (D_FULLDEBUG | D_DAEMONCORE) ) {
+				if( IsDebugVerbose( D_DAEMONCORE ) ) {
 					dprintf( D_DAEMONCORE, "Removed local classad file %s\n", 
 							 daemonCore->localAdFile );
 				}
@@ -357,7 +360,7 @@ static void
 kill_daemon_ad_file()
 {
 	MyString param_name;
-	param_name.sprintf( "%s_DAEMON_AD_FILE", get_mySubSystem()->getName() );
+	param_name.formatstr( "%s_DAEMON_AD_FILE", get_mySubSystem()->getName() );
 	char *ad_file = param(param_name.Value());
 	if( !ad_file ) {
 		return;
@@ -384,7 +387,7 @@ drop_addr_file()
 
 	if( addrFile ) {
 		MyString newAddrFile;
-		newAddrFile.sprintf("%s.new",addrFile);
+		newAddrFile.formatstr("%s.new",addrFile);
 		if( (ADDR_FILE = safe_fopen_wrapper_follow(newAddrFile.Value(), "w")) ) {
 			// Always prefer the local, private address if possible.
 			const char* addr = daemonCore->privateNetworkIpAddr();
@@ -607,7 +610,7 @@ set_dynamic_dir( const char* param_name, const char* append_str )
 	}
 
 		// First, create the new name.
-	newdir.sprintf( "%s.%s", val, append_str );
+	newdir.formatstr( "%s.%s", val, append_str );
 	
 		// Next, try to create the given directory, if it doesn't
 		// already exist.
@@ -860,6 +863,33 @@ handle_off_graceful( Service*, int, Stream* stream)
 	return TRUE;
 }
 
+class SigtermContinue {
+public:
+	static bool should_sigterm_continue() { return should_continue; };
+	static void sigterm_should_not_continue() { should_continue = false; }
+	static void sigterm_should_continue() { should_continue = true; }
+private:
+	static bool should_continue;
+};
+
+bool SigtermContinue::should_continue = true;
+
+
+static int
+handle_off_force( Service*, int, Stream* stream)
+{
+	if( !stream->end_of_message() ) {
+		dprintf( D_ALWAYS, "handle_off_force: failed to read end of message\n");
+		return FALSE;
+	}
+	if (daemonCore) {
+		daemonCore->SetPeacefulShutdown( false );
+		SigtermContinue::sigterm_should_continue();
+		daemonCore->Send_Signal( daemonCore->getpid(), SIGTERM );
+	}
+	return TRUE;
+}
+
 static int
 handle_off_peaceful( Service*, int, Stream* stream)
 {
@@ -891,6 +921,24 @@ handle_set_peaceful_shutdown( Service*, int, Stream* stream)
 		return FALSE;
 	}
 	daemonCore->SetPeacefulShutdown(true);
+	return TRUE;
+}
+
+static int
+handle_set_force_shutdown( Service*, int, Stream* stream)
+{
+	// If the master could send peaceful shutdown signals, it would
+	// not be necessary to have a message for turning on the peaceful
+	// shutdown toggle.  Since the master only sends fast and graceful
+	// shutdown signals, condor_off is responsible for first turning
+	// on peaceful shutdown in appropriate daemons.
+
+	if( !stream->end_of_message() ) {
+		dprintf( D_ALWAYS, "handle_set_force_shutdown: failed to read end of message\n");
+		return FALSE;
+	}
+	daemonCore->SetPeacefulShutdown( false );
+	SigtermContinue::sigterm_should_continue();
 	return TRUE;
 }
 
@@ -1351,11 +1399,27 @@ unix_sigusr1(int)
 	if (daemonCore) {
 		daemonCore->Send_Signal( daemonCore->getpid(), SIGUSR1 );
 	}
+	
 }
 
 void
 unix_sigusr2(int)
 {
+	// This is a debug only param not to be advertised.
+	if (param_boolean( "DEBUG_CLASSAD_CACHE", false))
+	{
+	  std::string szFile = param("LOG");
+	  szFile +="/";
+	  szFile += get_mySubSystem()->getName();
+	  szFile += "_classad_cache";
+	  
+	  if (!classad::CachedExprEnvelope::_debug_dump_keys(szFile))
+	  {
+	    dprintf( D_FULLDEBUG, "FAILED to write file %s\n",szFile.c_str() );
+	  }
+	}
+	
+  
 	if (daemonCore) {
 		daemonCore->Send_Signal( daemonCore->getpid(), SIGUSR2 );
 	}
@@ -1400,7 +1464,7 @@ dc_reconfig()
 	}
 
 	// Reinitialize logging system; after all, LOG may have been changed.
-	dprintf_config(get_mySubSystem()->getName(), get_param_functions());
+	dprintf_config(get_mySubSystem()->getName());
 	
 	// again, chdir to the LOG directory so that if we dump a core
 	// it will go there.  the location of LOG may have changed, so redo it here.
@@ -1460,13 +1524,14 @@ TimerHandler_main_shutdown_fast()
 int
 handle_dc_sigterm( Service*, int )
 {
-	static int been_here = FALSE;
-	if( been_here ) {
+		// Introduces a race condition.
+		// What if SIGTERM received while we are here?
+	if( !SigtermContinue::should_sigterm_continue() ) {
 		dprintf( D_FULLDEBUG, 
 				 "Got SIGTERM, but we've already done graceful shutdown.  Ignoring.\n" );
 		return TRUE;
 	}
-	been_here = TRUE;
+	SigtermContinue::sigterm_should_not_continue(); // After this
 
 	dprintf(D_ALWAYS, "Got SIGTERM. Performing graceful shutdown.\n");
 
@@ -1946,7 +2011,10 @@ int dc_main( int argc, char** argv )
 		}
 		
 			// Actually set up logging.
-		dprintf_config(get_mySubSystem()->getName(), get_param_functions());
+		if(Termlog)
+			dprintf_set_tool_debug(get_mySubSystem()->getName(), 0);
+		else
+			dprintf_config(get_mySubSystem()->getName());
 	}
 
 		// run as condor 99.9% of the time, so studies tell us.
@@ -2034,7 +2102,7 @@ int dc_main( int argc, char** argv )
 
 	// See if the config tells us to wait on startup for a debugger to attach.
 	MyString debug_wait_param;
-	debug_wait_param.sprintf("%s_DEBUG_WAIT", get_mySubSystem()->getName() );
+	debug_wait_param.formatstr("%s_DEBUG_WAIT", get_mySubSystem()->getName() );
 	if (param_boolean(debug_wait_param.Value(), false, false)) {
 		volatile int debug_wait = 1;
 		dprintf(D_ALWAYS,
@@ -2046,7 +2114,7 @@ int dc_main( int argc, char** argv )
 	}
 
 #ifdef WIN32
-	debug_wait_param.sprintf("%s_WAIT_FOR_DEBUGGER", get_mySubSystem()->getName() );
+	debug_wait_param.formatstr("%s_WAIT_FOR_DEBUGGER", get_mySubSystem()->getName() );
 	int wait_for_win32_debugger = param_integer(debug_wait_param.Value(), 0);
 	if (wait_for_win32_debugger) {
 		UINT ms = GetTickCount() - 10;
@@ -2081,7 +2149,7 @@ int dc_main( int argc, char** argv )
 		}
 		
 			// Actually set up logging.
-		dprintf_config(get_mySubSystem()->getName(), get_param_functions());
+		dprintf_config(get_mySubSystem()->getName());
 	}
 
 		// Now that we have the daemonCore object, we can finally
@@ -2332,6 +2400,10 @@ int dc_main( int argc, char** argv )
 								  (CommandHandler)handle_off_graceful,
 								  "handle_off_graceful()", 0, ADMINISTRATOR );
 
+	daemonCore->Register_Command( DC_OFF_FORCE, "DC_OFF_FORCE",
+								  (CommandHandler)handle_off_force,
+								  "handle_off_force()", 0, ADMINISTRATOR );
+
 	daemonCore->Register_Command( DC_OFF_PEACEFUL, "DC_OFF_PEACEFUL",
 								  (CommandHandler)handle_off_peaceful,
 								  "handle_off_peaceful()", 0, ADMINISTRATOR );
@@ -2340,6 +2412,10 @@ int dc_main( int argc, char** argv )
 								  (CommandHandler)handle_set_peaceful_shutdown,
 								  "handle_set_peaceful_shutdown()", 0, ADMINISTRATOR );
 
+	daemonCore->Register_Command( DC_SET_FORCE_SHUTDOWN, "DC_SET_FORCE_SHUTDOWN",
+								  (CommandHandler)handle_set_force_shutdown,
+								  "handle_set_force_shutdown()", 0, ADMINISTRATOR );
+
 		// DC_NOP is for waking up select.  There is no need for
 		// security here, because anyone can wake up select anyway.
 		// This command is also used to gracefully close a socket
@@ -2347,6 +2423,51 @@ int dc_main( int argc, char** argv )
 	daemonCore->Register_Command( DC_NOP, "DC_NOP",
 								  (CommandHandler)handle_nop,
 								  "handle_nop()", 0, ALLOW );
+
+		// the next several commands are NOPs registered at all permission
+		// levels, for security testing and diagnostics.  for now they all
+		// invoke the same function, but how they are authorized before calling
+		// it may vary depending on the configuration
+	daemonCore->Register_Command( DC_NOP_READ, "DC_NOP_READ",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, READ );
+
+	daemonCore->Register_Command( DC_NOP_WRITE, "DC_NOP_WRITE",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, WRITE );
+
+	daemonCore->Register_Command( DC_NOP_NEGOTIATOR, "DC_NOP_NEGOTIATOR",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, NEGOTIATOR );
+
+	daemonCore->Register_Command( DC_NOP_ADMINISTRATOR, "DC_NOP_ADMINISTRATOR",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, ADMINISTRATOR );
+
+	daemonCore->Register_Command( DC_NOP_OWNER, "DC_NOP_OWNER",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, OWNER );
+
+	daemonCore->Register_Command( DC_NOP_CONFIG, "DC_NOP_CONFIG",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, CONFIG_PERM );
+
+	daemonCore->Register_Command( DC_NOP_DAEMON, "DC_NOP_DAEMON",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, DAEMON );
+
+	daemonCore->Register_Command( DC_NOP_ADVERTISE_STARTD, "DC_NOP_ADVERTISE_STARTD",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, ADVERTISE_STARTD_PERM );
+
+	daemonCore->Register_Command( DC_NOP_ADVERTISE_SCHEDD, "DC_NOP_ADVERTISE_SCHEDD",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, ADVERTISE_SCHEDD_PERM );
+
+	daemonCore->Register_Command( DC_NOP_ADVERTISE_MASTER, "DC_NOP_ADVERTISE_MASTER",
+								  (CommandHandler)handle_nop,
+								  "handle_nop()", 0, ADVERTISE_MASTER_PERM );
+
 
 	daemonCore->Register_Command( DC_FETCH_LOG, "DC_FETCH_LOG",
 								  (CommandHandler)handle_fetch_log,

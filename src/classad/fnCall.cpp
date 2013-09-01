@@ -28,6 +28,10 @@
 #include "classad/sink.h"
 #include "classad/util.h"
 
+#ifndef WIN32
+#include <sys/time.h>
+#endif
+
 #if defined(WIN32) && !defined(USE_PCRE) && !defined(USE_POSIX_REGEX)
   #define USE_PCRE
   #define HAVE_PCRE_H
@@ -250,13 +254,14 @@ SameAs(const ExprTree *tree) const
 {
     bool is_same;
     const FunctionCall *other_fn;
+    const ExprTree * pSelfTree = tree->self();
     
-    if (this == tree) {
+    if (this == pSelfTree) {
         is_same = true;
-    } else if (tree->GetKind() != FN_CALL_NODE) {
+    } else if (pSelfTree->GetKind() != FN_CALL_NODE) {
         is_same = false;
     } else {
-        other_fn = (const FunctionCall *) tree;
+        other_fn = (const FunctionCall *) pSelfTree;
         
         if (functionName == other_fn->functionName
             && function == other_fn->function
@@ -1897,6 +1902,7 @@ convBool( const char*, const ArgumentList &argList, EvalState &state,
 		case Value::ERROR_VALUE:
 		case Value::CLASSAD_VALUE:
 		case Value::LIST_VALUE:
+		case Value::SLIST_VALUE:
 		case Value::ABSOLUTE_TIME_VALUE:
 			result.SetErrorValue( );
 			return( true );
@@ -1907,7 +1913,7 @@ convBool( const char*, const ArgumentList &argList, EvalState &state,
 
 		case Value::INTEGER_VALUE:
 			{
-				int ival;
+				long long ival;
 				arg.IsIntegerValue( ival );
 				result.SetBooleanValue( ival != 0 );
 				return( true );
@@ -2011,6 +2017,7 @@ convTime(const char* name,const ArgumentList &argList,EvalState &state,
 		case Value::ERROR_VALUE:
 		case Value::CLASSAD_VALUE:
 		case Value::LIST_VALUE:
+		case Value::SLIST_VALUE:
 		case Value::BOOLEAN_VALUE:
 			result.SetErrorValue( );
 			return( true );
@@ -2140,9 +2147,9 @@ doRound( const char* name,const ArgumentList &argList,EvalState &state,
                 result.SetIntegerValue((int) floor(rvalue));
             } else if (   strcasecmp("ceil", name)    == 0 
                        || strcasecmp("ceiling", name) == 0) {
-                result.SetIntegerValue((int) ceil(rvalue));
+                result.SetIntegerValue((long long) ceil(rvalue));
             } else if( strcasecmp("round", name) == 0) {
-                result.SetIntegerValue((int) rint(rvalue));
+                result.SetIntegerValue((long long) rint(rvalue));
             } else {
                 result.SetErrorValue( );
             }
@@ -2171,9 +2178,9 @@ doMath2( const char* name,const ArgumentList &argList,EvalState &state,
 
 	if (strcasecmp("pow", name) == 0) {
 		// take arg2 to the power of arg2
-		int ival, ibase;
+		long long ival, ibase;
 		if (arg.IsIntegerValue(ival) && arg2.IsIntegerValue(ibase) && ibase >= 0) {
-			ival = (int) (pow((double)ival, ibase) + 0.5);
+			ival = (long long) (pow((double)ival, (double)ibase) + 0.5);
 			result.SetIntegerValue(ival);
 		} else {
 			Value	realValue, realBase;
@@ -2241,7 +2248,7 @@ doMath2( const char* name,const ArgumentList &argList,EvalState &state,
 			// at this point rbase should contain the real value of either arg2 or the
 			// last entry in the list. and rval should contain the value to be quantized.
 
-			int ival, ibase;
+			long long ival, ibase;
 			if (arg2.IsIntegerValue(ibase)) {
 				// quantize to an integer base,
 				if ( ! ibase)
@@ -2280,6 +2287,9 @@ random( const char*,const ArgumentList &argList,EvalState &state,
     double  double_max;
     int     random_int;
     double  random_double;
+
+	// TODO Make this work properly for ranges beyond 2^31
+	//   (2^15 on windows)
 
     // takes exactly one argument
 	if( argList.size() > 1 ) {
@@ -2330,7 +2340,7 @@ ifThenElse( const char* /* name */,const ArgumentList &argList,EvalState &state,
 		}
 		break;
 	case Value::INTEGER_VALUE: {
-		int intval;
+		long long intval;
 		if( !arg1.IsIntegerValue(intval) ) {
 			result.SetErrorValue();
 			return( false );
@@ -2355,6 +2365,7 @@ ifThenElse( const char* /* name */,const ArgumentList &argList,EvalState &state,
 	case Value::ERROR_VALUE:
 	case Value::CLASSAD_VALUE:
 	case Value::LIST_VALUE:
+	case Value::SLIST_VALUE:
 	case Value::STRING_VALUE:
 	case Value::ABSOLUTE_TIME_VALUE:
 	case Value::RELATIVE_TIME_VALUE:
@@ -2490,13 +2501,23 @@ debug( const char* name,const ArgumentList &argList,EvalState &state,
 	bool old_debug = state.debug;
 	state.debug = true;
 
+	double diff = 0;
+#ifndef WIN32
+	struct timeval begin, end;
+	gettimeofday(&begin, NULL);
+#endif
 	if( !argList[0]->Evaluate( state, arg ) ) {
 		result.SetErrorValue( );
 		return( false );
 	}
+#ifndef WIN32
+	gettimeofday(&end, NULL);
+	diff = (end.tv_sec + (end.tv_usec * 0.000001)) -
+		(begin.tv_sec + (begin.tv_usec * 0.000001));
+#endif
 	state.debug = old_debug;
 	result = arg;
-	argList[0]->debug_format_value(result);
+	argList[0]->debug_format_value(result, diff);
 	return true;
 }
 

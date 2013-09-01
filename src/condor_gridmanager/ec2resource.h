@@ -47,6 +47,7 @@ public:
 											  const char * private_key_file );
 
 	GahpClient *gahp;
+	GahpClient *status_gahp;
 
 	EC2Resource(const char * resource_name, 
 				const char * public_key_file, 
@@ -62,13 +63,27 @@ public:
 
 	void PublishResourceAd( ClassAd *resource_ad );
 
+    bool hadAuthFailure() { return m_hadAuthFailure; }
+
+    std::string authFailureMessage;
+
+    BatchStatusResult StartBatchStatus();
+    BatchStatusResult FinishBatchStatus();
+    GahpClient * BatchGahp() { return status_gahp; }
+
+    HashTable< HashKey, EC2Job * > jobsByInstanceID;
+    HashTable< HashKey, EC2Job * > spotJobsByRequestID;
+    
 private:
 	void DoPing(time_t & ping_delay, 
 				bool & ping_complete, 
 				bool & ping_succeeded  );
 	
 	char* m_public_key_file;
-	char* m_private_key_file;	
+	char* m_private_key_file;
+
+	bool m_hadAuthFailure;
+	bool m_checkSpotNext;
 };    
   
 #endif

@@ -66,6 +66,10 @@ TransThreadHashTable *FileTransfer::TransThreadTable = NULL;
 int FileTransfer::CommandsRegistered = FALSE;
 int FileTransfer::SequenceNum = 0;
 int FileTransfer::ReaperId = -1;
+bool FileTransfer::ServerShouldBlock = true;
+
+const int FINAL_UPDATE_XFER_PIPE_CMD = 1;
+const int IN_PROGRESS_UPDATE_XFER_PIPE_CMD = 0;
 
 class FileTransferItem {
 public:
@@ -157,8 +161,11 @@ FileTransfer::FileTransfer()
 	TransferStart = 0;
 	uploadStartTime = uploadEndTime = downloadStartTime = downloadEndTime = (time_t)-1;
 	ClientCallback = 0;
+	ClientCallbackCpp = 0;
 	ClientCallbackClass = NULL;
+	ClientCallbackWantsStatusUpdates = false;
 	TransferPipe[0] = TransferPipe[1] = -1;
+	registered_xfer_pipe = false;
 	bytesSent = 0.0;
 	bytesRcvd = 0.0;
 	m_final_transfer_flag = FALSE;
@@ -175,6 +182,8 @@ FileTransfer::FileTransfer()
 	m_sec_session_id = NULL;
 	I_support_filetransfer_plugins = false;
 	plugin_table = NULL;
+	MaxUploadBytes = -1;  // no limit by default
+	MaxDownloadBytes = -1;
 }
 
 FileTransfer::~FileTransfer()
@@ -182,12 +191,16 @@ FileTransfer::~FileTransfer()
 	if (daemonCore && ActiveTransferTid >= 0) {
 		dprintf(D_ALWAYS, "FileTransfer object destructor called during "
 				"active transfer.  Cancelling transfer.\n");
-		daemonCore->Kill_Thread(ActiveTransferTid);
-		TransThreadTable->remove(ActiveTransferTid);
-		ActiveTransferTid = -1;
+		abortActiveTransfer();
 	}
-	if (TransferPipe[0] >= 0) close(TransferPipe[0]);
-	if (TransferPipe[1] >= 0) close(TransferPipe[1]);
+	if (TransferPipe[0] >= 0) {
+		if( registered_xfer_pipe ) {
+			registered_xfer_pipe = false;
+			daemonCore->Cancel_Pipe(TransferPipe[0]);
+		}
+		daemonCore->Close_Pipe(TransferPipe[0]);
+	}
+	if (TransferPipe[1] >= 0) daemonCore->Close_Pipe(TransferPipe[1]);
 	if (Iwd) free(Iwd);
 	if (ExecFile) free(ExecFile);
 	if (UserLogFile) free(UserLogFile);
@@ -215,23 +228,13 @@ FileTransfer::~FileTransfer()
 		delete last_download_catalog;
 	}
 	if (TransSock) free(TransSock);
-	if (TransKey) {
-		// remove our key from the hash table
-		if ( TranskeyTable ) {
-			MyString key(TransKey);
-			TranskeyTable->remove(key);
-			if ( TranskeyTable->getNumElements() == 0 ) {
-				// if hash table is empty, delete table as well
-				delete TranskeyTable;
-				TranskeyTable = NULL;
-				// delete our Thread table as well, which should be empty now
-				delete TransThreadTable;
-				TransThreadTable = NULL;
-			}
-		}		
-		// and free the key as well
-		free(TransKey);
-	}	
+	stopServer();
+	// Do not delete the TransThreadTable. There may be other FileTransfer
+	// objects out there planning to use it.
+	//if( TransThreadTable && TransThreadTable->getNumElements() == 0 ) {
+	//	delete TransThreadTable;
+	//	TransThreadTable = NULL;
+	//}
 #ifdef WIN32
 	if (perm_obj) delete perm_obj;
 #endif
@@ -376,7 +379,7 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 	int Proc = 0;
 	Ad->LookupInteger(ATTR_CLUSTER_ID, Cluster);
 	Ad->LookupInteger(ATTR_PROC_ID, Proc);
-	m_jobid.sprintf("%d.%d",Cluster,Proc);
+	m_jobid.formatstr("%d.%d",Cluster,Proc);
 	if ( IsServer() && Spool ) {
 
 		SpoolSpace = gen_ckpt_name(Spool,Cluster,Proc,0);
@@ -384,7 +387,7 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 		sprintf(TmpSpoolSpace,"%s.tmp",SpoolSpace);
 	}
 
-	if ( ((IsServer() && !simple_init) || (IsClient() && simple_init)) && 
+	if ( (IsServer() || (IsClient() && simple_init)) && 
 		 (Ad->LookupString(ATTR_JOB_CMD, buf, sizeof(buf)) == 1) ) 
 	{
 		// stash the executable name for comparison later, so
@@ -429,6 +432,8 @@ FileTransfer::SimpleInit(ClassAd *Ad, bool want_check_perms, bool is_server,
 		if ( xferExec && !InputFiles->file_contains(ExecFile) ) {
 			InputFiles->append(ExecFile);	
 		}	
+	} else if ( IsClient() && !simple_init ) {
+		ExecFile = strdup( CONDOR_EXEC );
 	}
 
 	// Set OutputFiles to be ATTR_SPOOLED_OUTPUT_FILES if specified, otherwise
@@ -742,7 +747,7 @@ FileTransfer::Init( ClassAd *Ad, bool want_check_perms, priv_state priv,
 				// if filesize is -1, it's a special flag meaning to compare
 				// the file in the old way, i.e. only checking if it is newer
 				// than the stored spool_date.
-				if((filesize==-1)) {
+				if(filesize==-1) {
 					if(spool_space.GetModifyTime() <= mod_time) {
 						dprintf( D_FULLDEBUG,
 					 		"Not including file %s, t: %ld<=%ld, s: N/A\n",
@@ -852,15 +857,30 @@ FileTransfer::DownloadFiles(bool blocking)
 		if ( !d.connectSock(&sock,0) ) {
 			dprintf( D_ALWAYS, "FileTransfer: Unable to connect to server "
 					 "%s\n", TransSock );
+			Info.success = 0;
+			Info.in_progress = false;
+			formatstr( Info.error_desc, "FileTransfer: Unable to connecto to server %s",
+					 TransSock );
 			return FALSE;
 		}
 
-		d.startCommand(FILETRANS_UPLOAD, &sock, 0, NULL, NULL, false, m_sec_session_id);
+		CondorError err_stack;
+		if ( !d.startCommand(FILETRANS_UPLOAD, &sock, 0, &err_stack, NULL, false, m_sec_session_id) ) {
+			Info.success = 0;
+			Info.in_progress = 0;
+			formatstr( Info.error_desc, "FileTransfer: Unable to start "
+					   "transfer with server %s: %s", TransSock,
+					   err_stack.getFullText().c_str() );
+		}
 
 		sock.encode();
 
 		if ( !sock.put_secret(TransKey) ||
 			!sock.end_of_message() ) {
+			Info.success = 0;
+			Info.in_progress = false;
+			formatstr( Info.error_desc, "FileTransfer: Unable to start transfer with server %s",
+					 TransSock );
 			return 0;
 		}
 
@@ -1021,8 +1041,8 @@ FileTransfer::ComputeFilesToSend()
 			}
 			else {
 				dprintf( D_FULLDEBUG,
-						 "Skipping file %s, t: %"PRIi64"==%"PRIi64
-						 ", s: %"PRIi64"==%"PRIi64"\n",
+						 "Skipping file %s, t: %" PRIi64"==%" PRIi64
+						 ", s: %" PRIi64"==%" PRIi64"\n",
 						 f,
 						 (PRIi64_t)dir.GetModifyTime(),
 						 (PRIi64_t)modification_time,
@@ -1199,15 +1219,30 @@ FileTransfer::UploadFiles(bool blocking, bool final_transfer)
 		if ( !d.connectSock(&sock,0) ) {
 			dprintf( D_ALWAYS, "FileTransfer: Unable to connect to server "
 					 "%s\n", TransSock );
+			Info.success = 0;
+			Info.in_progress = false;
+			formatstr( Info.error_desc, "FileTransfer: Unable to connecto to server %s",
+					 TransSock );
 			return FALSE;
 		}
 
-		d.startCommand(FILETRANS_DOWNLOAD, &sock, clientSockTimeout, NULL, NULL, false, m_sec_session_id);
+		CondorError err_stack;
+		if ( !d.startCommand(FILETRANS_DOWNLOAD, &sock, clientSockTimeout, &err_stack, NULL, false, m_sec_session_id) ) {
+			Info.success = 0;
+			Info.in_progress = 0;
+			formatstr( Info.error_desc, "FileTransfer: Unable to start "
+					   "transfer with server %s: %s", TransSock,
+					   err_stack.getFullText().c_str() );
+		}
 
 		sock.encode();
 
 		if ( !sock.put_secret(TransKey) ||
 			!sock.end_of_message() ) {
+			Info.success = 0;
+			Info.in_progress = false;
+			formatstr( Info.error_desc, "FileTransfer: Unable to start transfer with server %s",
+					 TransSock );
 			return 0;
 		}
 
@@ -1295,11 +1330,11 @@ FileTransfer::HandleCommands(Service *, int command, Stream *s)
 			transobject->FilesToSend = transobject->InputFiles;
 			transobject->EncryptFiles = transobject->EncryptInputFiles;
 			transobject->DontEncryptFiles = transobject->DontEncryptInputFiles;
-			transobject->Upload(sock,true);		// blocking = true for now...
+			transobject->Upload(sock,ServerShouldBlock);
 			}
 			break;
 		case FILETRANS_DOWNLOAD:
-			transobject->Download(sock,true);	// blocking = true for now...
+			transobject->Download(sock,ServerShouldBlock);
 			break;
 		default:
 			dprintf(D_ALWAYS,
@@ -1314,12 +1349,19 @@ FileTransfer::HandleCommands(Service *, int command, Stream *s)
 }
 
 
+bool
+FileTransfer::SetServerShouldBlock( bool block )
+{
+	bool old_value = ServerShouldBlock;
+	ServerShouldBlock = block;
+	return old_value;
+}
+
 int
 FileTransfer::Reaper(Service *, int pid, int exit_status)
 {
 	FileTransfer *transobject;
-	bool read_failed = false;
-	if ( TransThreadTable->lookup(pid,transobject) < 0) {
+	if (!TransThreadTable || TransThreadTable->lookup(pid,transobject) < 0) {
 		dprintf(D_ALWAYS, "unknown pid %d in FileTransfer::Reaper!\n", pid);
 		return FALSE;
 	}
@@ -1331,8 +1373,11 @@ FileTransfer::Reaper(Service *, int pid, int exit_status)
 	if( WIFSIGNALED(exit_status) ) {
 		transobject->Info.success = false;
 		transobject->Info.try_again = true;
-		transobject->Info.error_desc.sprintf("File transfer failed (killed by signal=%d)", WTERMSIG(exit_status));
-		read_failed = true; // do not try to read from the pipe
+		transobject->Info.error_desc.formatstr("File transfer failed (killed by signal=%d)", WTERMSIG(exit_status));
+		if( transobject->registered_xfer_pipe ) {
+			transobject->registered_xfer_pipe = false;
+			daemonCore->Cancel_Pipe(transobject->TransferPipe[0]);
+		}
 		dprintf( D_ALWAYS, "%s\n", transobject->Info.error_desc.Value() );
 	} else {
 		if( WEXITSTATUS(exit_status) != 0 ) {
@@ -1350,97 +1395,21 @@ FileTransfer::Reaper(Service *, int pid, int exit_status)
 		// We don't do this until this late stage in the game, because
 		// in windows everything currently happens in the main thread.
 	if( transobject->TransferPipe[1] != -1 ) {
-		close(transobject->TransferPipe[1]);
+		daemonCore->Close_Pipe(transobject->TransferPipe[1]);
 		transobject->TransferPipe[1] = -1;
 	}
 
-	int n;
-
-	if(!read_failed) {
-		n = read( transobject->TransferPipe[0],
-				  (char *)&transobject->Info.bytes,
-				  sizeof( filesize_t) );
-		if(n != sizeof( filesize_t )) read_failed = true;
+		// if we haven't already read the final status update, do it now
+	if( transobject->registered_xfer_pipe ) {
+		transobject->ReadTransferPipeMsg();
 	}
 
-	if(!read_failed) {
-		n = read( transobject->TransferPipe[0],
-				  (char *)&transobject->Info.try_again,
-				  sizeof( bool ) );
-		if(n != sizeof( bool )) read_failed = true;
+	if( transobject->registered_xfer_pipe ) {
+		transobject->registered_xfer_pipe = false;
+		daemonCore->Cancel_Pipe(transobject->TransferPipe[0]);
 	}
 
-	
-	if(!read_failed) {
-		n = read( transobject->TransferPipe[0],
-				  (char *)&transobject->Info.hold_code,
-				  sizeof( int ) );
-		if(n != sizeof( int )) read_failed = true;
-	}
-
-	if(!read_failed) {
-		n = read( transobject->TransferPipe[0],
-				  (char *)&transobject->Info.hold_subcode,
-				  sizeof( int ) );
-		if(n != sizeof( int )) read_failed = true;
-	}
-
-	int error_len = 0;
-	if(!read_failed) {
-		n = read( transobject->TransferPipe[0],
-				  (char *)&error_len,
-				  sizeof( int ) );
-		if(n != sizeof( int )) read_failed = true;
-	}
-
-	if(!read_failed && error_len) {
-		char *error_buf = new char[error_len];
-		ASSERT(error_buf);
-
-		n = read( transobject->TransferPipe[0],
-			  error_buf,
-			  error_len );
-		if(n != error_len) read_failed = true;
-		if(!read_failed) {
-			transobject->Info.error_desc = error_buf;
-		}
-
-		delete [] error_buf;
-	}
-
-	int spooled_files_len = 0;
-	if(!read_failed) {
-		n = read( transobject->TransferPipe[0],
-				  (char *)&spooled_files_len,
-				  sizeof( int ) );
-		if(n != sizeof( int )) read_failed = true;
-	}
-
-	if(!read_failed && spooled_files_len) {
-		char *spooled_files_buf = new char[spooled_files_len];
-		ASSERT(spooled_files_buf);
-
-		n = read( transobject->TransferPipe[0],
-			  spooled_files_buf,
-			  spooled_files_len );
-		if(n != spooled_files_len) read_failed = true;
-		if(!read_failed) {
-			transobject->Info.spooled_files = spooled_files_buf;
-		}
-
-		delete [] spooled_files_buf;
-	}
-
-	if(read_failed) {
-		transobject->Info.success = false;
-		transobject->Info.try_again = true;
-		if( transobject->Info.error_desc.IsEmpty() ) {
-			transobject->Info.error_desc.sprintf("Failed to read status report from file transfer pipe (errno %d): %s",errno,strerror(errno));
-			dprintf(D_ALWAYS,"%s\n",transobject->Info.error_desc.Value());
-		}
-	}
-
-	close(transobject->TransferPipe[0]);
+	daemonCore->Close_Pipe(transobject->TransferPipe[0]);
 	transobject->TransferPipe[0] = -1;
 
 	// If Download was successful (it returns 1 on success) and
@@ -1459,13 +1428,176 @@ FileTransfer::Reaper(Service *, int pid, int exit_status)
 		sleep(1);
 	}
 
-	if (transobject->ClientCallback) {
-		dprintf(D_FULLDEBUG,
-				"Calling client FileTransfer handler function.\n");
-		((transobject->ClientCallbackClass)->*(transobject->ClientCallback))(transobject);
-	}
+	transobject->callClientCallback();
 
 	return TRUE;
+}
+
+void
+FileTransfer::callClientCallback()
+{
+	if (ClientCallback) {
+		dprintf(D_FULLDEBUG,
+				"Calling client FileTransfer handler function.\n");
+		(*(ClientCallback))(this);
+	}
+	if (ClientCallbackCpp) {
+		dprintf(D_FULLDEBUG,
+				"Calling client FileTransfer handler function.\n");
+		((ClientCallbackClass)->*(ClientCallbackCpp))(this);
+	}
+}
+
+bool
+FileTransfer::ReadTransferPipeMsg()
+{
+	int n;
+
+	char cmd=0;
+	n = daemonCore->Read_Pipe( TransferPipe[0], &cmd, sizeof(cmd) );
+	if(n != sizeof( cmd )) goto read_failed;
+
+	if( cmd == IN_PROGRESS_UPDATE_XFER_PIPE_CMD ) {
+		int i=XFER_STATUS_UNKNOWN;
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&i,
+								   sizeof( int ) );
+		if(n != sizeof( int )) goto read_failed;
+		Info.xfer_status = (FileTransferStatus)i;
+
+		if( ClientCallbackWantsStatusUpdates ) {
+			callClientCallback();
+		}
+	}
+	else if( cmd == FINAL_UPDATE_XFER_PIPE_CMD ) {
+		Info.xfer_status = XFER_STATUS_DONE;
+
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&Info.bytes,
+								   sizeof( filesize_t) );
+		if(n != sizeof( filesize_t )) goto read_failed;
+		if( Info.type == DownloadFilesType ) {
+			bytesRcvd += Info.bytes;
+		}
+		else {
+			bytesSent += Info.bytes;
+		}
+
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&Info.try_again,
+								   sizeof( bool ) );
+		if(n != sizeof( bool )) goto read_failed;
+
+	
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&Info.hold_code,
+								   sizeof( int ) );
+		if(n != sizeof( int )) goto read_failed;
+
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&Info.hold_subcode,
+								   sizeof( int ) );
+		if(n != sizeof( int )) goto read_failed;
+
+		int error_len = 0;
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&error_len,
+								   sizeof( int ) );
+		if(n != sizeof( int )) goto read_failed;
+
+		if(error_len) {
+			char *error_buf = new char[error_len];
+			ASSERT(error_buf);
+
+			n = daemonCore->Read_Pipe( TransferPipe[0],
+									   error_buf,
+									   error_len );
+			if(n != error_len) goto read_failed;
+			Info.error_desc = error_buf;
+
+			delete [] error_buf;
+		}
+
+		int spooled_files_len = 0;
+		n = daemonCore->Read_Pipe( TransferPipe[0],
+								   (char *)&spooled_files_len,
+								   sizeof( int ) );
+		if(n != sizeof( int )) goto read_failed;
+
+		if(spooled_files_len) {
+			char *spooled_files_buf = new char[spooled_files_len];
+			ASSERT(spooled_files_buf);
+
+			n = daemonCore->Read_Pipe( TransferPipe[0],
+									   spooled_files_buf,
+									   spooled_files_len );
+			if(n != spooled_files_len) goto read_failed;
+			Info.spooled_files = spooled_files_buf;
+
+			delete [] spooled_files_buf;
+		}
+
+		if( registered_xfer_pipe ) {
+			registered_xfer_pipe = false;
+			daemonCore->Cancel_Pipe(TransferPipe[0]);
+		}
+	}
+	else {
+		EXCEPT("Invalid file transfer pipe command %d\n",cmd);
+	}
+
+	return true;
+
+ read_failed:
+	Info.success = false;
+	Info.try_again = true;
+	if( Info.error_desc.IsEmpty() ) {
+		Info.error_desc.formatstr("Failed to read status report from file transfer pipe (errno %d): %s",errno,strerror(errno));
+		dprintf(D_ALWAYS,"%s\n",Info.error_desc.Value());
+	}
+	if( registered_xfer_pipe ) {
+		registered_xfer_pipe = false;
+		daemonCore->Cancel_Pipe(TransferPipe[0]);
+	}
+
+	return false;
+}
+
+void
+FileTransfer::UpdateXferStatus(FileTransferStatus status)
+{
+	if( Info.xfer_status != status ) {
+		bool write_failed = false;
+		if( TransferPipe[1] != -1 ) {
+			int n;
+			char cmd = IN_PROGRESS_UPDATE_XFER_PIPE_CMD;
+
+			n = daemonCore->Write_Pipe( TransferPipe[1],
+										&cmd,
+										sizeof(cmd) );
+			if(n != sizeof(cmd)) write_failed = true;
+
+			if(!write_failed) {
+				int i = status;
+				n = daemonCore->Write_Pipe( TransferPipe[1],
+											(char *)&i,
+											sizeof(int) );
+				if(n != sizeof(int)) write_failed = true;
+			}
+		}
+
+		if( !write_failed ) {
+			Info.xfer_status = status;
+		}
+	}
+}
+
+int
+FileTransfer::TransferPipeHandler(int p)
+{
+	ASSERT( p == TransferPipe[0] );
+
+	return ReadTransferPipeMsg();
 }
 
 int
@@ -1481,6 +1613,7 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 	Info.type = DownloadFilesType;
 	Info.success = true;
 	Info.in_progress = true;
+	Info.xfer_status = XFER_STATUS_UNKNOWN;
 	TransferStart = time(NULL);
 
 	if (blocking) {
@@ -1496,10 +1629,22 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 		ASSERT( daemonCore );
 
 		// make a pipe to communicate with our thread
-		if (pipe(TransferPipe) < 0) {
-			dprintf(D_ALWAYS, "pipe failed with errno %d in "
-					"FileTransfer::Upload\n", errno);
+		if (!daemonCore->Create_Pipe(TransferPipe,true)) {
+			dprintf(D_ALWAYS, "Create_Pipe failed in "
+					"FileTransfer::Upload\n");
 			return FALSE;
+		}
+
+		if (-1 == daemonCore->Register_Pipe(TransferPipe[0],
+											"Download Results",
+											(PipeHandlercpp)&FileTransfer::TransferPipeHandler,
+											"TransferPipeHandler",
+											this)) {
+			dprintf(D_ALWAYS,"FileTransfer::Upload() failed to register pipe.\n");
+			return FALSE;
+		}
+		else {
+			registered_xfer_pipe = true;
 		}
 
 		download_info *info = (download_info *)malloc(sizeof(download_info));
@@ -1515,6 +1660,9 @@ FileTransfer::Download(ReliSock *s, bool blocking)
 			free(info);
 			return FALSE;
 		}
+		dprintf(D_FULLDEBUG,
+				"FileTransfer: created download transfer process with id %d\n",
+				ActiveTransferTid);
 		// daemonCore will free(info) when the thread exits
 		TransThreadTable->insert(ActiveTransferTid, this);
 
@@ -1575,6 +1723,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 	int rc;
 	int reply = 0;
 	filesize_t bytes=0;
+	filesize_t peer_max_transfer_bytes=0;
 	MyString filename;;
 	MyString fullname;
 	char *tmp_buf = NULL;
@@ -1686,7 +1835,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 			hold_code = CONDOR_HOLD_CODE_DownloadFileError;
 			hold_subcode = EPERM;
 
-			error_buf.sprintf_cat(
+			error_buf.formatstr_cat(
 				" Attempt to write to illegal sandbox path: %s",
 				filename.Value());
 
@@ -1705,23 +1854,42 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 		}
 		else if( final_transfer || IsClient() ) {
 			MyString remap_filename;
-			if(filename_remap_find(download_filename_remaps.Value(),filename.Value(),remap_filename)) {
+			int res = filename_remap_find(download_filename_remaps.Value(),filename.Value(),remap_filename,0);
+			dprintf(D_FULLDEBUG, "REMAP: res is %i -> %s !\n", res, remap_filename.Value());
+			if (res == -1) {
+				// there was loop in the file transfer remaps, so set a good
+				// hold reason
+				error_buf.formatstr("remaps resulted in a cycle: %s", remap_filename.Value());
+				dprintf(D_ALWAYS,"REMAP: DoDownload: %s\n",error_buf.Value());
+				download_success = false;
+				try_again = false;
+				hold_code = CONDOR_HOLD_CODE_DownloadFileError;
+				hold_subcode = EPERM;
+
+					// In order for the wire protocol to remain in a well
+					// defined state, we must consume the rest of the
+					// file transmission without writing.
+				fullname = NULL_FILE;
+			}
+			else if(res) {
+				// legit remap was found
 				if(!is_relative_to_cwd(remap_filename.Value())) {
 					fullname = remap_filename;
 				}
 				else {
-					fullname.sprintf("%s%c%s",Iwd,DIR_DELIM_CHAR,remap_filename.Value());
+					fullname.formatstr("%s%c%s",Iwd,DIR_DELIM_CHAR,remap_filename.Value());
 				}
 				dprintf(D_FULLDEBUG,"Remapped downloaded file from %s to %s\n",filename.Value(),remap_filename.Value());
 			}
 			else {
-				fullname.sprintf("%s%c%s",Iwd,DIR_DELIM_CHAR,filename.Value());
+				// no remap found
+				fullname.formatstr("%s%c%s",Iwd,DIR_DELIM_CHAR,filename.Value());
 			}
 #ifdef WIN32
 			// check for write permission on this file, if we are supposed to check
 			if ( perm_obj && (perm_obj->write_access(fullname.Value()) != 1) ) {
 				// we do _not_ have permission to write this file!!
-				error_buf.sprintf("Permission denied to write file %s!",
+				error_buf.formatstr("Permission denied to write file %s!",
 				                   fullname.Value());
 				dprintf(D_ALWAYS,"DoDownload: %s\n",error_buf.Value());
 				download_success = false;
@@ -1736,7 +1904,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 			}
 #endif
 		} else {
-			fullname.sprintf("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,filename.Value());
+			fullname.formatstr("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,filename.Value());
 		}
 
 		if( PeerDoesGoAhead ) {
@@ -1761,7 +1929,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 				// peer to tell is that it is ready to send.
 			if( !peer_goes_ahead_always ) {
 
-				if( !ReceiveTransferGoAhead(s,fullname.Value(),true,peer_goes_ahead_always) ) {
+				if( !ReceiveTransferGoAhead(s,fullname.Value(),true,peer_goes_ahead_always,peer_max_transfer_bytes) ) {
 					dprintf(D_FULLDEBUG, "DoDownload: exiting at %d\n",__LINE__);
 					return_and_resetpriv( -1 );
 				}
@@ -1769,6 +1937,33 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 
 			s->decode();
 		}
+
+		UpdateXferStatus(XFER_STATUS_ACTIVE);
+
+		filesize_t this_file_max_bytes = -1;
+		filesize_t max_bytes_slack = 65535;
+		if( MaxDownloadBytes < 0 ) {
+			this_file_max_bytes = -1; // no limit
+		}
+		else if( MaxDownloadBytes + max_bytes_slack >= *total_bytes ) {
+
+				// We have told the sender our limit, and a
+				// well-behaved sender will not send more than that.
+				// We give the sender a little slack, because there
+				// may be minor differences in how the sender and
+				// receiver account for the size of some things (like
+				// proxies and what-not).  It is best if the sender
+				// reaches the limit first, because that path has
+				// better error handling.  If instead the receiver
+				// hits its limit first, the connection is closed, and
+				// the sender will not understand why.
+
+			this_file_max_bytes = MaxDownloadBytes + max_bytes_slack - *total_bytes;
+		}
+		else {
+			this_file_max_bytes = 0;
+		}
+
 
 		// On WinNT and apparently, some Unix, too, even doing an
 		// fsync on the file does not get rid of the lazy-write
@@ -1790,7 +1985,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 			//
 			// receive the classad
 			ClassAd file_info;
-			if (!file_info.initFromStream(*s)) {
+			if (!getClassAd(s, file_info)) {
 				dprintf(D_FULLDEBUG,"DoDownload: exiting at %d\n",__LINE__);
 				return_and_resetpriv( -1 );
 			}
@@ -1842,7 +2037,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 					// that hapens further down
 					rc = 0; 
 
-					error_buf.sprintf(
+					error_buf.formatstr(
 						"%s at %s failed due to remote transfer hook error: %s",
 						get_mySubSystem()->getName(),
 						s->my_ip_str(),fullname.Value());
@@ -1859,7 +2054,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 			} else {
 				// unrecongized subcommand
 				dprintf(D_ALWAYS, "FILETRANSFER: unrecognized subcommand %i! skipping!\n", subcommand);
-				file_info.dPrint(D_FULLDEBUG);
+				dPrintAd(D_FULLDEBUG, file_info);
 				
 				rc = 0;
 			}
@@ -1924,7 +2119,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 						rc = 0;
 					}
 					else {
-						remove(fullname.Value());
+						IGNORE_RETURN remove(fullname.Value());
 						rc = mkdir(fullname.Value(),file_mode);
 					}
 				}
@@ -1934,7 +2129,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 					rc = 0; 
 
 					int the_error = errno;
-					error_buf.sprintf(
+					error_buf.formatstr(
 						"%s at %s failed to create directory %s: %s (errno %d)",
 						get_mySubSystem()->getName(),
 						s->my_ip_str(),fullname.Value(),
@@ -1951,16 +2146,16 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 				}
 			}
 		} else if ( TransferFilePermissions ) {
-			rc = s->get_file_with_permissions( &bytes, fullname.Value() );
+			rc = s->get_file_with_permissions( &bytes, fullname.Value(), false, this_file_max_bytes, &xfer_queue );
 		} else {
-			rc = s->get_file( &bytes, fullname.Value() );
+			rc = s->get_file( &bytes, fullname.Value(), false, false, this_file_max_bytes, &xfer_queue );
 		}
 
 		elapsed = time(NULL)-start;
 
 		if( rc < 0 ) {
 			int the_error = errno;
-			error_buf.sprintf("%s at %s failed to receive file %s",
+			error_buf.formatstr("%s at %s failed to receive file %s",
 			                  get_mySubSystem()->getName(),
 							  s->my_ip_str(),fullname.Value());
 			download_success = false;
@@ -1971,10 +2166,10 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 				// defined state
 
 				if (rc == GET_FILE_PLUGIN_FAILED) {
-					error_buf.sprintf_cat(": %s", errstack.getFullText());
+					error_buf.formatstr_cat(": %s", errstack.getFullText().c_str());
 				} else {
 					error_buf.replaceString("receive","write to");
-					error_buf.sprintf_cat(": (errno %d) %s",the_error,strerror(the_error));
+					error_buf.formatstr_cat(": (errno %d) %s",the_error,strerror(the_error));
 				}
 
 				// Since there is a well-defined errno describing what just
@@ -1997,6 +2192,16 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 				// well defined in this case, so we can't report a specific
 				// error message.
 				try_again = true;
+				hold_code = CONDOR_HOLD_CODE_DownloadFileError;
+				hold_subcode = the_error;
+
+				if( rc == GET_FILE_MAX_BYTES_EXCEEDED ) {
+					try_again = false;
+					error_buf.formatstr_cat(": max total download bytes exceeded (max=%ld MB)",
+											(long int)(MaxDownloadBytes/1024/1024));
+					hold_code = CONDOR_HOLD_CODE_MaxTransferOutputSizeExceeded;
+					hold_subcode = 0;
+				}
 
 				dprintf(D_ALWAYS,"DoDownload: %s\n",error_buf.Value());
 
@@ -2010,12 +2215,39 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 			}
 		}
 
+		if ( ExecFile && !file_strcmp( condor_basename( ExecFile ), filename.Value() ) ) {
+				// We're receiving the executable, make sure execute
+				// bit is set
+				// TODO How should we modify the permisions of the
+				//   executable? Adding any group or world permissions
+				//   seems wrong. For now, behave the same way as the
+				//   starter.
+#if 0
+			struct stat stat_buf;
+			if ( stat( fullname.Value(), &stat_buf ) < 0 ) {
+				dprintf( D_ALWAYS, "Failed to stat executable %s, errno=%d (%s)\n",
+						 fullname.Value(), errno, strerror(errno) );
+			} else if ( ! (stat_buf.st_mode & S_IXUSR) ) {
+				stat_buf.st_mode |= S_IXUSR;
+				if ( chmod( fullname.Value(), stat_buf.st_mode ) < 0 ) {
+					dprintf( D_ALWAYS, "Failed to set execute bit on %s, errno=%d (%s)\n",
+							 fullname.Value(), errno, strerror(errno) );
+				}
+			}
+#else
+			if ( chmod( fullname.Value(), 0755 ) < 0 ) {
+				dprintf( D_ALWAYS, "Failed to set execute bit on %s, errno=%d (%s)\n",
+						 fullname.Value(), errno, strerror(errno) );
+			}
+#endif
+		}
+
 		if ( want_fsync ) {
 			struct utimbuf timewrap;
 
 			time_t current_time = time(NULL);
 			timewrap.actime = current_time;		// set access time to now
-			timewrap.modtime = current_time - 180;	// set modify time to 3 min ago
+			timewrap.modtime = current_time;	// set modify time to now
 
 			utime(fullname.Value(),&timewrap);
 		}
@@ -2075,9 +2307,9 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 		}
 
 		MyString download_error_buf;
-		download_error_buf.sprintf("%s failed to receive file(s) from %s",
+		download_error_buf.formatstr("%s failed to receive file(s) from %s",
 						  get_mySubSystem()->getName(),peer_ip_str);
-		error_buf.sprintf("%s; %s",
+		error_buf.formatstr("%s; %s",
 						  upload_error_buf.Value(),
 						  download_error_buf.Value());
 		dprintf(D_ALWAYS,"DoDownload: %s\n",error_buf.Value());
@@ -2108,7 +2340,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 		// we just stashed all the files in the TmpSpoolSpace.
 		// write out the commit file.
 
-		buf.sprintf("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,COMMIT_FILENAME);
+		buf.formatstr("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,COMMIT_FILENAME);
 #if defined(WIN32)
 		if ((fd = safe_open_wrapper_follow(buf.Value(), O_WRONLY | O_CREAT | O_TRUNC | 
 			_O_BINARY | _O_SEQUENTIAL, 0644)) < 0)
@@ -2147,7 +2379,7 @@ FileTransfer::GetTransferAck(Stream *s,bool &success,bool &try_again,int &hold_c
 	s->decode();
 
 	ClassAd ad;
-	if(!ad.initFromStream(*s) || !s->end_of_message()) {
+	if(!getClassAd(s, ad) || !s->end_of_message()) {
 		char const *ip = NULL;
 		if(s->type() == Sock::reli_sock) {
 			ip = ((ReliSock *)s)->get_sinful_peer();
@@ -2161,13 +2393,13 @@ FileTransfer::GetTransferAck(Stream *s,bool &success,bool &try_again,int &hold_c
 	int result = -1;
 	if(!ad.LookupInteger(ATTR_RESULT,result)) {
 		MyString ad_str;
-		ad.sPrint(ad_str);
+		sPrintAd(ad_str, ad);
 		dprintf(D_ALWAYS,"Download acknowledgment missing attribute: %s.  Full classad: [\n%s]\n",ATTR_RESULT,ad_str.Value());
 		success = false;
 		try_again = false;
 		hold_code = CONDOR_HOLD_CODE_InvalidTransferAck;
 		hold_subcode = 0;
-		error_desc.sprintf("Download acknowledgment missing attribute: %s",ATTR_RESULT);
+		error_desc.formatstr("Download acknowledgment missing attribute: %s",ATTR_RESULT);
 		return;
 	}
 	if(result == 0) {
@@ -2240,7 +2472,7 @@ FileTransfer::SendTransferAck(Stream *s,bool success,bool try_again,int hold_cod
 		}
 	}
 	s->encode();
-	if(!ad.put(*s) || !s->end_of_message()) {
+	if(!putClassAd(s, ad) || !s->end_of_message()) {
 		char const *ip = NULL;
 		if(s->type() == Sock::reli_sock) {
 			ip = ((ReliSock *)s)->get_sinful_peer();
@@ -2275,12 +2507,12 @@ FileTransfer::CommitFiles()
 
 	Directory tmpspool( TmpSpoolSpace, desired_priv_state );
 
-	buf.sprintf("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,COMMIT_FILENAME);
+	buf.formatstr("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,COMMIT_FILENAME);
 	if ( access(buf.Value(),F_OK) >= 0 ) {
 		// the commit file exists, so commit the files.
 
 		MyString SwapSpoolSpace;
-		SwapSpoolSpace.sprintf("%s.swap",SpoolSpace);
+		SwapSpoolSpace.formatstr("%s.swap",SpoolSpace);
 		bool swap_dir_ready = SpooledJobFiles::createJobSwapSpoolDirectory(&jobAd,desired_priv_state);
 		if( !swap_dir_ready ) {
 			EXCEPT("Failed to create %s",SwapSpoolSpace.Value());
@@ -2290,9 +2522,9 @@ FileTransfer::CommitFiles()
 			// don't commit the commit file!
 			if ( file_strcmp(file,COMMIT_FILENAME) == MATCH )
 				continue;
-			buf.sprintf("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,file);
-			newbuf.sprintf("%s%c%s",SpoolSpace,DIR_DELIM_CHAR,file);
-			swapbuf.sprintf("%s%c%s",SwapSpoolSpace.Value(),DIR_DELIM_CHAR,file);
+			buf.formatstr("%s%c%s",TmpSpoolSpace,DIR_DELIM_CHAR,file);
+			newbuf.formatstr("%s%c%s",SpoolSpace,DIR_DELIM_CHAR,file);
+			swapbuf.formatstr("%s%c%s",SwapSpoolSpace.Value(),DIR_DELIM_CHAR,file);
 
 				// If the target name exists, move it into the swap
 				// directory.  This serves two purposes:
@@ -2336,6 +2568,7 @@ FileTransfer::Upload(ReliSock *s, bool blocking)
 	Info.type = UploadFilesType;
 	Info.success = true;
 	Info.in_progress = true;
+	Info.xfer_status = XFER_STATUS_UNKNOWN;
 	TransferStart = time(NULL);
 
 	if (blocking) {
@@ -2350,10 +2583,22 @@ FileTransfer::Upload(ReliSock *s, bool blocking)
 		ASSERT( daemonCore );
 
 		// make a pipe to communicate with our thread
-		if (pipe(TransferPipe) < 0) {
-			dprintf(D_ALWAYS, "pipe failed with errno %d in "
-					"FileTransfer::Upload\n", errno);
+		if (!daemonCore->Create_Pipe(TransferPipe,true)) {
+			dprintf(D_ALWAYS, "Create_Pipe failed in "
+					"FileTransfer::Upload\n");
 			return FALSE;
+		}
+
+		if (-1 == daemonCore->Register_Pipe(TransferPipe[0],
+											"Upload Results",
+											(PipeHandlercpp)&FileTransfer::TransferPipeHandler,
+											"TransferPipeHandler",
+											this)) {
+			dprintf(D_ALWAYS,"FileTransfer::Upload() failed to register pipe.\n");
+			return FALSE;
+		}
+		else {
+			registered_xfer_pipe = true;
 		}
 
 		upload_info *info = (upload_info *)malloc(sizeof(upload_info));
@@ -2368,6 +2613,9 @@ FileTransfer::Upload(ReliSock *s, bool blocking)
 			ActiveTransferTid = -1;
 			return FALSE;
 		}
+		dprintf(D_FULLDEBUG,
+				"FileTransfer: created upload transfer process with id %d\n",
+				ActiveTransferTid);
 		// daemonCore will free(info) when the thread exits
 		TransThreadTable->insert(ActiveTransferTid, this);
 	}
@@ -2382,25 +2630,34 @@ FileTransfer::WriteStatusToTransferPipe(filesize_t total_bytes)
 	bool write_failed = false;
 
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		char cmd = FINAL_UPDATE_XFER_PIPE_CMD;
+
+		n = daemonCore->Write_Pipe( TransferPipe[1],
+									&cmd,
+									sizeof(cmd) );
+		if(n != sizeof(cmd)) write_failed = true;
+	}
+
+	if(!write_failed) {
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   (char *)&total_bytes,
 				   sizeof(filesize_t) );
 		if(n != sizeof(filesize_t)) write_failed = true;
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   (char *)&Info.try_again,
 				   sizeof(bool) );
 		if(n != sizeof(bool)) write_failed = true;
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   (char *)&Info.hold_code,
 				   sizeof(int) );
 		if(n != sizeof(int)) write_failed = true;
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   (char *)&Info.hold_subcode,
 				   sizeof(int) );
 		if(n != sizeof(int)) write_failed = true;
@@ -2410,13 +2667,13 @@ FileTransfer::WriteStatusToTransferPipe(filesize_t total_bytes)
 		error_len++; //write the null too
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   (char *)&error_len,
 				   sizeof(int) );
 		if(n != sizeof(int)) write_failed = true;
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   Info.error_desc.Value(),
 				   error_len );
 		if(n != error_len) write_failed = true;
@@ -2427,13 +2684,13 @@ FileTransfer::WriteStatusToTransferPipe(filesize_t total_bytes)
 		spooled_files_len++; //write the null too
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   (char *)&spooled_files_len,
 				   sizeof(int) );
 		if(n != sizeof(int)) write_failed = true;
 	}
 	if(!write_failed) {
-		n = write( TransferPipe[1],
+		n = daemonCore->Write_Pipe( TransferPipe[1],
 				   Info.spooled_files.Value(),
 				   spooled_files_len );
 		if(n != spooled_files_len) write_failed = true;
@@ -2468,6 +2725,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 	int rc;
 	MyString fullname;
 	filesize_t bytes;
+	filesize_t peer_max_transfer_bytes = -1; // unlimited
 	bool is_the_executable;
 	bool upload_success = false;
 	bool do_download_ack = false;
@@ -2560,10 +2818,27 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			dprintf(D_FULLDEBUG, "DoUpload: sending %s as URL.\n", filename);
 		} else if( filename[0] != '/' && filename[0] != '\\' && filename[1] != ':' ){
 			// looks like a relative path
-			fullname.sprintf("%s%c%s",Iwd,DIR_DELIM_CHAR,filename);
+			fullname.formatstr("%s%c%s",Iwd,DIR_DELIM_CHAR,filename);
 		} else {
 			// looks like an unix absolute path or a windows path
 			fullname = filename;
+		}
+
+		MyString dest_filename;
+		if ( ExecFile && !simple_init && (file_strcmp(ExecFile,filename)==0 )) {
+			// this file is the job executable
+			is_the_executable = true;
+			dest_filename = CONDOR_EXEC;
+		} else {
+			// this file is _not_ the job executable
+			is_the_executable = false;
+
+			if( dest_dir && *dest_dir ) {
+				dest_filename.formatstr("%s%c",dest_dir,DIR_DELIM_CHAR);
+			}
+
+			// condor_basename works for URLs
+			dest_filename.formatstr_cat( "%s", condor_basename(filename) );
 		}
 
 		// check for read permission on this file, if we are supposed to check.
@@ -2576,7 +2851,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			(perm_obj->read_access(fullname.Value()) != 1) ) {
 			// we do _not_ have permission to read this file!!
 			upload_success = false;
-			error_desc.sprintf("error reading from %s: permission denied",fullname.Value());
+			error_desc.formatstr("error reading from %s: permission denied",fullname.Value());
 			do_upload_ack = true;    // tell receiver that we failed
 			do_download_ack = true;
 			try_again = false; // put job on hold
@@ -2707,23 +2982,6 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			s->set_crypto_mode(socket_default_crypto);
 		}
 
-		MyString dest_filename;
-		if ( ExecFile && !simple_init && (file_strcmp(ExecFile,filename)==0 )) {
-			// this file is the job executable
-			is_the_executable = true;
-			dest_filename = CONDOR_EXEC;
-		} else {
-			// this file is _not_ the job executable
-			is_the_executable = false;
-
-			if( dest_dir && *dest_dir ) {
-				dest_filename.sprintf("%s%c",dest_dir,DIR_DELIM_CHAR);
-			}
-
-			// condor_basename works for URLs
-			dest_filename.sprintf_cat( "%s", condor_basename(filename) );
-		}
-
 		// for command 999, this string must equal the Attribute "Filename" in
 		// the classad that follows.  it wouldn't really need to be sent here
 		// but is more wire-compatible with older versions if we do.
@@ -2745,7 +3003,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			if( !peer_goes_ahead_always ) {
 					// Now wait for our peer to tell us it is ok for us to
 					// go ahead and send data.
-				if( !ReceiveTransferGoAhead(s,fullname.Value(),false,peer_goes_ahead_always) ) {
+				if( !ReceiveTransferGoAhead(s,fullname.Value(),false,peer_goes_ahead_always,peer_max_transfer_bytes) ) {
 					dprintf(D_FULLDEBUG, "DoUpload: exiting at %d\n",__LINE__);
 					return_and_resetpriv( -1 );
 				}
@@ -2761,6 +3019,36 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			}
 
 			s->encode();
+		}
+
+		UpdateXferStatus(XFER_STATUS_ACTIVE);
+
+		filesize_t this_file_max_bytes = -1;
+		filesize_t effective_max_upload_bytes = MaxUploadBytes;
+		bool using_peer_max_transfer_bytes = false;
+		if( peer_max_transfer_bytes >= 0 && (peer_max_transfer_bytes < effective_max_upload_bytes || effective_max_upload_bytes < 0) ) {
+				// For superior error handling, it is best for the
+				// uploading side to know about the downloading side's
+				// max transfer byte limit.  This prevents the
+				// uploading side from trying to send more than the
+				// maximum, which would cause the downloading side to
+				// close the connection, which would cause the
+				// uploading side to assume there was a communication
+				// error rather than an intentional stop.
+			effective_max_upload_bytes = peer_max_transfer_bytes;
+			using_peer_max_transfer_bytes = true;
+			dprintf(D_FULLDEBUG,"DoUpload: changing maximum upload MB from %ld to %ld at request of peer.\n",
+					(long int)(effective_max_upload_bytes >= 0 ? effective_max_upload_bytes/1024/1024 : effective_max_upload_bytes),
+					(long int)(peer_max_transfer_bytes/1024/1024));
+		}
+		if( effective_max_upload_bytes < 0 ) {
+			this_file_max_bytes = -1; // no limit
+		}
+		else if( effective_max_upload_bytes >= *total_bytes ) {
+			this_file_max_bytes = effective_max_upload_bytes - *total_bytes;
+		}
+		else {
+			this_file_max_bytes = 0;
 		}
 
 		if ( file_command == 999) {
@@ -2808,14 +3096,14 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 
 				// it's all assembled, so send the ad using stream s.
 				// don't end the message, it's done below.
-				if(!file_info.put(*s)) {
+				if(!putClassAd(s, file_info)) {
 					dprintf(D_FULLDEBUG,"DoDownload: exiting at %d\n",__LINE__);
 					return_and_resetpriv( -1 );
 				}
 
 				// compute the size of what we sent
 				MyString junkbuf;
-				file_info.sPrint(junkbuf);
+				sPrintAd(junkbuf, file_info);
 				bytes = junkbuf.Length();
 
 			} else {
@@ -2878,15 +3166,19 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 				errno = EISDIR;
 			}
 		} else if ( TransferFilePermissions ) {
-			rc = s->put_file_with_permissions( &bytes, fullname.Value() );
+			rc = s->put_file_with_permissions( &bytes, fullname.Value(), this_file_max_bytes, &xfer_queue );
 		} else {
-			rc = s->put_file( &bytes, fullname.Value() );
+			rc = s->put_file( &bytes, fullname.Value(), 0, this_file_max_bytes, &xfer_queue );
 		}
 		if( rc < 0 ) {
 			int the_error = errno;
 			upload_success = false;
-			error_desc.sprintf("error sending %s",fullname.Value());
-			if((rc == PUT_FILE_OPEN_FAILED) || (rc == PUT_FILE_PLUGIN_FAILED)) {
+			error_desc.formatstr("error sending %s",fullname.Value());
+			if((rc == PUT_FILE_OPEN_FAILED) || (rc == PUT_FILE_PLUGIN_FAILED) || (rc == PUT_FILE_MAX_BYTES_EXCEEDED)) {
+				try_again = false; // put job on hold
+				hold_code = CONDOR_HOLD_CODE_UploadFileError;
+				hold_subcode = the_error;
+
 				if (rc == PUT_FILE_OPEN_FAILED) {
 					// In this case, put_file() has transmitted a zero-byte
 					// file in place of the failed one. This means there is an
@@ -2894,20 +3186,26 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 					// the while loop.
 
 					error_desc.replaceString("sending","reading from");
-					error_desc.sprintf_cat(": (errno %d) %s",the_error,strerror(the_error));
+					error_desc.formatstr_cat(": (errno %d) %s",the_error,strerror(the_error));
 					if( fail_because_mkdir_not_supported ) {
-						error_desc.sprintf_cat("; Remote condor version is too old to transfer directories.");
+						error_desc.formatstr_cat("; Remote condor version is too old to transfer directories.");
 					}
 					if( fail_because_symlink_not_supported ) {
-						error_desc.sprintf_cat("; Transfer of symlinks to directories is not supported.");
+						error_desc.formatstr_cat("; Transfer of symlinks to directories is not supported.");
 					}
+				} else if ( rc == PUT_FILE_MAX_BYTES_EXCEEDED ) {
+					StatInfo this_file_stat(fullname.Value());
+					filesize_t this_file_size = this_file_stat.GetFileSize();
+					error_desc.formatstr_cat(": max total %s bytes exceeded (max=%ld MB, this file=%ld MB)",
+											 using_peer_max_transfer_bytes ? "download" : "upload",
+											 (long int)(effective_max_upload_bytes/1024/1024),
+											 (long int)(this_file_size/1024/1024));
+					hold_code = using_peer_max_transfer_bytes ? CONDOR_HOLD_CODE_MaxTransferOutputSizeExceeded : CONDOR_HOLD_CODE_MaxTransferInputSizeExceeded;
+					the_error = 0;
 				} else {
 					// add on the error string from the errstack used
-					error_desc.sprintf_cat(": %s", errstack.getFullText());
+					error_desc.formatstr_cat(": %s", errstack.getFullText().c_str());
 				}
-				try_again = false; // put job on hold
-				hold_code = CONDOR_HOLD_CODE_UploadFileError;
-				hold_subcode = the_error;
 
 				// We'll continue trying to transfer the rest of the files
 				// in question, but we'll record the information we need from
@@ -3021,6 +3319,28 @@ FileTransfer::ObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool down
 	return result;
 }
 
+std::string
+FileTransfer::GetTransferQueueUser()
+{
+	std::string user;
+	ClassAd *job = GetJobAd();
+	if( job ) {
+		std::string user_expr;
+		if( param(user_expr,"TRANSFER_QUEUE_USER_EXPR","strcat(\"Owner_\",Owner)") ) {
+			ExprTree *user_tree = NULL;
+			if( ParseClassAdRvalExpr( user_expr.c_str(), user_tree ) == 0 && user_tree ) {
+				classad::Value val;
+				const char *str = NULL;
+				if ( EvalExprTree(user_tree,job,NULL,val) && val.IsStringValue(str) )
+				{
+					user = str;
+				}
+				delete user_tree;
+			}
+		}
+	}
+	return user;
+}
 
 bool
 FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool downloading,Stream *s,char const *full_fname,bool &go_ahead_always,bool &try_again,int &hold_code,int &hold_subcode,MyString &error_desc)
@@ -3033,9 +3353,11 @@ FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool do
 	const int alive_slop = 20;
 	int min_timeout = 300;
 
+	std::string queue_user = GetTransferQueueUser();
+
 	s->decode();
 	if( !s->get(alive_interval) || !s->end_of_message() ) {
-		error_desc.sprintf("ObtainAndSendTransferGoAhead: failed on alive_interval before GoAhead");
+		error_desc.formatstr("ObtainAndSendTransferGoAhead: failed on alive_interval before GoAhead");
 		return false;
 	}
 
@@ -3053,22 +3375,28 @@ FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool do
 		msg.Assign(ATTR_RESULT,go_ahead);
 
 		s->encode();
-		if( !msg.put(*s) || !s->end_of_message() ) {
-			error_desc.sprintf("Failed to send GoAhead new timeout message.");
+		if( !putClassAd(s, msg) || !s->end_of_message() ) {
+			error_desc.formatstr("Failed to send GoAhead new timeout message.");
 		}
 	}
 	ASSERT( timeout > alive_slop );
 	timeout -= alive_slop;
 
-	if( !xfer_queue.RequestTransferQueueSlot(downloading,full_fname,m_jobid.Value(),timeout,error_desc) )
+	if( !xfer_queue.RequestTransferQueueSlot(downloading,full_fname,m_jobid.Value(),queue_user.c_str(),timeout,error_desc) )
 	{
 		go_ahead = GO_AHEAD_FAILED;
 	}
 
+	bool first_poll = true;
 	while(1) {
 		if( go_ahead == GO_AHEAD_UNDEFINED ) {
 			timeout = alive_interval - (time(NULL) - last_alive) - alive_slop;
 			if( timeout < min_timeout ) timeout = min_timeout;
+			if( first_poll ) {
+					// Use a short timeout on the first time, so we quickly report
+					// that the transfer is queued, if it is.
+				timeout = 5;
+			}
 			bool pending = true;
 			if( xfer_queue.PollForTransferQueueSlot(timeout,pending,error_desc) )
 			{
@@ -3103,6 +3431,9 @@ FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool do
 
 		s->encode();
 		msg.Assign(ATTR_RESULT,go_ahead); // go ahead
+		if( downloading ) {
+			msg.Assign(ATTR_MAX_TRANSFER_BYTES,MaxDownloadBytes);
+		}
 		if( go_ahead < 0 ) {
 				// tell our peer what exactly went wrong
 			msg.Assign(ATTR_TRY_AGAIN,try_again);
@@ -3112,8 +3443,8 @@ FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool do
 				msg.Assign(ATTR_HOLD_REASON,error_desc.Value());
 			}
 		}
-		if( !msg.put(*s) || !s->end_of_message() ) {
-			error_desc.sprintf("Failed to send GoAhead message.");
+		if( !putClassAd(s, msg) || !s->end_of_message() ) {
+			error_desc.formatstr("Failed to send GoAhead message.");
 			try_again = true;
 			return false;
 		}
@@ -3122,6 +3453,8 @@ FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool do
 		if( go_ahead != GO_AHEAD_UNDEFINED ) {
 			break;
 		}
+
+		UpdateXferStatus(XFER_STATUS_QUEUED);
 	}
 
 	if( go_ahead == GO_AHEAD_ALWAYS ) {
@@ -3136,7 +3469,8 @@ FileTransfer::ReceiveTransferGoAhead(
 	Stream *s,
 	char const *fname,
 	bool downloading,
-	bool &go_ahead_always)
+	bool &go_ahead_always,
+	filesize_t &peer_max_transfer_bytes)
 {
 	bool try_again = true;
 	int hold_code = 0;
@@ -3161,7 +3495,7 @@ FileTransfer::ReceiveTransferGoAhead(
 	}
 	old_timeout = s->timeout(alive_interval + slop_time);
 
-	result = DoReceiveTransferGoAhead(s,fname,downloading,go_ahead_always,try_again,hold_code,hold_subcode,error_desc,alive_interval);
+	result = DoReceiveTransferGoAhead(s,fname,downloading,go_ahead_always,peer_max_transfer_bytes,try_again,hold_code,hold_subcode,error_desc,alive_interval);
 
 	s->timeout( old_timeout );
 
@@ -3181,6 +3515,7 @@ FileTransfer::DoReceiveTransferGoAhead(
 	char const *fname,
 	bool downloading,
 	bool &go_ahead_always,
+	filesize_t &peer_max_transfer_bytes,
 	bool &try_again,
 	int &hold_code,
 	int &hold_subcode,
@@ -3192,7 +3527,7 @@ FileTransfer::DoReceiveTransferGoAhead(
 	s->encode();
 
 	if( !s->put(alive_interval) || !s->end_of_message() ) {
-		error_desc.sprintf("DoReceiveTransferGoAhead: failed to send alive_interval");
+		error_desc.formatstr("DoReceiveTransferGoAhead: failed to send alive_interval");
 		return false;
 	}
 
@@ -3200,9 +3535,9 @@ FileTransfer::DoReceiveTransferGoAhead(
 
 	while(1) {
 		ClassAd msg;
-		if( !msg.initFromStream(*s) || !s->end_of_message() ) {
+		if( !getClassAd(s, msg) || !s->end_of_message() ) {
 			char const *ip = s->peer_ip_str();
-			error_desc.sprintf("Failed to receive GoAhead message from %s.",
+			error_desc.formatstr("Failed to receive GoAhead message from %s.",
 							   ip ? ip : "(null)");
 
 			return false;
@@ -3211,14 +3546,19 @@ FileTransfer::DoReceiveTransferGoAhead(
 		go_ahead = GO_AHEAD_UNDEFINED;
 		if(!msg.LookupInteger(ATTR_RESULT,go_ahead)) {
 			MyString msg_str;
-			msg.sPrint(msg_str);
-			error_desc.sprintf("GoAhead message missing attribute: %s.  "
+			sPrintAd(msg_str, msg);
+			error_desc.formatstr("GoAhead message missing attribute: %s.  "
 							   "Full classad: [\n%s]",
 							   ATTR_RESULT,msg_str.Value());
 			try_again = false;
 			hold_code = CONDOR_HOLD_CODE_InvalidTransferGoAhead;
 			hold_subcode = 1;
 			return false;
+		}
+
+		filesize_t mtb = peer_max_transfer_bytes;
+		if( msg.LookupInteger(ATTR_MAX_TRANSFER_BYTES,mtb) ) {
+			peer_max_transfer_bytes = mtb;
 		}
 
 		if( go_ahead == GO_AHEAD_UNDEFINED ) {
@@ -3237,6 +3577,7 @@ FileTransfer::DoReceiveTransferGoAhead(
 			}
 
 			dprintf(D_FULLDEBUG,"Still waiting for GoAhead for %s.\n",fname);
+			UpdateXferStatus(XFER_STATUS_QUEUED);
 			continue;
 		}
 
@@ -3310,12 +3651,12 @@ FileTransfer::ExitDoUpload(filesize_t *total_bytes, ReliSock *s, priv_state save
 
 			MyString error_desc_to_send;
 			if(!upload_success) {
-				error_desc_to_send.sprintf("%s at %s failed to send file(s) to %s",
+				error_desc_to_send.formatstr("%s at %s failed to send file(s) to %s",
 										   get_mySubSystem()->getName(),
 										   s->my_ip_str(),
 										   s->get_sinful_peer());
 				if(upload_error_desc) {
-					error_desc_to_send.sprintf_cat(": %s",upload_error_desc);
+					error_desc_to_send.formatstr_cat(": %s",upload_error_desc);
 				}
 			}
 			SendTransferAck(s,upload_success,try_again,hold_code,hold_subcode,
@@ -3343,15 +3684,15 @@ FileTransfer::ExitDoUpload(filesize_t *total_bytes, ReliSock *s, priv_state save
 			receiver_ip_str = "disconnected socket";
 		}
 
-		error_buf.sprintf("%s at %s failed to send file(s) to %s",
+		error_buf.formatstr("%s at %s failed to send file(s) to %s",
 						  get_mySubSystem()->getName(),
 						  s->my_ip_str(),receiver_ip_str);
 		if(upload_error_desc) {
-			error_buf.sprintf_cat(": %s",upload_error_desc);
+			error_buf.formatstr_cat(": %s",upload_error_desc);
 		}
 
 		if(!download_error_buf.IsEmpty()) {
-			error_buf.sprintf_cat("; %s",download_error_buf.Value());
+			error_buf.formatstr_cat("; %s",download_error_buf.Value());
 		}
 
 		error_desc = error_buf.Value();
@@ -3380,6 +3721,39 @@ FileTransfer::ExitDoUpload(filesize_t *total_bytes, ReliSock *s, priv_state save
 	Info.error_desc = error_desc;
 
 	return rc;
+}
+
+void
+FileTransfer::stopServer()
+{
+	abortActiveTransfer();
+	if (TransKey) {
+		// remove our key from the hash table
+		if ( TranskeyTable ) {
+			MyString key(TransKey);
+			TranskeyTable->remove(key);
+			if ( TranskeyTable->getNumElements() == 0 ) {
+				// if hash table is empty, delete table as well
+				delete TranskeyTable;
+				TranskeyTable = NULL;
+			}
+		}		
+		// and free the key as well
+		free(TransKey);
+		TransKey = NULL;
+	}	
+}
+
+void
+FileTransfer::abortActiveTransfer()
+{
+	if( ActiveTransferTid != -1 ) {
+		ASSERT( daemonCore );
+		dprintf(D_ALWAYS,"FileTransfer: killing active transfer %d\n",ActiveTransferTid);
+		daemonCore->Kill_Thread(ActiveTransferTid);
+		TransThreadTable->remove(ActiveTransferTid);
+		ActiveTransferTid = -1;
+	}
 }
 
 int
@@ -3615,7 +3989,9 @@ bool FileTransfer::BuildFileCatalog(time_t spool_time, const char* iwd, FileCata
 	// modification times to spool_time.  this essentially builds a catalog
 	// that mimics old behavior.
 	//
-	Directory file_iterator(iwd);
+	// make sure this iteration is done as the actual owner of the directory,
+	// as it may not be world-readable.
+	Directory file_iterator(iwd, PRIV_USER);
 	const char * f = NULL;
 	while( (f = file_iterator.Next()) ) {
 		if (!file_iterator.IsDirectory()) {
@@ -3740,7 +4116,7 @@ int FileTransfer::InvokeFileTransferPlugin(CondorError &e, const char* source, c
 	// return -1 on error, or zero otherwise, so map plugin_status to the
 	// proper value.
 	if (plugin_status != 0) {
-		e.pushf("FILETRANSFER", 1, "non-zero exit(%i) from %s\n", plugin_status, plugin.Value());
+		e.pushf("FILETRANSFER", 1, "non-zero exit(%i) from %s", plugin_status, plugin.Value());
 		return GET_FILE_PLUGIN_FAILED;
 	}
 
@@ -3799,7 +4175,7 @@ int FileTransfer::InitializePlugins(CondorError &e) {
 			I_support_filetransfer_plugins = true;
 			InsertPluginMappings(methods, p);
 		} else {
-			dprintf(D_ALWAYS, "FILETRANSFER: failed to add plugin \"%s\" because: %s\n", p, e.getFullText());
+			dprintf(D_ALWAYS, "FILETRANSFER: failed to add plugin \"%s\" because: %s\n", p, e.getFullText().c_str());
 		}
 	}
 
@@ -4044,7 +4420,7 @@ FileTransfer::ExpandInputFileList( char const *input_list, char const *iwd, MySt
 		else {
 			FileTransferList filelist;
 			if( !ExpandFileTransferList( path, "", iwd, 1, filelist ) ) {
-				error_msg.sprintf_cat("Failed to expand '%s' in transfer input file list. ",path);
+				error_msg.formatstr_cat("Failed to expand '%s' in transfer input file list. ",path);
 				result = false;
 			}
 			FileTransferList::iterator filelist_it;
@@ -4094,7 +4470,7 @@ FileTransfer::ExpandInputFileList( ClassAd *job, MyString &error_msg ) {
 	MyString iwd;
 	if( job->LookupString(ATTR_JOB_IWD,iwd) != 1 )
 	{
-		error_msg.sprintf("Failed to expand transfer input list because no IWD found in job ad.");
+		error_msg.formatstr("Failed to expand transfer input list because no IWD found in job ad.");
 		return false;
 	}
 
@@ -4138,7 +4514,7 @@ FileTransfer::LegalPathInSandbox(char const *path,char const *sandbox) {
 	bool more = true;
 	while( more ) {
 		MyString fullpath;
-		fullpath.sprintf("%s%c%s",sandbox,DIR_DELIM_CHAR,pathbuf);
+		fullpath.formatstr("%s%c%s",sandbox,DIR_DELIM_CHAR,pathbuf);
 
 		more = filename_split( pathbuf, dirbuf, filebuf );
 
@@ -4219,4 +4595,21 @@ FileTransfer::outputFileIsSpooled(char const *fname) {
 		}
 	}
 	return false;
+}
+
+ClassAd*
+FileTransfer::GetJobAd() {
+	return &jobAd;
+}
+
+void
+FileTransfer::setMaxUploadBytes(filesize_t _MaxUploadBytes)
+{
+	MaxUploadBytes = _MaxUploadBytes;
+}
+
+void
+FileTransfer::setMaxDownloadBytes(filesize_t _MaxDownloadBytes)
+{
+	MaxDownloadBytes = _MaxDownloadBytes;
 }

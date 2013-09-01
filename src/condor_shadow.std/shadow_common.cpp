@@ -106,8 +106,6 @@ char *strcpy();
 
 extern int MainSymbolExists;
 extern int JobStatus;
-extern char    *MailerPgm;
-extern char My_UID_Domain[];
 
 ClassAd *JobAd = NULL;			// ClassAd which describes this job
 extern char *schedd, *scheddName;
@@ -631,14 +629,14 @@ handle_termination( PROC *proc, char *notification, int *jobstatus,
 					"was killed by signal %d.\nCore file is %s/core.%d.%d.",
 					 WTERMSIG(status) ,
 						coredir, proc->id.cluster, proc->id.proc);
-				corepath.sprintf("%s/core.%d.%d",
+				corepath.formatstr("%s/core.%d.%d",
 							coredir, proc->id.cluster, proc->id.proc);
 			} else {
 				(void)sprintf(notification,
 					"was killed by signal %d.\nCore file is %s%s/core.%d.%d.",
 					 WTERMSIG(status) ,proc->rootdir, coredir, 
 					 proc->id.cluster, proc->id.proc);
-				corepath.sprintf("%s%s/core.%d.%d",
+				corepath.formatstr("%s%s/core.%d.%d",
 							proc->rootdir, coredir, proc->id.cluster, 
 							proc->id.proc);
 			}
@@ -683,9 +681,10 @@ checkForDebugging( ClassAd* ad )
 	// For debugging, see if there's a special attribute in the
     // job ad that sends us into an infinite loop, waiting for
     // someone to attach with a debugger
-    int shadow_should_wait = 0;
-    ad->LookupInteger( ATTR_SHADOW_WAIT_FOR_DEBUG,
-					   shadow_should_wait );
+    volatile int shadow_should_wait = 0;
+	int tmp = 0; // Can't pass volatile int to LookupInteger
+    ad->LookupInteger( ATTR_SHADOW_WAIT_FOR_DEBUG, tmp );
+	shadow_should_wait = tmp;
     if( shadow_should_wait ) {
         dprintf( D_ALWAYS, "Job requested shadow should wait for "
             "debugger with %s=%d, going into infinite loop\n",
@@ -807,7 +806,7 @@ part_send_job(
 	  }
 
 		  // Send the job info 
-	  if( !JobAd->put(*sock) ) {
+	  if( !putClassAd(sock, *JobAd) ) {
 		  dprintf( D_ALWAYS, "failed to send job ad\n" );
 		  goto returnfailure;
 	  }	

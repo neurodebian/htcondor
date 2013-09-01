@@ -30,6 +30,7 @@
 #include "sig_install.h"
 #include "string_list.h"
 #include "condor_string.h"   // for strnewp()
+#include "match_prefix.h"    // is_arg_colon_prefix
 #include "print_wrapped_text.h"
 #include "error_utils.h"
 #include "condor_distribution.h"
@@ -79,6 +80,7 @@ struct SortSpec {
 
 // global variables
 AttrListPrintMask pm;
+List<const char> pm_head; // The list of headings for the mask entries
 const char		*DEFAULT= "<default>";
 DCCollector* pool = NULL;
 AdTypes		type 	= (AdTypes) -1;
@@ -86,6 +88,8 @@ ppOption	ppStyle	= PP_NOTSET;
 int			wantOnlyTotals 	= 0;
 int			summarySize = -1;
 bool        expert = false;
+bool		wide_display = false; // when true, don't truncate field data
+bool		invalid_fields_empty = false; // when true, print "" instead of "[?]" for missing data
 Mode		mode	= MODE_NOTSET;
 int			diagnose = 0;
 char*		direct = NULL;
@@ -356,7 +360,7 @@ main (int argc, char *argv[])
 		printf ("----------\n");
 
 		q = query->getQueryAd (queryAd);
-		queryAd.fPrint (stdout);
+		fPrintAd (stdout, queryAd);
 
 		printf ("----------\n");
 		fprintf (stderr, "Result of making query ad was:  %d\n", q);
@@ -453,7 +457,7 @@ main (int argc, char *argv[])
         if (Q_OK != q) {
                 // we can always provide these messages:
 	        fprintf( stderr, "Error: %s\n", getStrQueryResult(q) );
-		fprintf( stderr, "%s\n", errstack.getFullText(true) );
+		fprintf( stderr, "%s\n", errstack.getFullText(true).c_str() );
 
 	        if ((NULL != requested_daemon) && ((Q_NO_COLLECTOR_HOST == q) || (requested_daemon->type() == DT_COLLECTOR))) {
                         // Specific long message if connection to collector failed.
@@ -559,23 +563,32 @@ usage ()
 		"\t-sort <expr>\t\tSort entries by expressions\n"
 		"\t-total\t\t\tDisplay totals only\n"
 		"\t-verbose\t\tSame as -long\n"
+		"\t-wide\t\t\tdon't truncate data to fit in 80 columns.\n"
 		"\t-xml\t\t\tDisplay entire classads, but in XML\n"
 		"\t-attributes X,Y,...\tAttributes to show in -xml or -long \n"
 		"\t-expert\t\t\tDisplay shorter error messages\n"
 		"    and [custom-opts ...] are one or more of\n"
 		"\t-constraint <const>\tAdd constraint on classads\n"
 		"\t-format <fmt> <attr>\tRegister display format and attribute\n"
-		"\t-target filename\tIf -format is used, the option target classad\n",
+		"\t-autoformat:[V,ntlh] <attr> [attr2 [attr3 ...]]\t    Print attr(s) with automatic formatting\n"
+		"\t\tV\tUse %%V formatting\n"
+		"\t\t,\tComma separated (default is space separated)\n"
+		"\t\tt\tTab separated\n"
+		"\t\tn\tNewline after each attribute\n"
+		"\t\tl\tLabel each value\n"
+		"\t\th\tHeadings\n"
+		"\t-target filename\tIf -format or -af is used, the option target classad\n",
 		myName);
 }
 
 void
 firstPass (int argc, char *argv[])
 {
-	param_functions *p_funcs;
 	int had_pool_error = 0;
 	int had_direct_error = 0;
-    int had_statistics_error = 0;
+	int had_statistics_error = 0;
+	const char * pcolon = NULL;
+
 	// Process arguments:  there are dependencies between them
 	// o -l/v and -serv are mutually exclusive
 	// o -sub, -avail and -run are mutually exclusive
@@ -630,6 +643,25 @@ firstPass (int argc, char *argv[])
 			}
 			i += 2;			
 		} else
+		if (*argv[i] == '-' &&
+			(is_arg_colon_prefix(argv[i]+1, "autoformat", &pcolon, 5) || 
+			 is_arg_colon_prefix(argv[i]+1, "af", &pcolon, 2)) ) {
+				// make sure we have at least one more argument
+			if ( !argv[i+1] || *(argv[i+1]) == '-') {
+				fprintf( stderr, "Error: Argument %s requires "
+						 "at last one attribute parameter\n", argv[i] );
+				fprintf( stderr, "Use \"%s -help\" for details\n", myName );
+				exit( 1 );
+			}
+			setPPstyle (PP_CUSTOM, i, argv[i]);
+			while (argv[i+1] && *(argv[i+1]) != '-') {
+				++i;
+			}
+		} else
+		if (matchPrefix (argv[i], "-wide", 3)) {
+			wide_display = true; // when true, don't truncate field data
+			//invalid_fields_empty = true;
+		} else
 		if (matchPrefix (argv[i], "-target", 5)) {
 			if( !argv[i+1] ) {
 				fprintf( stderr, "%s: -target requires one additional argument\n",
@@ -673,9 +705,7 @@ firstPass (int argc, char *argv[])
 		} else
 		if (matchPrefix (argv[i], "-debug", 3)) {
 			// dprintf to console
-			Termlog = 1;
-			p_funcs = get_param_functions();
-			dprintf_config ("TOOL", p_funcs);
+			dprintf_set_tool_debug("TOOL", 0);
 		} else
 		if (matchPrefix (argv[i], "-help", 2)) {
 			usage ();
@@ -821,18 +851,18 @@ firstPass (int argc, char *argv[])
             ss.expr = sortExpr;
 
             ss.arg = argv[i];
-            sprintf(ss.keyAttr, "CondorStatusSortKey%d", jsort);
-            sprintf(ss.keyExprAttr, "CondorStatusSortKeyExpr%d", jsort);
+            formatstr(ss.keyAttr, "CondorStatusSortKey%d", jsort);
+            formatstr(ss.keyExprAttr, "CondorStatusSortKeyExpr%d", jsort);
 
 			string exprString;
-			sprintf(exprString, "MY.%s < TARGET.%s", ss.keyAttr.c_str(), ss.keyAttr.c_str());
+			formatstr(exprString, "MY.%s < TARGET.%s", ss.keyAttr.c_str(), ss.keyAttr.c_str());
 			if (ParseClassAdRvalExpr(exprString.c_str(), sortExpr)) {
                 fprintf(stderr, "Error:  Parse error of: %s\n", exprString.c_str());
                 exit(1);
 			}
 			ss.exprLT = sortExpr;
 
-			sprintf(exprString, "MY.%s == TARGET.%s", ss.keyAttr.c_str(), ss.keyAttr.c_str());
+			formatstr(exprString, "MY.%s == TARGET.%s", ss.keyAttr.c_str(), ss.keyAttr.c_str());
 			if (ParseClassAdRvalExpr(exprString.c_str(), sortExpr)) {
                 fprintf(stderr, "Error:  Parse error of: %s\n", exprString.c_str());
                 exit(1);
@@ -895,6 +925,7 @@ firstPass (int argc, char *argv[])
 void
 secondPass (int argc, char *argv[])
 {
+	const char * pcolon = NULL;
 	char *daemonname;
 	for (int i = 1; i < argc; i++) {
 		// omit parameters which qualify switches
@@ -927,6 +958,73 @@ secondPass (int argc, char *argv[])
 						i, argv[i+1], argv[i+2]);
 			}
 			i += 2;
+			continue;
+		}
+		if (*argv[i] == '-' &&
+			(is_arg_colon_prefix(argv[i]+1, "autoformat", &pcolon, 5) || 
+			 is_arg_colon_prefix(argv[i]+1, "af", &pcolon, 2)) ) {
+				// make sure we have at least one more argument
+			if ( !argv[i+1] || *(argv[i+1]) == '-') {
+				fprintf( stderr, "Error: Argument %s requires "
+						 "at last one attribute parameter\n", argv[i] );
+				fprintf( stderr, "Use \"%s -help\" for details\n", myName );
+				exit( 1 );
+			}
+
+			bool flabel = false;
+			bool fCapV  = false;
+			bool fheadings = false;
+			const char * pcolpre = " ";
+			const char * pcolsux = NULL;
+			if (pcolon) {
+				++pcolon;
+				while (*pcolon) {
+					switch (*pcolon)
+					{
+						case ',': pcolsux = ","; break;
+						case 'n': pcolsux = "\n"; break;
+						case 't': pcolpre = "\t"; break;
+						case 'l': flabel = true; break;
+						case 'V': fCapV = true; break;
+						case 'h': fheadings = true; break;
+					}
+					++pcolon;
+				}
+			}
+			pm.SetAutoSep(NULL, pcolpre, pcolsux, "\n");
+
+			while (argv[i+1] && *(argv[i+1]) != '-') {
+				++i;
+				ClassAd ad;
+				StringList attributes;
+				if(!ad.GetExprReferences(argv[i],attributes,attributes)){
+					fprintf( stderr, "Error:  Parse error of: %s\n", argv[i]);
+					exit(1);
+				}
+
+				attributes.rewind();
+				char const *s;
+				while ((s = attributes.next())) {
+					projList.AppendArg(s);
+				}
+
+				MyString lbl = "";
+				int wid = 0;
+				int opts = FormatOptionNoTruncate;
+				if (fheadings || pm_head.Length() > 0) { 
+					const char * hd = fheadings ? argv[i] : "(expr)";
+					wid = 0 - (int)strlen(hd); 
+					opts = FormatOptionAutoWidth | FormatOptionNoTruncate; 
+					pm_head.Append(hd);
+				}
+				else if (flabel) { lbl.formatstr("%s = ", argv[i]); wid = 0; opts = 0; }
+				lbl += fCapV ? "%V" : "%v";
+				if (diagnose) {
+					printf ("Arg %d --- register format [%s] width=%d, opt=0x%x for [%s]\n",
+							i, lbl.Value(), wid, opts,  argv[i]);
+				}
+				pm.registerFormat(lbl.Value(), wid, opts, argv[i]);
+			}
 			continue;
 		}
 		if (matchPrefix (argv[i], "-target", 2)) {
@@ -1100,17 +1198,18 @@ lessThanFunc(AttrList *ad1, AttrList *ad2, void *)
 int
 customLessThanFunc( AttrList *ad1, AttrList *ad2, void *)
 {
-	EvalResult 	lt_result;
+	classad::Value lt_result;
+	bool val;
 
 	for (unsigned i = 0;  i < sortSpecs.size();  ++i) {
-		if (EvalExprTree(sortSpecs[i].exprLT, ad1, ad2, &lt_result)
-			&& lt_result.type == LX_INTEGER ) {
-			if( lt_result.i ) {
+		if (EvalExprTree(sortSpecs[i].exprLT, ad1, ad2, lt_result)
+			&& lt_result.IsBooleanValue(val) ) {
+			if( val ) {
 				return 1;
 			} else {
 				if (EvalExprTree( sortSpecs[i].exprEQ, ad1,
-					ad2, &lt_result ) &&
-				(( lt_result.type != LX_INTEGER || !lt_result.i ))){
+					ad2, lt_result ) &&
+					( !lt_result.IsBooleanValue(val) || !val )){
 					return 0;
 				}
 			}

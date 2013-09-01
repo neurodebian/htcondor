@@ -22,6 +22,7 @@
 #include "classad/exprTree.h"
 #include "classad/sink.h"
 #include "classad/util.h"
+#include "classad/classadCache.h"
 
 #include <math.h>
 
@@ -165,9 +166,9 @@ Unparse( string &buffer, const Value &val )
 			return;
 		}
 		case Value::INTEGER_VALUE: {
-			int	i;
+			long long	i;
 			val.IsIntegerValue( i );
-			sprintf( tempBuf, "%d", i );
+			sprintf( tempBuf, "%lld", i );
 			buffer += tempBuf;
 			return;
 		}
@@ -239,6 +240,7 @@ Unparse( string &buffer, const Value &val )
 			UnparseAux( buffer, attrs );
 			return;
 		}
+		case Value::SLIST_VALUE:
 		case Value::LIST_VALUE: {
 			const ExprList *el = NULL;
 			vector<ExprTree*> exprs;
@@ -306,6 +308,13 @@ Unparse( string &buffer, const ExprTree *tree )
 			UnparseAux( buffer, exprs );
 			return;
 		}
+		
+		case ExprTree::EXPR_ENVELOPE:
+		{
+			// recurse b/c we indirect for this element.
+			Unparse( buffer, ((CachedExprEnvelope*)tree)->get());
+			return;
+		}
 
 		default:
 				// I really wonder whether we should except here, but I
@@ -324,7 +333,7 @@ void ClassAdUnParser::
 UnparseAux( string &buffer, const Value &val, Value::NumberFactor factor )
 {
 	Unparse( buffer, val );
-	if( val.IsNumber( ) && factor != Value::NO_FACTOR ) {
+	if( ( val.IsIntegerValue() || val.IsRealValue() ) && factor != Value::NO_FACTOR ) {
 		buffer += (factor==Value::B_FACTOR)?"B"  :
 					(factor==Value::K_FACTOR)?"K": 
 					(factor==Value::M_FACTOR)?"M":

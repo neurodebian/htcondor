@@ -194,6 +194,7 @@ struct FamilyInfo {
 	gid_t* group_ptr;
 #endif
 	const char* glexec_proxy;
+	bool want_pid_namespace;
 	const char* cgroup;
 
 	FamilyInfo() {
@@ -203,6 +204,7 @@ struct FamilyInfo {
 		group_ptr = NULL;
 #endif
 		glexec_proxy = NULL;
+		want_pid_namespace = false;
 		cgroup = NULL;
 	}
 };
@@ -1146,7 +1148,8 @@ class DaemonCore : public Service
         int              *affinity_mask	     = NULL,
         char const      *daemon_sock         = NULL,
         MyString        *err_return_msg      = NULL,
-        FilesystemRemap *remap               = NULL
+        FilesystemRemap *remap               = NULL,
+        long		 	as_hard_limit        = 0l
         );
 
     //@}
@@ -1497,6 +1500,7 @@ class DaemonCore : public Service
 		 */
 	void ClearSharedPortServerAddr();
 
+	void InstallAuditingCallback( void (*fn)(int, Sock&, bool) ) { audit_log_callback_fn = fn; }
 
 	//-----------------------------------------------------------------------------
 	/*
@@ -1534,6 +1538,7 @@ class DaemonCore : public Service
 	   time_t InitTime;            // last time we init'ed the structure
 	   time_t RecentStatsTickTime; // time of the latest recent buffer Advance
 	   int    RecentWindowMax;     // size of the time window over which RecentXXX values are calculated.
+       int    RecentWindowQuantum;
        int    PublishFlags;        // verbositiy of publishing
 
 	   // helper methods
@@ -1722,6 +1727,7 @@ class DaemonCore : public Service
 		bool			is_connect_pending;
 		bool			is_reverse_connect_pending;
 		bool			call_handler;
+		bool			waiting_for_data;
 		int				servicing_tid;	// tid servicing this socket
 		bool			remove_asap;	// remove when being_serviced==false
     };
@@ -1865,6 +1871,8 @@ class DaemonCore : public Service
 	int					_cookie_len, _cookie_len_old;
 	unsigned char		*_cookie_data, *_cookie_data_old;
 
+	void (*audit_log_callback_fn)( int, Sock &, bool);
+
 #ifdef WIN32
     // the thread id of the thread running the main daemon core
     DWORD   dcmainThreadId;
@@ -1906,7 +1914,8 @@ class DaemonCore : public Service
     int HandleChildAliveCommand(int command, Stream* stream);
     int HungChildTimeout();
     int SendAliveToParent();
-    unsigned int max_hang_time;
+    int max_hang_time;
+	int max_hang_time_raw;
 	int m_child_alive_period;
     int send_child_alive_timer;
 	bool m_want_send_child_alive;

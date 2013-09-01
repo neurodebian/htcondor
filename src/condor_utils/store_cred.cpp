@@ -44,7 +44,7 @@ void SecureZeroMemory(void *p, size_t n)
 // NOTE: its up to the caller to ensure scrambled has enough room
 void simple_scramble(char* scrambled,  const char* orig, int len)
 {
-	const char deadbeef[] = {0xDE, 0xAD, 0xBE, 0xEF};
+	const unsigned char deadbeef[] = {0xDE, 0xAD, 0xBE, 0xEF};
 
 	for (int i = 0; i < len; i++) {
 		scrambled[i] = orig[i] ^ deadbeef[i % sizeof(deadbeef)];
@@ -253,8 +253,8 @@ int store_cred_service(const char *user, const char *pw, int mode)
 
 #include <conio.h>
 
-extern "C" FILE *DebugFP;
-extern "C" int DebugFlags;
+//extern "C" FILE *DebugFP;
+//extern "C" int DebugFlags;
 
 char* getStoredCredential(const char *username, const char *domain)
 {

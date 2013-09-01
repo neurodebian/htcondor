@@ -142,7 +142,7 @@ void ViewServer::Init()
 
 void ViewServer::Config()
 {
-	MyString history_dir_buf;
+	string history_dir_buf;
 	char const *history_dir;
 	char* tmp;
 	dprintf(D_ALWAYS, "In ViewServer::Config()\n");
@@ -166,12 +166,12 @@ void ViewServer::Config()
 		if (!tmp) {
 			EXCEPT("No POOL_HISTORY_DIR or LOCAL_DIR directory specified in config file\n");
 		}
-		history_dir_buf.sprintf("%s/ViewHist",tmp);
+		formatstr(history_dir_buf, "%s/ViewHist", tmp);
 	}
 	else {
 		history_dir_buf = tmp;
 	}
-	history_dir = history_dir_buf.Value();
+	history_dir = history_dir_buf.c_str();
 	free(tmp);
 
 	dprintf(D_ALWAYS, "Configuration: SAMPLING_INTERVAL=%d, MAX_STORAGE=%d, MaxFileSize=%d, POOL_HISTORY_DIR=%s\n",HistoryInterval,MaxStorage,MaxFileSize,history_dir);
@@ -184,9 +184,9 @@ void ViewServer::Config()
 		for (int j=0; j<HistoryLevels; j++) {
 			DataSet[i][j].MaxSamples=4*((int) pow((double)4,(double)j));
 			DataSet[i][j].NumSamples=0;
-			DataSet[i][j].OldFileName.sprintf("%s/viewhist%d.%d.old",history_dir,i,j);
+			DataSet[i][j].OldFileName.formatstr("%s/viewhist%d.%d.old",history_dir,i,j);
 			DataSet[i][j].OldStartTime=FindFileStartTime(DataSet[i][j].OldFileName.Value());
-			DataSet[i][j].NewFileName.sprintf("%s/viewhist%d.%d.new",history_dir,i,j);
+			DataSet[i][j].NewFileName.formatstr("%s/viewhist%d.%d.new",history_dir,i,j);
 			DataSet[i][j].NewStartTime=FindFileStartTime(DataSet[i][j].NewFileName.Value());
 		}
 	}

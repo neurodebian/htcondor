@@ -19,10 +19,10 @@ Each slot is represented by an individual machine ClassAd.
 In this way, each multi-core machine will appear to the HTCondor system as
 a collection of separate slots.  
 As an example, a multi-core machine named
-vulture.cs.wisc.edu would appear to HTCondor as the
-multiple machines, named slot1@vulture.cs.wisc.edu,
-slot2@vulture.cs.wisc.edu,
-slot3@vulture.cs.wisc.edu, and so on.
+\Expr{vulture.cs.wisc.edu} would appear to HTCondor as the
+multiple machines, named \Expr{slot1@vulture.cs.wisc.edu},
+\Expr{slot2@vulture.cs.wisc.edu},
+\Expr{slot3@vulture.cs.wisc.edu}, and so on.
 
 \index{dividing resources in  multi-core machines}
 The way that the \Condor{startd} breaks up the
@@ -149,11 +149,11 @@ then each one may be defined with up to
 100\Percent\ for its disk share.  If some slots are in the same
 partition, then their total is not allowed to exceed 100\Percent.
 
-The four predefined attribute names are case insensitive when defining slot types.
+The four predefined attribute names are case insensitive when defining 
+slot types.
 The first letter of the attribute name distinguishes between
-the attributes.
-The four attributes, with several examples of acceptable names for
-each are
+these attributes.
+The four attributes, with several examples of acceptable names for each:
 \begin{itemize}
   \item Cpus, C, c, cpu 
   \item ram, RAM, MEMORY, memory, Mem, R, r, M, m
@@ -172,19 +172,18 @@ This configuration example also omits definitions of
 \MacroNI{NUM\_SLOTS\_TYPE\_<N>}, to define the number of each slot type.
 
 \begin{verbatim}
-SLOT_TYPE_1 = cpus=2, ram=128, swap=25%, disk=1/2
+  SLOT_TYPE_1 = cpus=2, ram=128, swap=25%, disk=1/2
 
-SLOT_TYPE_2 = cpus=1/2, memory=128, virt=25%, disk=50%
+  SLOT_TYPE_2 = cpus=1/2, memory=128, virt=25%, disk=50%
 
-SLOT_TYPE_3 = c=1/2, m=50%, v=1/4, disk=1/2
+  SLOT_TYPE_3 = c=1/2, m=50%, v=1/4, disk=1/2
 
-SLOT_TYPE_4 = c=25%, m=64, v=1/4, d=25%
+  SLOT_TYPE_4 = c=25%, m=64, v=1/4, d=25%
 
-SLOT_TYPE_5 = 25%
+  SLOT_TYPE_5 = 25%
 
-SLOT_TYPE_6 = 1/4
+  SLOT_TYPE_6 = 1/4
 \end{verbatim}
-
 
 The default value for each resource share is \Expr{auto}.  The share
 may also be explicitly set to \Expr{auto}.  All slots with the value
@@ -211,6 +210,85 @@ that they specify an impossible configuration.
 If this occurs, the \Condor{startd} daemon fails after writing
 a message to its log attempting to indicate the configuration
 requirements that it could not implement.
+
+In addition to the standard resources of CPUs, memory, disk, and swap,
+the administrator may also define custom resources on 
+a localized per-machine basis.
+To implement this, 
+a list of names of the local machine resources are defined using configuration 
+variable \Macro{MACHINE\_RESOURCE\_NAMES}.
+This example defines two resources,
+a GPU and an actuator:
+\begin{verbatim}
+MACHINE_RESOURCE_NAMES = gpu, actuator
+\end{verbatim}
+
+The quantities of available resources are defined using configuration
+variables of the form \Macro{MACHINE\_RESOURCE\_<name>},
+where \Expr{<name>} is as defined by variable 
+\MacroNI{MACHINE\_RESOURCE\_NAMES}, as shown in this example:
+\begin{verbatim}
+MACHINE_RESOURCE_gpu = 16
+MACHINE_RESOURCE_actuator = 8
+\end{verbatim}
+
+Local machine resource names defined in this way may now be used in conjunction 
+with \Macro{SLOT\_TYPE\_<N>}, using all the same syntax described
+earlier in this section.
+The following example demonstrates
+the definition of static and partitionable slot types with local machine 
+resources:
+\begin{verbatim}
+# declare one partitionable slot with half of the GPUs, 6 actuators, and
+# 50% of all other resources:
+SLOT_TYPE_1 = gpu=50%,actuator=6,50%
+SLOT_TYPE_1_PARTITIONABLE = TRUE
+NUM_SLOTS_TYPE_1 = 1
+
+# declare two static slots, each with 25% of the GPUs, 1 actuator, and
+# 25% of all other resources: 
+SLOT_TYPE_2 = gpu=25%,actuator=1,25%
+SLOT_TYPE_2_PARTITIONABLE = FALSE
+NUM_SLOTS_TYPE_2 = 2
+\end{verbatim}
+
+A job may request these local machine resources using the 
+syntax \SubmitCmd{request\_<name>}, 
+as described in section~\ref{sec:SMP-dynamicprovisioning}.  
+This example shows a portion of a submit description file 
+that requests GPUs and an actuator:
+\begin{verbatim}
+universe = vanilla
+
+# request two GPUs and one actuator:
+request_gpu = 2
+request_actuator = 1
+
+queue
+\end{verbatim}
+
+The slot ClassAd will represent each local machine resource
+with the following attributes:
+\begin{description}
+\item{\Attr{Total<name>}: the total quantity of the resource 
+  identified by \Expr{<name>}}
+\item{\Attr{Detected<name>}: the quantity detected of the resource
+  identified by \Expr{<name>}; this attribute is
+  currently equivalent to \Attr{Total<name>}}
+\item{\Attr{TotalSlot<name>}: the quantity of the resource
+  identified by \Expr{<name>} allocated to this slot}
+\item{\Attr{<name>}: the amount of the resource
+  identified by \Expr{<name>} available to be used on this slot}
+\end{description}
+
+From the example given, the \Expr{gpu} resource would be represented by
+the ClassAd attributes
+\Attr{TotalGpu}, \Attr{DetectedGpu}, \Attr{TotalSlotGpu}, and \Attr{Gpu}.
+In the job ClassAd, 
+the amount of the requested machine resource appears 
+in a job ClassAd attribute named \Attr{Request<name>}.
+For this example,
+the two attributes will be \Attr{RequestGpu} and \Attr{RequestActuator}.
 
 The number of each type being
 reported can be changed at run time, by issuing a reconfiguration
@@ -557,6 +635,15 @@ to \Expr{True}.
 The value of \Expr{<N>} within the configuration variable name
 is the same value as in slot type definition configuration variable
 \MacroNI{SLOT\_TYPE\_<N>}.
+For the most common cases the machine should
+be configured for one slot, managing all the resources on the machine.
+To do so, set the following configuration variables:
+
+\begin{verbatim}
+NUM_SLOTS=1
+NUM_SLOTS_TYPE_1=1
+SLOT_TYPE_1_PARTITIONABLE=true
+\end{verbatim}
 
 In a pool using dynamic provisioning, 
 jobs can have extra, and desired, resources specified in the submit
@@ -663,7 +750,6 @@ and their defaults are
   \item{\Macro{MODIFY\_REQUEST\_EXPR\_REQUESTMEMORY} = \Expr{quantize(RequestMemory, \{TotalSlotMem / TotalSlotCpus / 4\}) }}
   \item{\Macro{MODIFY\_REQUEST\_EXPR\_REQUESTDISK} = \Expr{quantize(RequestDisk, \{1024\}) }}
 \end{description}
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{\label{sec:SMP-defrag}

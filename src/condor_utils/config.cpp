@@ -434,7 +434,7 @@ insert( const char *name, const char *value, BUCKET **table, int table_size )
 	register BUCKET	*ptr;
 	int		loc;
 	BUCKET	*bucket;
-	char	tmp_name[ MAX_PARAM_LEN ];
+	char	tmp_name[ MAX_PARAM_LEN ],*tvalue;
 
 		/* Make sure not already in hash table */
 	snprintf( tmp_name, MAX_PARAM_LEN, "%s", name);
@@ -443,8 +443,9 @@ insert( const char *name, const char *value, BUCKET **table, int table_size )
 	loc = condor_hash( tmp_name, table_size );
 	for( ptr=table[loc]; ptr; ptr=ptr->next ) {
 		if( strcmp(tmp_name,ptr->name) == 0 ) {
+			tvalue = expand_macro(value,table,table_size,name,true);
 			FREE( ptr->value );
-			ptr->value = strdup( value );
+			ptr->value = tvalue;
 			return;
 		}
 	}
@@ -630,7 +631,7 @@ char *
 expand_macro( const char *value,
 			  BUCKET **table,
 			  int table_size,
-			  char *self,
+			  const char *self,
 			  bool use_default_param_table )
 {
 	char *tmp = strdup( value );
@@ -647,11 +648,13 @@ expand_macro( const char *value,
 			all_done = false;
 			tvalue = getenv(name);
 			if( tvalue == NULL ) {
-				EXCEPT("Can't find %s in environment!",name);
+				//EXCEPT("Can't find %s in environment!",name);
+				tvalue = "UNDEFINED";		
 			}
 
-			rval = (char *)MALLOC( (unsigned)(strlen(left) + strlen(tvalue) +
-											  strlen(right) + 1));
+			rval = (char *)MALLOC( (unsigned)(strlen(left) + strlen(tvalue) + strlen(right) + 1));
+			ASSERT(rval);
+
 			(void)sprintf( rval, "%s%s%s", left, tvalue, right );
 			FREE( tmp );
 			tmp = rval;

@@ -123,7 +123,7 @@ bool StarterHookMgr::getHookPath(HookType hook_type, char*& hpath)
     hpath = NULL;
 	if (!m_hook_keyword) return true;
 	MyString _param;
-	_param.sprintf("%s_HOOK_%s", m_hook_keyword, getHookTypeString(hook_type));
+	_param.formatstr("%s_HOOK_%s", m_hook_keyword, getHookTypeString(hook_type));
 	return validateHookPath(_param.Value(), hpath);
 }
 
@@ -132,7 +132,7 @@ int StarterHookMgr::getHookTimeout(HookType hook_type, int def_value)
 {
 	if (!m_hook_keyword) return 0;
 	MyString _param;
-	_param.sprintf("%s_HOOK_%s_TIMEOUT", m_hook_keyword, getHookTypeString(hook_type));
+	_param.formatstr("%s_HOOK_%s_TIMEOUT", m_hook_keyword, getHookTypeString(hook_type));
 	return param_integer(_param.Value(), def_value);
 }
 
@@ -147,7 +147,7 @@ StarterHookMgr::tryHookPrepareJob()
 
 	MyString hook_stdin;
 	ClassAd* job_ad = Starter->jic->jobClassAd();
-	job_ad->sPrint(hook_stdin);
+	sPrintAd(hook_stdin, *job_ad);
 
 	HookClient* hook_client = new HookPrepareJobClient(m_hook_prepare_job);
 
@@ -156,7 +156,7 @@ StarterHookMgr::tryHookPrepareJob()
 
 	if (!spawn(hook_client, NULL, &hook_stdin, PRIV_USER_FINAL, &env)) {
 		MyString err_msg;
-		err_msg.sprintf("failed to execute HOOK_PREPARE_JOB (%s)",
+		err_msg.formatstr("failed to execute HOOK_PREPARE_JOB (%s)",
 						m_hook_prepare_job);
 		dprintf(D_ALWAYS|D_FAILURE,
 				"ERROR in StarterHookMgr::tryHookPrepareJob: %s\n",
@@ -186,7 +186,7 @@ StarterHookMgr::hookUpdateJobInfo(ClassAd* job_info)
 	MergeClassAds(&update_ad, job_info, true);
 
 	MyString hook_stdin;
-	update_ad.sPrint(hook_stdin);
+	sPrintAd(hook_stdin, update_ad);
 
 		// Since we're not saving the output, this can just live on
         // the stack and be destroyed as soon as we return.
@@ -242,7 +242,7 @@ StarterHookMgr::tryHookJobExit(ClassAd* job_info, const char* exit_reason)
 	ASSERT(exit_reason);
 
 	MyString hook_stdin;
-	job_info->sPrint(hook_stdin);
+	sPrintAd(hook_stdin, *job_info);
 
 	ArgList args;
 	args.AppendArg(exit_reason);
@@ -292,7 +292,7 @@ HookPrepareJobClient::hookExited(int exit_status) {
 			subcode = WEXITSTATUS(exit_status);
 		}
 		MyString err_msg;
-		err_msg.sprintf("HOOK_PREPARE_JOB (%s) failed (%s)", m_hook_path,
+		err_msg.formatstr("HOOK_PREPARE_JOB (%s) failed (%s)", m_hook_path,
 						status_msg.Value());
 		dprintf(D_ALWAYS|D_FAILURE,
 				"ERROR in StarterHookMgr::tryHookPrepareJob: %s\n",
@@ -307,7 +307,7 @@ HookPrepareJobClient::hookExited(int exit_status) {
 		ClassAd updateAd;
 		updateAd.initFromString(out.Value(), NULL);
 		dprintf(D_FULLDEBUG, "Prepare hook output classad\n");
-		updateAd.dPrint(D_FULLDEBUG);
+		dPrintAd(D_FULLDEBUG, updateAd);
 
 			// Insert each expr from the update ad into the job ad
 		updateAd.ResetExpr();
@@ -315,10 +315,11 @@ HookPrepareJobClient::hookExited(int exit_status) {
 		const char *name;
 		ExprTree *et;
 		while (updateAd.NextExpr(name, et)) {
-			job_ad->Insert(name, et->Copy());
+			ExprTree *pCopy = et->Copy();
+			job_ad->Insert(name, pCopy, false);
 		}
 		dprintf(D_FULLDEBUG, "After Prepare hook: merged job classad:\n");
-		job_ad->dPrint(D_FULLDEBUG);
+		dPrintAd(D_FULLDEBUG, *job_ad);
 		Starter->jobEnvironmentReady();
 	}
 }

@@ -37,6 +37,7 @@
 #include "KeyCache.h"
 // #include "condor_daemon_core.h"
 #include "classy_counted_ptr.h"
+#include "reli_sock.h"
 
 
 typedef void StartCommandCallbackType(bool success,Sock *sock,CondorError *errstack,void *misc_data);
@@ -79,8 +80,8 @@ public:
 	};
 
 
-	static const char* sec_feat_act_rev[];
-	static const char* sec_req_rev[];
+	static const char sec_feat_act_rev[][10];
+	static const char sec_req_rev[][10];
 
 	static KeyCache                      * session_cache;
 	static HashTable<MyString, MyString> * command_map;

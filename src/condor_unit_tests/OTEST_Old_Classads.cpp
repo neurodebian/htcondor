@@ -27,7 +27,10 @@
 #include "function_test_driver.h"
 #include "emit.h"
 #include "unit_test_utils.h"
-#include "condor_xml_classads.h"
+
+#ifdef WIN32
+	#define strcasecmp _stricmp
+#endif
 
 static bool test_copy_constructor_actuals(void);
 static bool test_copy_constructor_pointer(void);
@@ -291,6 +294,7 @@ static bool test_to_lower(void);
 static bool test_size_positive(void);
 static bool test_size_zero(void);
 static bool test_size_undefined(void);
+static bool test_nested_ads(void);
 
 
 bool OTEST_Old_Classads(void) {
@@ -559,6 +563,7 @@ bool OTEST_Old_Classads(void) {
 	driver.register_function(test_size_positive);
 	driver.register_function(test_size_zero);
 	driver.register_function(test_size_undefined);
+	driver.register_function(test_nested_ads);
 
 	return driver.do_all_functions();
 }
@@ -707,16 +712,18 @@ static bool test_xml() {
 	emit_comment("This doesn't look like it preserves tabs.");
 	const char* classad_string = "\tA=1\n\t\tB=TRUE\n\t\tC=\"String\"\n\t\t"
 		"D=\"\"\n\t\tE=\" \"";
-	ClassAdXMLUnparser unparser;
-	ClassAdXMLParser parser;
+	classad::ClassAdXMLUnParser unparser;
+	classad::ClassAdXMLParser parser;
 	compat_classad::ClassAd classad, *classadAfter;
-	MyString xml, before, after;
+	MyString before, after;
+	std::string xml;
 	classad.initFromString(classad_string, NULL);
-	classad.sPrint(before);
-	unparser.SetUseCompactSpacing(false);
-	unparser.Unparse(&classad, xml);
-	classadAfter = parser.ParseClassAd(xml.Value());
-	classadAfter->sPrint(after);
+	sPrintAd(before, classad);
+	unparser.SetCompactSpacing(false);
+	unparser.Unparse(xml, &classad);
+	classadAfter = new compat_classad::ClassAd();
+	parser.ParseClassAd(xml, *classadAfter);
+	sPrintAd(after, *classadAfter);
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
 	emit_output_expected_header();
@@ -725,7 +732,7 @@ static bool test_xml() {
 	emit_output_actual_header();
 	emit_param("Before", before.Value());
 	emit_param("After", after.Value());
-	if(after != before) {
+	if(!classad.SameAs(classadAfter)) {
 		delete classadAfter;
 		FAIL;
 	}
@@ -859,9 +866,9 @@ static bool test_lookup_expr_error_or_false() {
 	classad.initFromString(classad_string, NULL);
 	const char* attribute_name = "E";
 	ExprTree * tree = classad.LookupExpr(attribute_name);
-	EvalResult val;
-	int actual1 = EvalExprTree(tree, &classad, NULL, &val);
-	int actual2 = (val.type == LX_ERROR);
+	classad::Value val;
+	int actual1 = EvalExprTree(tree, &classad, NULL, val);
+	int actual2 = (val.GetType() == classad::Value::ERROR_VALUE);
 	int expect = 1;
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
@@ -886,9 +893,9 @@ static bool test_lookup_expr_error_and() {
 	classad.initFromString(classad_string, NULL);
 	const char* attribute_name = "L";
 	ExprTree * tree = classad.LookupExpr(attribute_name);
-	EvalResult val;
-	int actual1 = EvalExprTree(tree, &classad, NULL, &val);
-	int actual2 = (val.type == LX_ERROR);
+	classad::Value val;
+	int actual1 = EvalExprTree(tree, &classad, NULL, val);
+	int actual2 = (val.GetType() == classad::Value::ERROR_VALUE);
 	int expect = 1;
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
@@ -913,9 +920,9 @@ static bool test_lookup_expr_error_and_true() {
 	classad.initFromString(classad_string, NULL);
 	const char* attribute_name = "M";
 	ExprTree * tree = classad.LookupExpr(attribute_name);
-	EvalResult val;
-	int actual1 = EvalExprTree(tree, &classad, NULL, &val);
-	int actual2 = (val.type == LX_ERROR);
+	classad::Value val;
+	int actual1 = EvalExprTree(tree, &classad, NULL, val);
+	int actual2 = (val.GetType() == classad::Value::ERROR_VALUE);
 	int expect = 1;
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
@@ -1018,7 +1025,8 @@ static bool test_lookup_string_file() {
 	emit_retval("%d", found);
 	emit_param("STRING", "%s", result);
 	if(found != expectInt || strcmp(result, expectString) != MATCH) {
-		delete classad;	free(result);	
+		delete classad;	
+		free(result);	
 		FAIL;
 	}
 	delete classad; free(result);
@@ -1033,7 +1041,7 @@ static bool test_get_my_type_name_no() {
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
 	const char* expect = "";
-	const char* result = classad.GetMyTypeName();
+	const char* result = GetMyTypeName(classad);
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
 	emit_output_expected_header();
@@ -1053,7 +1061,7 @@ static bool test_get_my_type_name_yes() {
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
 	const char* expect = "foo";
-	const char* result = classad.GetMyTypeName();
+	const char* result = GetMyTypeName(classad);
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
 	emit_output_expected_header();
@@ -1074,7 +1082,7 @@ static bool test_get_target_type_name_no() {
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
 	const char* expect = "";
-	const char* result = classad.GetTargetTypeName();
+	const char* result = GetTargetTypeName(classad);
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
 	emit_output_expected_header();
@@ -1095,7 +1103,7 @@ static bool test_get_target_type_name_yes() {
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
 	const char* expect = "blah";
-	const char* result = classad.GetTargetTypeName();
+	const char* result = GetTargetTypeName(classad);
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
 	emit_output_expected_header();
@@ -1676,6 +1684,7 @@ static bool test_next_dirty_expr_clear() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	const char* name;
@@ -1701,6 +1710,7 @@ static bool test_next_dirty_expr_insert() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.Insert("C = 3");
@@ -1715,7 +1725,7 @@ static bool test_next_dirty_expr_insert() {
 	emit_param("Dirty Attribute", "C");
 	emit_output_actual_header();
 	emit_param("Dirty Attribute", name);
-	if(strcmp(name, "C") != MATCH) {
+	if(strcasecmp(name, "C") != MATCH) {
 		FAIL;
 	}
 	PASS;
@@ -1728,6 +1738,7 @@ static bool test_next_dirty_expr_insert_two_calls() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.Insert("C = 3");
@@ -1755,6 +1766,7 @@ static bool test_next_dirty_expr_two_inserts_first() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.Insert("C = 3");
@@ -1770,7 +1782,7 @@ static bool test_next_dirty_expr_two_inserts_first() {
 	emit_param("Dirty Attribute", "C");
 	emit_output_actual_header();
 	emit_param("Dirty Attribute", name);
-	if(strcmp(name, "C") != MATCH) {
+	if(strcasecmp(name, "C") != MATCH) {
 		FAIL;
 	}
 	PASS;
@@ -1782,6 +1794,7 @@ static bool test_next_dirty_expr_two_inserts_second() {
 		"two times.");
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
+	classad.EnableDirtyTracking();
 	classad.initFromString(classad_string, NULL);
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
@@ -1799,7 +1812,7 @@ static bool test_next_dirty_expr_two_inserts_second() {
 	emit_param("Dirty Attribute", "D");
 	emit_output_actual_header();
 	emit_param("Dirty Attribute", name);
-	if(strcmp(name, "D") != MATCH) {
+	if(strcasecmp(name, "D") != MATCH) {
 		FAIL;
 	}
 	PASS;
@@ -1812,6 +1825,7 @@ static bool test_next_dirty_expr_two_inserts_third() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.Insert("C = 3");
@@ -1842,6 +1856,7 @@ static bool test_next_dirty_expr_two_inserts_clear() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.Insert("C = 3");
@@ -1871,6 +1886,7 @@ static bool test_next_dirty_expr_set_first() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.SetDirtyFlag("A", true);
@@ -1900,6 +1916,7 @@ static bool test_next_dirty_expr_set_second() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.SetDirtyFlag("A", true);
@@ -1929,6 +1946,7 @@ static bool test_get_dirty_flag_exists_dirty() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.SetDirtyFlag("A", true);
@@ -1959,6 +1977,7 @@ static bool test_get_dirty_flag_exists_not_dirty() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.SetDirtyFlag("A", true);
@@ -1989,6 +2008,7 @@ static bool test_get_dirty_flag_not_exist() {
 	const char* classad_string = "\tA = 1\n\t\tB = 2";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
+	classad.EnableDirtyTracking();
 	classad.ClearAllDirtyFlags();
 	classad.ResetExpr();
 	classad.SetDirtyFlag("A", true);
@@ -7014,6 +7034,8 @@ static bool test_equality() {
 	emit_output_actual_header();
 	emit_param("ExprTree Equality", tfstr((*e1) == (*e2)));
 	emit_param("MyString Equality", tfstr(n1 == n2));
+	emit_param("n1", n1.Value());
+	emit_param("n2", n2.Value());
 	if(!((*e1) == (*e2)) || !(n1 == n2)) {
 		delete(e1); delete(e2);
 		FAIL;
@@ -7612,6 +7634,48 @@ static bool test_size_undefined() {
 	if(retVal != 1 || actual != expect) {
 		FAIL;
 	}
+	PASS;
+}
+
+
+static bool test_nested_ads()
+{
+	classad::ClassAdParser parser;
+	classad::ClassAdUnParser unparser;
+	classad::ClassAd ad, ad2;
+	classad::ExprTree *tree;
+
+	emit_test("Testing classad caching with nested ads");
+	
+	bool do_caching = true;
+
+	ad.InsertAttr( "A", 4 );
+	if ( !parser.ParseExpression( "{ [ Y = 1; Z = A; ] }", tree ) ) {
+		FAIL;
+	}
+	ad.Insert( "B", tree, do_caching );
+	if ( !parser.ParseExpression( "B[0].Z", tree ) ) {
+		FAIL;
+	}
+	ad.Insert( "C", tree, do_caching );
+
+	std::string str;
+	unparser.Unparse( str, &ad );
+	emit_input_header();
+	emit_param("ClassAd", str.c_str());
+	emit_output_expected_header();
+	emit_param("A =", "4");
+	emit_param("C =", "4");
+	
+	int result;
+	if ( !ad.EvaluateAttrInt( "A", result ) || result != 4 ) {
+		FAIL;
+	} 
+
+	if ( !ad.EvaluateAttrInt( "C", result ) || result != 4) {
+		FAIL;
+	}
+	
 	PASS;
 }
 

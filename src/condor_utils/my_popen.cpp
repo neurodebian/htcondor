@@ -160,7 +160,8 @@ my_popen(const char *const_cmd, const char *mode, int want_stderr)
 		si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
 		si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 	}
-	si.dwFlags = STARTF_USESTDHANDLES;
+	si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
 
 	// make call to CreateProcess
 	cmd = strdup(const_cmd);
@@ -353,6 +354,23 @@ my_popenv_impl( const char *const args[],
 
 		/* The child */
 	if( pid == 0 ) {
+
+		/* Don't leak out fds from the parent to our child.
+		 * Wish there was a more efficient way to do this, but
+		 * this is how we do it in daemoncore CreateProcess...
+		 * Of course, do not close stdin/out/err or the fds to
+		 * the pipes we just created above.
+		 */
+		for (int jj=3; jj < getdtablesize(); jj++) {
+			if (jj != pipe_d[0] &&
+				jj != pipe_d[1] &&
+				jj != pipe_d2[0] &&
+				jj != pipe_d2[1])
+			{
+				close(jj);
+			}
+		}
+
 		close(pipe_d2[0]);
 
 		if( parent_reads ) {
@@ -390,13 +408,15 @@ my_popenv_impl( const char *const args[],
 			   will fail if we don't have a ruid of 0 (root), but
 			   that's harmless.  also, note that we have to stash our
 			   effective uid, then switch our euid to 0 to be able to
-			   set our real uid/gid
+			   set our real uid/gid.
+			   We wrap some of the calls in if-statements to quiet some
+			   compilers that object to us not checking the return values.
 			*/
 		euid = geteuid();
 		egid = getegid();
-		seteuid( 0 );
+		if( seteuid( 0 ) ) { }
 		setgroups( 1, &egid );
-		setgid( egid );
+		if( setgid( egid ) ) { }
 		if( setuid( euid ) ) _exit(ENOEXEC); // Unsafe?
 
 			/* before we exec(), clear the signal mask and reset SIGPIPE
@@ -670,13 +690,15 @@ my_spawnv( const char* cmd, const char *const argv[] )
 			   it safely.  all of these calls will fail if we don't
 			   have a ruid of 0 (root), but that's harmless.  also,
 			   note that we have to stash our effective uid, then
-			   switch our euid to 0 to be able to set our real uid/gid 
+			   switch our euid to 0 to be able to set our real uid/gid.
+			   We wrap some of the calls in if-statements to quiet some
+			   compilers that object to us not checking the return values.
 			*/
 		euid = geteuid();
 		egid = getegid();
-		seteuid( 0 );
+		if( seteuid( 0 ) ) { }
 		setgroups( 1, &egid );
-		setgid( egid );
+		if( setgid( egid ) ) { }
 		if( setuid( euid ) ) _exit(ENOEXEC); // Unsafe?
 
 			/* Now it's safe to exec whatever we were given */

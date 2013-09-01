@@ -42,7 +42,7 @@ CCBIDFromString(CCBID &ccbid,char const *ccbid_str)
 static char const *
 CCBIDToString(CCBID ccbid,MyString &ccbid_str)
 {
-	ccbid_str.sprintf("%lu",ccbid);
+	ccbid_str.formatstr("%lu",ccbid);
 	return ccbid_str.Value();
 }
 
@@ -60,7 +60,7 @@ CCBIDFromContactString(CCBID &ccbid,char const *ccb_contact)
 static void
 CCBIDToContactString(char const *my_address,CCBID ccbid,MyString &ccb_contact)
 {
-	ccb_contact.sprintf("%s#%lu",my_address,ccbid);
+	ccb_contact.formatstr("%s#%lu",my_address,ccbid);
 }
 
 CCBServer::CCBServer():
@@ -135,7 +135,7 @@ CCBServer::InitAndReconfig()
 	sinful.setPrivateAddr(NULL);
 	sinful.setCCBContact(NULL);
 	ASSERT( sinful.getSinful() && sinful.getSinful()[0] == '<' );
-	m_address.sprintf("%s",sinful.getSinful()+1);
+	m_address.formatstr("%s",sinful.getSinful()+1);
 	if( m_address[m_address.Length()-1] == '>' ) {
 		m_address.setChar(m_address.Length()-1,'\0');
 	}
@@ -163,7 +163,7 @@ CCBServer::InitAndReconfig()
 		char *spool = param("SPOOL");
 		ASSERT( spool );
 		Sinful my_addr( daemonCore->publicNetworkIpAddr() );
-		m_reconnect_fname.sprintf("%s%c%s-%s.ccb_reconnect",
+		m_reconnect_fname.formatstr("%s%c%s-%s.ccb_reconnect",
 			spool,
 			DIR_DELIM_CHAR,
 			my_addr.getHost() ? my_addr.getHost() : "localhost",
@@ -177,8 +177,8 @@ CCBServer::InitAndReconfig()
 	{
 		// reconnect filename changed
 		// not worth freaking out on error here
-		remove( m_reconnect_fname.Value() );
-		rename( old_reconnect_fname.Value(), m_reconnect_fname.Value() );
+		IGNORE_RETURN remove( m_reconnect_fname.Value() );
+		IGNORE_RETURN rename( old_reconnect_fname.Value(), m_reconnect_fname.Value() );
 	}
 	if( old_reconnect_fname.IsEmpty() &&
 		!m_reconnect_fname.IsEmpty() &&
@@ -247,7 +247,7 @@ CCBServer::HandleRegistration(int cmd,Stream *stream)
 
 	ClassAd msg;
 	sock->decode();
-	if( !msg.initFromStream( *sock ) || !sock->end_of_message() ) {
+	if( !getClassAd( sock, msg ) || !sock->end_of_message() ) {
 		dprintf(D_ALWAYS,
 				"CCB: failed to receive registration "
 				"from %s.\n", sock->peer_description() );
@@ -259,7 +259,7 @@ CCBServer::HandleRegistration(int cmd,Stream *stream)
 	MyString name;
 	if( msg.LookupString(ATTR_NAME,name) ) {
 			// target daemon name is purely for debugging purposes
-		name.sprintf_cat(" on %s",sock->peer_description());
+		name.formatstr_cat(" on %s",sock->peer_description());
 		sock->set_peer_description(name.Value());
 	}
 
@@ -300,7 +300,7 @@ CCBServer::HandleRegistration(int cmd,Stream *stream)
 	reply_msg.Assign(ATTR_COMMAND,CCB_REGISTER);
 	reply_msg.Assign(ATTR_CLAIM_ID,reconnect_cookie_str.Value());
 
-	if( !reply_msg.put( *sock ) || !sock->end_of_message() ) {
+	if( !putClassAd( sock, reply_msg ) || !sock->end_of_message() ) {
 		dprintf(D_ALWAYS,
 				"CCB: failed to send registration response "
 				"to %s.\n", sock->peer_description() );
@@ -335,7 +335,7 @@ CCBServer::HandleRequest(int cmd,Stream *stream)
 
 	ClassAd msg;
 	sock->decode();
-	if( !msg.initFromStream( *sock ) || !sock->end_of_message() ) {
+	if( !getClassAd( sock, msg ) || !sock->end_of_message() ) {
 		dprintf(D_ALWAYS,
 				"CCB: failed to receive request "
 				"from %s.\n", sock->peer_description() );
@@ -345,7 +345,7 @@ CCBServer::HandleRequest(int cmd,Stream *stream)
 	MyString name;
 	if( msg.LookupString(ATTR_NAME,name) ) {
 			// client name is purely for debugging purposes
-		name.sprintf_cat(" on %s",sock->peer_description());
+		name.formatstr_cat(" on %s",sock->peer_description());
 		sock->set_peer_description(name.Value());
 	}
 	MyString target_ccbid_str;
@@ -364,7 +364,7 @@ CCBServer::HandleRequest(int cmd,Stream *stream)
 		!msg.LookupString(ATTR_CLAIM_ID,connect_id) )
 	{
 		MyString ad_str;
-		msg.sPrint(ad_str);
+		sPrintAd(ad_str, msg);
 		dprintf(D_ALWAYS,
 				"CCB: invalid request from %s: %s\n",
 				sock->peer_description(), ad_str.Value() );
@@ -386,7 +386,7 @@ CCBServer::HandleRequest(int cmd,Stream *stream)
 			sock->peer_description(), target_ccbid_str.Value());
 
 		MyString error_msg;
-		error_msg.sprintf(
+		error_msg.formatstr(
 			"CCB server rejecting request for ccbid %s because no daemon is "
 			"currently registered with that id "
 			"(perhaps it recently disconnected).", target_ccbid_str.Value());
@@ -435,7 +435,7 @@ CCBServer::HandleRequestResultsMsg( CCBTarget *target )
 
 	ClassAd msg;
 	sock->decode();
-	if( !msg.initFromStream( *sock ) || !sock->end_of_message() ) {
+	if( !getClassAd( sock, msg ) || !sock->end_of_message() ) {
 			// disconnect
 		dprintf(D_FULLDEBUG,
 				"CCB: received disconnect from target daemon %s "
@@ -465,7 +465,7 @@ CCBServer::HandleRequestResultsMsg( CCBTarget *target )
 
 	if( !CCBIDFromString( reqid, reqid_str.Value() ) ) {
 		MyString msg_str;
-		msg.sPrint(msg_str);
+		sPrintAd(msg_str, msg);
 		dprintf(D_ALWAYS,
 				"CCB: received reply from target daemon %s with ccbid %lu "
 				"without a valid request id: %s\n",
@@ -524,7 +524,7 @@ CCBServer::HandleRequestResultsMsg( CCBTarget *target )
 	}
 	if( connect_id != request->getConnectID() ) {
 		MyString msg_str;
-		msg.sPrint(msg_str);
+		sPrintAd(msg_str, msg);
 		dprintf( D_FULLDEBUG,
 				 "CCB: received wrong connect id (%s) from target daemon %s "
 				 "with ccbid %lu for "
@@ -548,7 +548,7 @@ CCBServer::SendHeartbeatResponse( CCBTarget *target )
 	ClassAd msg;
 	msg.Assign( ATTR_COMMAND, ALIVE );
 	sock->encode();
-	if( !msg.put( *sock ) || !sock->end_of_message() ) {
+	if( !putClassAd( sock, msg ) || !sock->end_of_message() ) {
 		dprintf(D_ALWAYS,
 				"CCB: failed to send heartbeat to target "
 				"daemon %s with ccbid %lu\n",
@@ -579,7 +579,7 @@ CCBServer::ForwardRequestToTarget( CCBServerRequest *request, CCBTarget *target 
 	msg.Assign( ATTR_REQUEST_ID, reqid_str );
 
 	sock->encode();
-	if( !msg.put( *sock ) || !sock->end_of_message() ) {
+	if( !putClassAd( sock, msg ) || !sock->end_of_message() ) {
 		dprintf(D_ALWAYS,
 				"CCB: failed to forward request id %lu from %s to target "
 				"daemon %s with ccbid %lu\n",
@@ -612,7 +612,7 @@ CCBServer::RequestReply( Sock *sock, bool success, char const *error_msg, CCBID 
 	msg.Assign( ATTR_ERROR_STRING, error_msg );
 
 	sock->encode();
-	if( !msg.put( *sock ) || !sock->end_of_message() ) {
+	if( !putClassAd( sock, msg ) || !sock->end_of_message() ) {
 			// Would like to be completely quiet if success and the
 			// client has disconnected, since this is normal; however,
 			// the above write operations will generate noise when
@@ -1144,12 +1144,12 @@ CCBServer::SaveAllReconnectInfo()
 	CloseReconnectFile();
 
 	if( m_reconnect_info.getNumElements()==0 ) {
-		remove( m_reconnect_fname.Value() );
+		IGNORE_RETURN remove( m_reconnect_fname.Value() );
 		return;
 	}
 
 	MyString orig_reconnect_fname = m_reconnect_fname;
-	m_reconnect_fname.sprintf_cat(".new");
+	m_reconnect_fname.formatstr_cat(".new");
 
 	if( !OpenReconnectFile() ) {
 		m_reconnect_fname = orig_reconnect_fname;

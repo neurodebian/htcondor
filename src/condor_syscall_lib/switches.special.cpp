@@ -147,7 +147,7 @@ int __have_no_getdents64;
 /* This is another C linkage type which brings in fork.o from libc on
 	glibc 2.5 machines, and causes conflicts. So here it gets
 	defined. */
-#if defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 void* __fork_handlers = NULL;
 #endif
 
@@ -224,8 +224,12 @@ extern "C" int getdents ( int fd, struct dirent *buf, size_t nbytes )
 }
 
 /* getdents, for some unknown reason, requires a special register passing
-	convention. */
+	convention. But only on 32 bit machines */
+#ifdef X86_64
+extern "C" int __getdents( int fd, struct dirent *dirp, size_t count ); 
+#else
 extern "C" int __getdents( int fd, struct dirent *dirp, size_t count ) __attribute__ ((regparm (3), stdcall));
+#endif
 
 extern "C" int __getdents( int fd, struct dirent *dirp, size_t count ) {
 	return getdents(fd,dirp,count);
@@ -241,7 +245,11 @@ extern "C" int __getdents( int fd, struct dirent *dirp, size_t count ) {
 	getdents/getdents64 and the implementation of it was, and is,
 	a crime against all that is rational and good. */
 
+#ifdef X86_64
+extern "C" int __getdents64( int fd, struct dirent64 *dirp, size_t count );
+#else
 extern "C" int __getdents64( int fd, struct dirent64 *dirp, size_t count ) __attribute__ ((regparm (3), stdcall));
+#endif
 
 extern "C" int getdents64(int, struct dirent64*, size_t);
 
@@ -729,6 +737,7 @@ mmap( MMAP_T a, size_t l, int p, int f, int fd, off_t o )
         } else {
                 if( LocalSysCalls() ) {
                         rval = (MMAP_T) MAP_FAILED;
+                        errno = ENOSYS;
                 } else {
                     rval = (MMAP_T) REMOTE_CONDOR_mmap( a, l, p, f, fd, o );
                 }
@@ -856,7 +865,7 @@ int _xstat(int version, const char *path, struct stat *buf)
 }
 
 
-int __xstat(int version, const char *path, struct stat *buf)
+int __xstat(int version, const char *path, struct stat *buf) __THROW
 {
 	return _condor_xstat( version, path, buf );
 }
@@ -866,7 +875,7 @@ int _fxstat(int version, int fd, struct stat *buf)
 	return _condor_fxstat( version, fd, buf );
 }
 
-int __fxstat(int version, int fd, struct stat *buf)
+int __fxstat(int version, int fd, struct stat *buf) __THROW
 {
 	return _condor_fxstat( version, fd, buf );
 }
@@ -878,18 +887,18 @@ int _lxstat(int version, const char *path, struct stat *buf)
 }
 
 
-int __lxstat(int version, const char *path, struct stat *buf)
+int __lxstat(int version, const char *path, struct stat *buf) __THROW
 {
 	return _condor_lxstat( version, path, buf );
 }
 
-#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 int _xstat64(int version, const char *path, struct stat64 *buf)
 {
 	return _condor_xstat64( version, path, buf );
 }
 
-int __xstat64(int version, const char *path, struct stat64 *buf)
+int __xstat64(int version, const char *path, struct stat64 *buf) __THROW
 {
 	return _condor_xstat64( version, path, buf );
 }
@@ -899,7 +908,7 @@ int _fxstat64(int version, int fd, struct stat64 *buf)
 	return _condor_fxstat64( version, fd, buf );
 }
 
-int __fxstat64(int version, int fd, struct stat64 *buf)
+int __fxstat64(int version, int fd, struct stat64 *buf) __THROW
 {
 	return _condor_fxstat64( version, fd, buf );
 }
@@ -909,7 +918,7 @@ int _lxstat64(int version, const char *path, struct stat64 *buf)
 	return _condor_lxstat64( version, path, buf );
 }
 
-int __lxstat64(int version, const char *path, struct stat64 *buf)
+int __lxstat64(int version, const char *path, struct stat64 *buf) __THROW
 {
 	return _condor_lxstat64( version, path, buf );
 }
@@ -975,7 +984,7 @@ _condor_k_stat_convert( int version, const struct kernel_stat *source,
 		target->__pad1 = 0;
 		target->__pad2 = 0;
 #endif
-		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212)
+		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212) && !defined(GLIBC213)
 		target->__unused1 = 0;
 		target->__unused2 = 0;
 		target->__unused3 = 0;
@@ -995,7 +1004,7 @@ _condor_k_stat_convert( int version, const struct kernel_stat *source,
 	}
 }
 
-#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) ||defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 void 
 _condor_k_stat_convert64( int version, const struct kernel_stat *source, 
 						struct stat64 *target )
@@ -1036,7 +1045,7 @@ _condor_k_stat_convert64( int version, const struct kernel_stat *source,
 		target->__pad1 = 0;
 		target->__pad2 = 0;
 #endif
-		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212)
+		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212) && !defined(GLIBC213)
 		/* glibc23 uses these fields */
 		target->__unused1 = 0;
 		target->__unused2 = 0;
@@ -1105,7 +1114,7 @@ _condor_s_stat_convert( int version, const struct stat *source,
 		target->__pad1 = 0;
 		target->__pad2 = 0;
 #endif
-		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212)
+		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212) && !defined(GLIBC213)
 		target->__unused1 = 0;
 		target->__unused2 = 0;
 		target->__unused3 = 0;
@@ -1123,7 +1132,7 @@ _condor_s_stat_convert( int version, const struct stat *source,
 	}
 }
 
-#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 void 
 _condor_s_stat_convert64( int version, const struct stat *source, 
 						struct stat64 *target )
@@ -1164,7 +1173,7 @@ _condor_s_stat_convert64( int version, const struct stat *source,
 		target->__pad1 = 0;
 		target->__pad2 = 0;
 #endif
-		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212)
+		#if !defined(GLIBC23) && !defined(GLIBC24) && !defined(GLIBC25) && !defined(GLIBC27) && !defined(GLIBC211) && !defined(GLIBC212) && !defined(GLIBC213)
 		/* glibc23 uses these fields */
 		target->__unused1 = 0;
 		target->__unused2 = 0;
@@ -1239,7 +1248,7 @@ int _condor_xstat(int version, const char *path, struct stat *buf)
 	return rval;
 }
 
-#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 extern "C" int REMOTE_CONDOR_stat( const char *, struct stat * );
 int _condor_xstat64(int version, const char *path, struct stat64 *buf)
 {
@@ -1313,7 +1322,7 @@ _condor_fxstat(int version, int fd, struct stat *buf)
 	return rval;
 }
 
-#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 extern "C" int REMOTE_CONDOR_fstat( int, struct stat * );
 int
 _condor_fxstat64(int version, int fd, struct stat64 *buf)
@@ -1387,7 +1396,7 @@ int _condor_lxstat(int version, const char *path, struct stat *buf)
 	return rval;
 }
 
-#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212)
+#if defined(GLIBC22) || defined(GLIBC23) || defined(GLIBC24) || defined(GLIBC25) || defined(GLIBC27) || defined(GLIBC211) || defined(GLIBC212) || defined(GLIBC213)
 extern "C" int REMOTE_CONDOR_lstat( const char *, struct stat *);
 int _condor_lxstat64(int version, const char *path, struct stat64 *buf)
 {
@@ -1624,6 +1633,8 @@ void _exit( int status )
 {
 	/* XXX this breaks atexit() and global C++ destructors */
 	(void) syscall( SYS_exit, status );
+
+	exit(status); // shouldn't get here, but supresses "_exit didn't exit" warning
 }
 
 /*
@@ -1648,7 +1659,7 @@ getrusage( int who, struct rusage *rusage )
 	int rval1 = 0;
 	int scm;
 	static struct rusage accum_rusage;
-	static int num_restarts = 50;  /* must not initialize to 0 */
+	static unsigned int num_restarts = 50;  /* must not initialize to 0 */
 
 	sigset_t omask = _condor_signals_disable();
 
@@ -1910,7 +1921,7 @@ static int remote_system_posix(const char *command, int len)
 	}
 
 	/* else just do what the user wanted of me */
-	rval = REMOTE_CONDOR_shell( (char*)command, len );
+	rval = REMOTE_CONDOR_shell( const_cast<char*>(command), len );
 	return rval;
 }
 

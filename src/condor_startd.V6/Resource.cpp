@@ -28,10 +28,16 @@
 #include "condor_holdcodes.h"
 #include "startd_bench_job.h"
 
+#include "slot_builder.h"
+
 #if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN) || defined(WIN32)
 #include "StartdPlugin.h"
 #endif
+#endif
+
+#ifndef max
+#define max(x,y) (((x) < (y)) ? (y) : (x))
 #endif
 
 extern FILESQL *FILEObj;
@@ -52,9 +58,9 @@ Resource::Resource( CpuAttributes* cap, int rid, bool multiple_slots, Resource* 
 	}
 	if( _parent ) {
 		r_sub_id = _parent->m_id_dispenser->next();
-		tmp.sprintf_cat( "%d_%d", r_id, r_sub_id );
+		tmp.formatstr_cat( "%d_%d", r_id, r_sub_id );
 	} else {
-		tmp.sprintf_cat( "%d", r_id );
+		tmp.formatstr_cat( "%d", r_id );
 	}
 	r_id_str = strdup( tmp.Value() );
 
@@ -65,7 +71,7 @@ Resource::Resource( CpuAttributes* cap, int rid, bool multiple_slots, Resource* 
 	m_id_dispenser = NULL;
 
 		// we need this before we instantiate the Reqexp object...
-	tmp.sprintf( "SLOT_TYPE_%d_PARTITIONABLE", type() );
+	tmp.formatstr( "SLOT_TYPE_%d_PARTITIONABLE", type() );
 	if( param_boolean( tmp.Value(), false ) ) {
 		set_feature( PARTITIONABLE_SLOT );
 
@@ -93,7 +99,7 @@ Resource::Resource( CpuAttributes* cap, int rid, bool multiple_slots, Resource* 
 		tmpName = my_full_hostname();
 	}
 	if( multiple_slots || get_feature() == PARTITIONABLE_SLOT ) {
-		tmp.sprintf( "%s@%s", r_id_str, tmpName );
+		tmp.formatstr( "%s@%s", r_id_str, tmpName );
 		r_name = strdup( tmp.Value() );
 	} else {
 		r_name = strdup( tmpName );
@@ -109,7 +115,7 @@ Resource::Resource( CpuAttributes* cap, int rid, bool multiple_slots, Resource* 
 		if (log) {
 			MyString avail_stats_ckpt_file(log);
 			free(log);
-			tmp.sprintf( "%c.avail_stats.%d", DIR_DELIM_CHAR, rid);
+			tmp.formatstr( "%c.avail_stats.%d", DIR_DELIM_CHAR, rid);
 			avail_stats_ckpt_file += tmp;
 			r_avail_stats.checkpoint_filename(avail_stats_ckpt_file);
 		}
@@ -657,12 +663,12 @@ Resource::hackLoadForCOD( void )
 	}
 
 	MyString load;
-	load.sprintf( "%s=%.2f", ATTR_LOAD_AVG, r_pre_cod_total_load );
+	load.formatstr( "%s=%.2f", ATTR_LOAD_AVG, r_pre_cod_total_load );
 
 	MyString c_load;
-	c_load.sprintf( "%s=%.2f", ATTR_CONDOR_LOAD_AVG, r_pre_cod_condor_load );
+	c_load.formatstr( "%s=%.2f", ATTR_CONDOR_LOAD_AVG, r_pre_cod_condor_load );
 
-	if( DebugFlags & D_FULLDEBUG && DebugFlags & D_LOAD ) {
+	if( IsDebugVerbose( D_LOAD ) ) {
 		if( r_cod_mgr->isRunning() ) {
 			dprintf( D_LOAD, "COD job current running, using "
 					 "'%s', '%s' for internal policy evaluation\n",
@@ -1061,8 +1067,8 @@ Resource::final_update( void )
 	MyString escaped_name;
 
 		// Set the correct types
-	invalidate_ad.SetMyTypeName( QUERY_ADTYPE );
-	invalidate_ad.SetTargetTypeName( STARTD_ADTYPE );
+	SetMyTypeName( invalidate_ad, QUERY_ADTYPE );
+	SetTargetTypeName( invalidate_ad, STARTD_ADTYPE );
 
 	/*
 	 * NOTE: the collector depends on the data below for performance reasons
@@ -1070,7 +1076,7 @@ Resource::final_update( void )
 	 * the IP was added to allow the collector to create a hash key to delete in O(1).
      */
 	 ClassAd::EscapeStringValue( r_name, escaped_name );
-     line.sprintf( "( TARGET.%s == \"%s\" )", ATTR_NAME, escaped_name.Value() );
+     line.formatstr( "( TARGET.%s == \"%s\" )", ATTR_NAME, escaped_name.Value() );
      invalidate_ad.AssignExpr( ATTR_REQUIREMENTS, line.Value() );
      invalidate_ad.Assign( ATTR_NAME, r_name );
      invalidate_ad.Assign( ATTR_MY_ADDRESS, daemonCore->publicNetworkIpAddr());
@@ -1127,7 +1133,7 @@ Resource::update_with_ack( void )
     /* get the public and private ads */
     publish_for_update( &public_ad, &private_ad );
 
-    if ( !public_ad.put ( *socket ) ) {
+    if ( !putClassAd ( socket, public_ad ) ) {
 
         dprintf (
             D_FULLDEBUG,
@@ -1139,7 +1145,7 @@ Resource::update_with_ack( void )
 
     }
 
-    if ( !private_ad.put ( *socket ) ) {
+    if ( !putClassAd ( socket, private_ad ) ) {
 
 		dprintf (
             D_FULLDEBUG,
@@ -1205,7 +1211,7 @@ Resource::hold_job( bool soft )
 
 		want_hold_expr = r_classad->LookupExpr("WANT_HOLD");
 		if( want_hold_expr ) {
-			want_hold_str.sprintf( "%s = %s", "WANT_HOLD",
+			want_hold_str.formatstr( "%s = %s", "WANT_HOLD",
 								   ExprTreeToString( want_hold_expr ) );
 		}
 
@@ -1281,10 +1287,10 @@ Resource::wants_vacate( void )
 			dprintf( D_ALWAYS,
 					 "In Resource::wants_vacate() with undefined WANT_VACATE\n" );
 			dprintf( D_ALWAYS, "INTERNAL AD:\n" );
-			r_classad->dPrint( D_ALWAYS );
+			dPrintAd( D_ALWAYS, *r_classad );
 			if( r_cur->ad() ) {
 				dprintf( D_ALWAYS, "JOB AD:\n" );
-				(r_cur->ad())->dPrint( D_ALWAYS );
+				dPrintAd( D_ALWAYS, *r_cur->ad() );
 			} else {
 				dprintf( D_ALWAYS, "ERROR! No job ad!!!!\n" );
 			}
@@ -1605,10 +1611,10 @@ Resource::eval_expr( const char* expr_name, bool fatal, bool check_vanilla )
 	if( (r_classad->EvalBool(expr_name, r_cur ? r_cur->ad() : NULL , tmp) ) == 0 ) {
 		if( fatal ) {
 			dprintf(D_ALWAYS, "Can't evaluate %s in the context of following ads\n", expr_name );
-			r_classad->dPrint(D_ALWAYS);
+			dPrintAd(D_ALWAYS, *r_classad);
 			dprintf(D_ALWAYS, "=============================\n");
 			if ( r_cur && r_cur->ad() ) {
-				r_cur->ad()->dPrint(D_ALWAYS);
+				dPrintAd(D_ALWAYS, *r_cur->ad());
 			} else {
 				dprintf( D_ALWAYS, "<no job ad>\n" );
 			}
@@ -1772,8 +1778,8 @@ Resource::publish( ClassAd* cap, amask_t mask )
 	char* ptr;
 
 		// Set the correct types on the ClassAd
-	cap->SetMyTypeName( STARTD_ADTYPE );
-	cap->SetTargetTypeName( JOB_ADTYPE );
+	SetMyTypeName( *cap,STARTD_ADTYPE );
+	SetTargetTypeName( *cap, JOB_ADTYPE );
 
 		// Insert attributes directly in the Resource object, or not
 		// handled by other objects.
@@ -1818,13 +1824,13 @@ Resource::publish( ClassAd* cap, amask_t mask )
 			// And then include everything from SLOTx_STARTD_EXPRS
 		daemonCore->publish(cap);
 
-		// config_fill_ad can not take strings with "." in it's prefix
-		// e.g. slot1.1, instead needs to be slot1
+		// config_fill_ad can not take strings with "_" in it's prefix
+		// e.g. slot1_1, instead needs to be slot1
 		MyString szTmp(r_id_str);
-		int iPeriodPos = szTmp.find(".");
+		int iUnderPos = szTmp.find("_");
 
-		if ( iPeriodPos >=0 ) {
-			szTmp.setChar ( iPeriodPos,  '\0' );
+		if ( iUnderPos >=0 ) {
+			szTmp.setChar ( iUnderPos,  '\0' );
 		}
 		
 		config_fill_ad( cap, szTmp.Value() );
@@ -1836,14 +1842,23 @@ Resource::publish( ClassAd* cap, amask_t mask )
 			cap->Assign(ATTR_VIRTUAL_MACHINE_ID, r_id);
 		}
 
+        // include any attributes set via local resource inventory
+        cap->Update(r_attr->get_mach_attr()->machattr());
+
+        // advertise the slot type id number, as in SLOT_TYPE_<N>
+        cap->Assign(ATTR_SLOT_TYPE_ID, int(r_attr->type()));
+
 		switch (get_feature()) {
 		case PARTITIONABLE_SLOT:
 			cap->AssignExpr(ATTR_SLOT_PARTITIONABLE, "TRUE");
+            cap->Assign(ATTR_SLOT_TYPE, "Partitionable");
 			break;
 		case DYNAMIC_SLOT:
 			cap->AssignExpr(ATTR_SLOT_DYNAMIC, "TRUE");
+            cap->Assign(ATTR_SLOT_TYPE, "Dynamic");
 			break;
 		default:
+            cap->Assign(ATTR_SLOT_TYPE, "Static");
 			break; // Do nothing
 		}
 	}		
@@ -1903,6 +1918,11 @@ Resource::publish( ClassAd* cap, amask_t mask )
 
 	free(ptr);
 
+	cap->Assign( ATTR_RETIREMENT_TIME_REMAINING, evalRetirementRemaining() );
+
+	    // Is this the local universe startd?
+    cap->Assign(ATTR_IS_LOCAL_STARTD, param_boolean("IS_LOCAL_STARTD", false));
+
 		// Put in max vacate time expression
 	ptr = param(ATTR_MACHINE_MAX_VACATE_TIME);
 	if( ptr && !*ptr ) {
@@ -1912,6 +1932,45 @@ Resource::publish( ClassAd* cap, amask_t mask )
 	cap->AssignExpr( ATTR_MACHINE_MAX_VACATE_TIME, ptr ? ptr : "0" );
 
 	free(ptr);
+    
+    
+    /////////////////////////////////////////////////////////////
+    // TSTCLAIR: Add named mounts to allow job matching based 
+    //           on starter mount capabilities. 
+    /////////////////////////////////////////////////////////////
+    ptr = param("NAMED_MOUNTS");
+    if (ptr)
+    {
+        StringList mount_list(ptr);
+        mount_list.rewind();
+        std::string mntlist; 
+        const char * next_mnt;
+        
+        // advertise the named mount points, but hide their details
+        while ( (next_mnt=mount_list.next()) ) 
+        {
+            MyString mnt_spec(next_mnt);
+            mnt_spec.Tokenize();
+            
+            const char * mnt_name = mnt_spec.GetNextToken("=", false);
+            if ( mnt_name ) 
+            {
+                if (mntlist.size())
+                {
+                    mntlist+=",";   
+                }
+                mntlist+=mnt_name;
+            }
+        }
+        
+        if (! cap->Assign( ATTR_NAMED_MOUNT_PTS, mntlist.c_str() ))
+        {
+            dprintf( D_ALWAYS, "FAILED to assign %s=%s\n",ATTR_NAMED_MOUNT_PTS,mntlist.c_str() );
+        }
+            
+        free(ptr);
+        ptr = NULL;
+    }
 
 #if HAVE_JOB_HOOKS
 	if (IS_PUBLIC(mask)) {
@@ -1959,7 +2018,7 @@ Resource::publish_private( ClassAd *ad )
 {
 		// Needed by the collector to correctly respond to queries
 		// for private ads.  As of 7.2.0, the 
-	ad->SetMyTypeName( STARTD_ADTYPE );
+	SetMyTypeName( *ad, STARTD_ADTYPE );
 
 		// For backward compatibility with pre 7.2.0 collectors, send
 		// name and IP address in private ad (needed to match up the
@@ -2041,7 +2100,7 @@ Resource::publishDeathTime( ClassAd* cap )
         }
     }
 
-    classad_attribute.sprintf( "%s=%d", ATTR_TIME_TO_LIVE, relative_death_time );
+    classad_attribute.formatstr( "%s=%d", ATTR_TIME_TO_LIVE, relative_death_time );
     cap->Insert( classad_attribute.Value() );
     return;
 }
@@ -2114,13 +2173,14 @@ Resource::compute( amask_t mask )
 void
 Resource::dprintf_va( int flags, const char* fmt, va_list args )
 {
+	const DPF_IDENT ident = 0; // REMIND: maybe something useful here??
 	if( resmgr->is_smp() ) {
 		MyString fmt_str( r_id_str );
 		fmt_str += ": ";
 		fmt_str += fmt;
-		::_condor_dprintf_va( flags, fmt_str.Value(), args );
+		::_condor_dprintf_va( flags, ident, fmt_str.Value(), args );
 	} else {
-		::_condor_dprintf_va( flags, fmt, args );
+		::_condor_dprintf_va( flags, ident, fmt, args );
 	}
 }
 
@@ -2158,7 +2218,7 @@ Resource::compute_condor_load( void )
 		cpu_usage = 0.0;
 	}
 
-	if( (DebugFlags & D_FULLDEBUG) && (DebugFlags & D_LOAD) ) {
+	if( IsDebugVerbose( D_LOAD ) ) {
 		dprintf( D_FULLDEBUG, "LoadQueue: Adding %d entries of value %f\n",
 				 num_since_last, cpu_usage );
 	}
@@ -2166,7 +2226,7 @@ Resource::compute_condor_load( void )
 
 	avg = (r_load_queue->avg() / numcpus);
 
-	if( (DebugFlags & D_FULLDEBUG) && (DebugFlags & D_LOAD) ) {
+	if( IsDebugVerbose( D_LOAD ) ) {
 		r_load_queue->display( this );
 		dprintf( D_FULLDEBUG,
 				 "LoadQueue: Size: %d  Avg value: %.2f  "
@@ -2404,17 +2464,21 @@ Resource::willingToRun(ClassAd* request_ad)
 			}
 			else if (!req_requirements) {
 				dprintf(D_FAILURE|D_ALWAYS, "Job requirements not satisfied.\n");
+				dprintf(D_ALWAYS, "Job ad was ============================\n");
+				dPrintAd(D_ALWAYS, *request_ad);
+				dprintf(D_ALWAYS, "Slot ad was ============================\n");
+				dPrintAd(D_ALWAYS, *r_classad);
 			}
 		}
 
 			// Possibly print out the ads we just got to the logs.
-		if (DebugFlags & D_JOB) {
+		if (IsDebugLevel(D_JOB)) {
 			dprintf(D_JOB, "REQ_CLASSAD:\n");
-			request_ad->dPrint(D_JOB);
+			dPrintAd(D_JOB, *request_ad);
 		}
-		if (DebugFlags & D_MACHINE) {
+		if (IsDebugLevel(D_MACHINE)) {
 			dprintf(D_MACHINE, "MACHINE_CLASSAD:\n");
-			r_classad->dPrint(D_MACHINE);
+			dPrintAd(D_MACHINE, *r_classad);
 		}
 	}
 	else {
@@ -2664,7 +2728,7 @@ Resource::getHookKeyword()
 {
 	if (!m_hook_keyword_initialized) {
 		MyString param_name;
-		param_name.sprintf("%s_JOB_HOOK_KEYWORD", r_id_str);
+		param_name.formatstr("%s_JOB_HOOK_KEYWORD", r_id_str);
 		m_hook_keyword = param(param_name.Value());
 		if (!m_hook_keyword) {
 			m_hook_keyword = param("STARTD_JOB_HOOK_KEYWORD");
@@ -2743,13 +2807,14 @@ Resource * initialize_resource(Resource * rip, ClassAd * req_classad, Claim* &le
 			char *tmp = param(knob.Value());
 			if( tmp ) {
 				ExprTree *tree = NULL;
-				EvalResult result;
+				classad::Value result;
+				int val;
 				ParseClassAdRvalExpr(tmp, tree);
 				if ( tree &&
-					 EvalExprTree(tree,req_classad,mach_classad,&result) &&
-					 result.type == LX_INTEGER )
+					 EvalExprTree(tree,req_classad,mach_classad,result) &&
+					 result.IsIntegerValue(val) )
 				{
-					req_classad->Assign(resources[i],result.i);
+					req_classad->Assign(resources[i],val);
 
 				}
 				if (tree) delete tree;
@@ -2812,7 +2877,7 @@ Resource * initialize_resource(Resource * rip, ClassAd * req_classad, Claim* &le
 				cpus = 1; // reasonable default, for sure
 			}
 		}
-		type.sprintf_cat( "cpus=%d ", cpus );
+		type.formatstr_cat( "cpus=%d ", cpus );
 
 			// Look to see how much MEMORY is being requested.
 		schedd_requested_attr = "_condor_";
@@ -2826,7 +2891,7 @@ Resource * initialize_resource(Resource * rip, ClassAd * req_classad, Claim* &le
 				return NULL;
 			}
 		}
-		type.sprintf_cat( "memory=%d ", memory );
+		type.formatstr_cat( "memory=%d ", memory );
 
 
 			// Look to see how much DISK is being requested.
@@ -2841,15 +2906,25 @@ Resource * initialize_resource(Resource * rip, ClassAd * req_classad, Claim* &le
 				return NULL;
 			}
 		}
-		type.sprintf_cat( "disk=%d%%",
+		type.formatstr_cat( "disk=%d%%",
 			max((int) ceil((disk / (double) rip->r_attr->get_total_disk()) * 100), 1) );
 
+
+        for (CpuAttributes::slotres_map_t::const_iterator j(rip->r_attr->get_slotres_map().begin());  j != rip->r_attr->get_slotres_map().end();  ++j) {
+            string reqname;
+            formatstr(reqname, "%s%s", ATTR_REQUEST_PREFIX, j->first.c_str());
+            int reqval = 0;
+            if (!req_classad->EvalInteger(reqname.c_str(), mach_classad, reqval)) reqval = 0;
+            string attr;
+            formatstr(attr, " %s=%d", j->first.c_str(), reqval);
+            type += attr;
+        }
 
 		rip->dprintf( D_FULLDEBUG,
 					  "Match requesting resources: %s\n", type.Value() );
 
 		type_list.initializeFromString( type.Value() );
-		cpu_attrs = resmgr->buildSlot( rip->r_id, &type_list, -1, false );
+		cpu_attrs = ::buildSlot( resmgr->m_attr, rip->r_id, &type_list, -rip->type(), false );
 		if( ! cpu_attrs ) {
 			rip->dprintf( D_ALWAYS,
 						  "Failed to parse attributes for request, aborting\n" );
@@ -2905,6 +2980,9 @@ Resource * initialize_resource(Resource * rip, ClassAd * req_classad, Claim* &le
 			 param_boolean("CLAIM_PARTITIONABLE_LEFTOVERS",true) ) 
 		{
 			leftover_claim = rip->r_cur;
+			leftover_claim->setad(new ClassAd(*req_classad));
+			leftover_claim->loadRequestInfo();
+			leftover_claim->setad(0);
 			ASSERT(leftover_claim);
 		}
 

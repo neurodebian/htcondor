@@ -23,7 +23,6 @@
 #include "subsystem_info.h"
 #include "baseshadow.h"
 #include "shadow.h"
-#include "mpishadow.h"
 #include "parallelshadow.h"
 #include "exit.h"
 #include "condor_debug.h"
@@ -202,16 +201,17 @@ readJobAd( void )
 		EXCEPT( "reading ClassAd from (%s): file is empty",
 				is_stdin ? "STDIN" : job_ad_file );
 	}
-	if( (DebugFlags & D_JOB) && (DebugFlags & D_FULLDEBUG) ) {
-		ad->dPrint( D_JOB );
+	if( IsDebugVerbose(D_JOB) ) {
+		dPrintAd( D_JOB, *ad );
 	} 
 
 	// For debugging, see if there's a special attribute in the
 	// job ad that sends us into an infinite loop, waiting for
 	// someone to attach with a debugger
-	int shadow_should_wait = 0;
-	ad->LookupInteger( ATTR_SHADOW_WAIT_FOR_DEBUG,
-					   shadow_should_wait );
+	volatile int shadow_should_wait = 0;
+	int tmp = 0; // Can't pass volatile into LookupInteger
+	ad->LookupInteger( ATTR_SHADOW_WAIT_FOR_DEBUG, tmp );
+	shadow_should_wait = tmp;
 	if( shadow_should_wait ) {
 		dprintf( D_ALWAYS, "Job requested shadow should wait for "
 			"debugger with %s=%d, going into infinite loop\n",
@@ -247,13 +247,11 @@ initShadow( ClassAd* ad )
 	case CONDOR_UNIVERSE_PARALLEL:
 		Shadow = new ParallelShadow();
 		break;
+	case CONDOR_UNIVERSE_LOCAL:
 	case CONDOR_UNIVERSE_VANILLA:
 	case CONDOR_UNIVERSE_JAVA:
 	case CONDOR_UNIVERSE_VM:
 		Shadow = new UniShadow();
-		break;
-	case CONDOR_UNIVERSE_MPI:
-		Shadow = new MPIShadow();
 		break;
 	default:
 		dprintf( D_ALWAYS, "This version of the shadow cannot support "
@@ -430,9 +428,9 @@ dumpClassad( const char* header, ClassAd* ad, int debug_flag )
 				 header );   
 		return;
 	}
-	if( DebugFlags & debug_flag ) {
+	if( IsDebugCatAndVerbosity(debug_flag) ) {
 		dprintf( debug_flag, "*** ClassAd Dump: %s ***\n", header );  
-		ad->dPrint( debug_flag );
+		dPrintAd( debug_flag, *ad );
 		dprintf( debug_flag, "--- End of ClassAd ---\n" );
 	}
 }

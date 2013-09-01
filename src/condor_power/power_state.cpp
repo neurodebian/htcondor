@@ -117,10 +117,7 @@ usage( bool error = true )
 static void
 enable_debug( void )
 {
-	param_functions *p_funcs = get_param_functions();
-	Termlog = true;
-	dprintf_config( "TOOL", p_funcs );
-	set_debug_flags( "D_FULLDEBUG" );
+	dprintf_set_tool_debug("TOOL", 0);
 }
 
 static void
@@ -241,7 +238,7 @@ dump_ad( void )
 	ad.Assign( ATTR_HIBERNATION_METHOD, hibernator->getMethod() );
 	ad.Assign( ATTR_HIBERNATION_SUPPORTED_STATES, states );
 	ad.Assign( ATTR_HIBERNATION_RAW_MASK, mask );
-	ad.fPrint( stdout );
+	fPrintAd( stdout, ad );
 }
 
 int

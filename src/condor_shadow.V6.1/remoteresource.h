@@ -42,6 +42,9 @@ typedef enum {
 			confirmation that it's really dead.  This state is 
 		    skipped if the job exits on its own. */
 	RR_PENDING_DEATH,
+		/// Waiting for file transfer reaper to finish
+		/// before changing state to RR_FINISHED
+	RR_PENDING_TRANSFER,
 		/// After it has stopped (for whatever reason...)
 	RR_FINISHED,
 		/// Suspended at the execution site
@@ -133,16 +136,6 @@ class RemoteResource : public Service {
 		*/ 
 	void getMachineName( char *& machineName );
 
-		/** Return the filesystem domain of the remote host.
-			@param filesystemDomain Will contain the host's fs_domain
-		*/
-	void getFilesystemDomain( char *& filesystemDomain );
-
-		/** Return the uid domain of the remote host.
-			@param uidDomain Will contain the host's uid_domain
-		*/
-	void getUidDomain( char *& uidDomain );
-
 		/** Return the sinful string of the starter.
 			@param starterAddr Will contain the starter's sinful string.
 		*/
@@ -170,16 +163,6 @@ class RemoteResource : public Service {
 			already exists, we assume it's a buffer and print into it.
        */
    void getClaimId( char *& id );
-
-		/** Return the arch string of the starter.
-			@param arch Will contain the starter's arch string.
-		*/
-	void getStarterArch( char *& arch );
-
-		/** Return the opsys string of the starter.
-			@param opsys Will contain the starter's opsys string.
-		*/
-	void getStarterOpsys( char *& opsys );
 
 		/** Return the claim socket associated with this remote host.  
 			@return The claim socket for this host.
@@ -270,23 +253,19 @@ class RemoteResource : public Service {
 		*/
 	void setMachineName( const char *machineName );
 
-		/** Set the filesystem domain for this host.  CRUFT
-			@param filesystemDomain The filesystem domain of this host.
-		*/
-	void setFilesystemDomain( const char *filesystemDomain );
-
-		/** Set the uid domain for this host.  CRUFT
-			@param uidDomain The uid domain of this host.
-		*/
-	void setUidDomain( const char *uidDomain );
-
 		/// The number of bytes sent to this resource.
 	float bytesSent();
 		
 		/// The number of bytes received from this resource.
 	float bytesReceived();
 
+	void getFileTransferStatus(FileTransferStatus &upload_status,FileTransferStatus &download_status);
+
 	FileTransfer filetrans;
+	FileTransferStatus m_upload_xfer_status;
+	FileTransferStatus m_download_xfer_status;
+
+	void initFileTransfer();
 
 	virtual void resourceExit( int reason_for_exit, int exit_status );
 
@@ -421,9 +400,6 @@ class RemoteResource : public Service {
 	char *starterAddress;
 	char *starterArch;
 	char *starterOpsys;
-	char *starter_version;
-	char *fs_domain;
-	char *uid_domain;
 	ReliSock *claim_sock;
 	int exit_reason;
 	bool claim_is_closing;
@@ -480,6 +456,9 @@ class RemoteResource : public Service {
 
 	bool began_execution;
 
+	int m_attempt_shutdown_tid;
+	time_t m_started_attempting_shutdown;
+
 private:
 
 		/// Private helper methods for trying to reconnect
@@ -522,7 +501,10 @@ private:
 	void setRemoteProxyRenewTime(time_t expiration_time);
 	void setRemoteProxyRenewTime();
 	void startCheckingProxy();
-
+	int attemptShutdownTimeout();
+	void attemptShutdown();
+	void abortFileTransfer();
+	int transferStatusUpdateCallback(FileTransfer *transobject);
 };
 
 

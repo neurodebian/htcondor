@@ -634,14 +634,6 @@ log file by both the \Condor{schedd} daemon and the \Condor{dagman} job.
 Partially written events by the \Condor{schedd} cause errors
 for \Condor{dagman}.
 
-An additional restriction applies to the submit description file
-command \SubmitCmd{Log} specific to an HTCondor job within
-a DAG node.
-\emph{This command may not be defined in such a way that it uses macros.}
-Using a macro would violate the restriction that there be exactly
-one log file specified for the potentially multiple jobs 
-within a single cluster.
-
 Here is a modified version of the DAG input file
 for the diamond-shaped DAG. 
 The modification has each node use the same 
@@ -1101,8 +1093,6 @@ In the case where the submit description file for each node
 varies only in file naming, the use of a substitution macro
 within the submit description file reduces the need to
 a single submit description file.
-Note that the user log file for a job currently cannot be specified
-using a macro passed from the DAG.
 
 The example uses a single submit description file in the DAG input
 file, and uses the \Arg{VARS} entry to name output files.
@@ -1237,6 +1227,22 @@ The resulting values passed to the NodeB executable are
   !@#$%^&*()_-=+=[]{}?/
 \end{verbatim}
 \normalsize
+
+% Note: this is an alternative to subsubsubsection, which we don't have.
+\begin{description}
+\item[Using VARS to define ClassAd attributes]
+\end{description}
+
+The \Arg{macroname} may also begin with a \Expr{+} character, in which case it
+names a ClassAd attribute. For example, the following VARS specification
+\begin{verbatim}
+  Vars NodeE +A="\"bob\""
+\end{verbatim}
+would allow the HTCondor submit description file for NodeE to use
+the following line:
+\begin{verbatim}
+  arguments = "$$([A])"
+\end{verbatim}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{Setting Priorities for Nodes}
@@ -1734,7 +1740,9 @@ lazily or eagerly:
 \item \Opt{-no\_recurse/do\_recurse}
 \item \Opt{-update\_submit}
 \item \Opt{-import\_env}
+\item \Opt{-suppress\_notification}
 \item \Opt{-priority}
+\item \Opt{-dont\_use\_default\_node\_log}
 \end{itemize}
 
 % See parsePreservedArgs() in condor_submit_dag.cpp
@@ -2769,6 +2777,15 @@ Here is an example of a node status file:
   JOB C STATUS_SUBMITTED (idle)
   JOB D STATUS_UNREADY   ()
 
+  Nodes total: 4
+  Nodes done: 1
+  Nodes pre: 0
+  Nodes queued: 2
+  Nodes post: 0
+  Nodes ready: 0
+  Nodes un-ready: 1
+  Nodes failed: 0
+
   DAG status: STATUS_SUBMITTED ()
   Next scheduled update: 1281041775 (Thu Aug  5 15:56:15 2010)
   END 1281041745 (Thu Aug  5 15:55:45 2010)
@@ -3003,6 +3020,31 @@ assuming the example \Arg{jobTag} field of \Expr{local}:
 \end{itemize}
 \end{description}
 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\label{sec:DAGStatusClassad}Status Information for the DAG in a ClassAd}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\index{DAGMan!DAG status in a job ClassAd}
+\label{Job-ClassAd-DAGAttributes}
+
+The \Condor{dagman} job places information about the status of the DAG
+into its own job ClassAd.  
+The attributes are fully described at
+section ~\ref{Job-ClassAd-DAGAttributes}.
+The attributes are
+
+\begin{itemize}
+\item \Attr{DAG\_NodesTotal}
+\item \Attr{DAG\_NodesDone}
+\item \Attr{DAG\_NodesPrerun}
+\item \Attr{DAG\_NodesQueued}
+\item \Attr{DAG\_NodesPostrun}
+\item \Attr{DAG\_NodesReady}
+\item \Attr{DAG\_NodesFailed}
+\item \Attr{DAG\_NodesUnready}
+\item \Attr{DAG\_Status}
+\item \Attr{DAG\_InRecovery}
+\end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{\label{sec:DAGLotsaJobs}Utilizing the Power of DAGMan for Large Numbers of Jobs}

@@ -160,9 +160,6 @@
 /* Define if enabling Quill (USED)*/
 #cmakedefine WANT_QUILL 1
 
-/* Define if enabling Stork (USED)*/
-#cmakedefine WANT_STORK 1
-
 /* Define to 1 to support invoking hooks throughout the workflow of a job (USED)*/
 #cmakedefine HAVE_JOB_HOOKS 1
 
@@ -257,6 +254,12 @@
 
 /* Define to 1 if the system has the MS_SHARED flag. */
 #cmakedefine HAVE_MS_SHARED 1
+
+/* Define to 1 if the system has the MS_SLAVE flag. */
+#cmakedefine HAVE_MS_SLAVE 1
+
+/* Define to 1 if the system has the MS_REC flag. */
+#cmakedefine HAVE_MS_REC 1
 
 /* Do we have the blahp external (used Imake)*/
 #cmakedefine HAVE_EXT_BLAHP 1
@@ -438,6 +441,9 @@
 /* Define to 1 if you have the 'snprintf' function. (USED)*/
 #cmakedefine HAVE_SNPRINTF 1
 
+/* Define to 1 if you have the 'eventfd' function. (USED)*/
+#cmakedefine HAVE_EVENTFD 1
+
 /* Define to 1 if you have the 'stat64' function. (USED)*/
 #cmakedefine HAVE_STAT64 1
 
@@ -572,5 +578,11 @@
 
 /* Define to 1 if the system has proportional set size (PSS).*/
 #cmakedefine HAVE_PSS 1
+
+/* Define to 1 if the compiler supports C++11 conventions */
+#cmakedefine PREFER_CPP11
+
+/* Define to 1 if the compiler does not support C++11 but does support TR1 */
+#cmakedefine PREFER_TR1
 
 #endif

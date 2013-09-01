@@ -24,9 +24,13 @@
    reliance on other Condor files to ease distribution.  -Jim B. */
 
 #include <stdio.h>              /* for FILE type */
+
 #if !defined(WIN32) 
 #include <time.h>
 #include <sys/resource.h>       /* for struct rusage */
+#elif (_MSC_VER >= 1600 )
+// fix vs2010 compiler issue
+#include <stdint.h> 
 #endif
 
 /* 
@@ -85,11 +89,12 @@ enum ULogEventNumber {
 	/** Job Status Known          */  ULOG_JOB_STATUS_KNOWN         = 30,
 	/** Job performing stage-in   */  ULOG_JOB_STAGE_IN				= 31,
 	/** Job performing stage-out  */  ULOG_JOB_STAGE_OUT			= 32,
-	/** Attribute updated  */	ULOG_ATTRIBUTE_UPDATE		= 33
+	/** Attribute updated  */         ULOG_ATTRIBUTE_UPDATE			= 33,
+	/** PRE_SKIP event for DAGMan */  ULOG_PRESKIP					= 34
 };
 
 /// For printing the enum value.  cout << ULogEventNumberNames[eventNumber];
-extern const char * ULogEventNumberNames[];
+extern const char ULogEventNumberNames[][30];
 
 //----------------------------------------------------------------------------
 /** Enumeration of possible outcomes after attempting to read an event.
@@ -106,7 +111,7 @@ enum ULogEventOutcome
 };
 
 /// For printing the enum value.  cout << ULogEventOutcomeNames[outcome];
-extern const char * ULogEventOutcomeNames[];
+extern const char * const ULogEventOutcomeNames[];
 
 //----------------------------------------------------------------------------
 /** Framework for a single User Log Event object.  This class is an abstract
@@ -199,6 +204,15 @@ class ULogEvent {
     /// The time this event occurred
     struct tm          eventTime;
 
+/*
+define ULOG_MICROSECONDS on linux to get microsecond resolution in the
+user log.  This is write only, and probably breaks compatability with
+log readers.
+*/
+
+#ifdef ULOG_MICROSECONDS
+	struct timeval     eventTimeval;
+#endif
     /// The cluster field of the Condor ID for this event
     int                cluster;
     /// The proc    field of the Condor ID for this event
@@ -232,7 +246,7 @@ class ULogEvent {
         @param usage the usage to consider
         @return NULL for failure, the string for success
     */
-    char* rusageToStr (rusage usage);
+    char* rusageToStr (const rusage &usage);
 
     /** Parse a formatted string with the resource usage information.
         @param rusageStr a string like the ones made by rusageToStr.
@@ -1904,6 +1918,42 @@ class AttributeUpdate : public ULogEvent
 	char *old_value;
 };
 
+class PreSkipEvent : public ULogEvent
+{
+  public:
+    ///
+    PreSkipEvent(void);
+    ///
+    ~PreSkipEvent(void);
+
+    /** Read the body of the next Submit event.
+        @param file the non-NULL readable log file
+        @return 0 for failure, 1 for success
+    */
+    virtual int readEvent (FILE *);
+
+    /** Write the body of the next Submit event.
+        @param file the non-NULL writable log file
+        @return 0 for failure, 1 for success
+    */
+    virtual int writeEvent (FILE *);
+
+	/** Return a ClassAd representation of this PreSkipEvent.
+		@return NULL for failure, the ClassAd pointer otherwise
+	*/
+	virtual ClassAd* toClassAd(void);
+
+	/** Initialize from this ClassAd.
+		@param a pointer to the ClassAd to initialize from
+	*/
+	virtual void initFromClassAd(ClassAd* ad);
+	
+	void setSkipNote(const char*);
+
+    // dagman-supplied text to include in the log event
+	char* skipEventLogNotes;
+
+};
 
 #endif // __CONDOR_EVENT_H__
 

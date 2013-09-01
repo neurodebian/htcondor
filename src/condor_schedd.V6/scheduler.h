@@ -30,6 +30,7 @@
 #define _CONDOR_SCHED_H_
 
 #include <map>
+#include <set>
 
 #include "dc_collector.h"
 #include "daemon.h"
@@ -60,8 +61,6 @@
 #include "schedd_stats.h"
 #include "condor_holdcodes.h"
 
-using std::map;
-
 extern  int         STARTD_CONTACT_TIMEOUT;
 const	int			NEGOTIATOR_CONTACT_TIMEOUT = 30;
 const	int			SCHEDD_INTERVAL_DEFAULT = 300;
@@ -73,6 +72,8 @@ const	int			JOB_DEFERRAL_WINDOW_DEFAULT = 0; // seconds
 extern	DLL_IMPORT_MAGIC char**		environ;
 
 extern char const * const HOME_POOL_SUBMITTER_TAG;
+
+void AuditLogNewConnection( int cmd, Sock &sock, bool failure );
 
 //
 // Given a ClassAd from the job queue, we check to see if it
@@ -113,9 +114,10 @@ struct shadow_rec
 
 struct OwnerData {
   char* Name;
-  char* Domain;
   int JobsRunning;
   int JobsIdle;
+  int WeightedJobsRunning;
+  int WeightedJobsIdle;
   int JobsHeld;
   int JobsFlocked;
   int FlockLevel;
@@ -124,8 +126,9 @@ struct OwnerData {
 		// successful negotiation at highest current flocking
 		// level.
   time_t NegotiationTimestamp;
-  OwnerData() { Name=NULL; Domain=NULL;
-  NegotiationTimestamp=JobsRunning=JobsIdle=JobsHeld=JobsFlocked=FlockLevel=OldFlockLevel=0; }
+  std::set<int> PrioSet; // Set of job priorities, used for JobPrioArray attr
+  OwnerData() { Name=NULL;
+  NegotiationTimestamp=WeightedJobsRunning=WeightedJobsIdle=JobsRunning=JobsIdle=JobsHeld=JobsFlocked=FlockLevel=OldFlockLevel=0; }
 };
 
 class match_rec: public ClaimIdParser
@@ -306,6 +309,7 @@ class Scheduler : public Service
 	void			send_all_jobs(ReliSock*, struct sockaddr_in*);
 	void			send_all_jobs_prioritized(ReliSock*, struct sockaddr_in*);
 
+	friend	int		NewProc(int cluster_id);
 	friend	int		count(ClassAd *);
 	friend	void	job_prio(ClassAd *);
 	friend  int		find_idle_local_jobs(ClassAd *);
@@ -313,7 +317,7 @@ class Scheduler : public Service
     friend  void    add_shadow_birthdate(int cluster, int proc, bool is_reconnect = false);
 	void			display_shadow_recs();
 	int				actOnJobs(int, Stream *);
-	void            enqueueActOnJobMyself( PROC_ID job_id, JobAction action, bool notify );
+	void            enqueueActOnJobMyself( PROC_ID job_id, JobAction action, bool notify, bool log );
 	int             actOnJobMyselfHandler( ServiceData* data );
 	int				updateGSICred(int, Stream* s);
 	void            setNextJobDelay( ClassAd *job_ad, ClassAd *machine_ad );
@@ -498,6 +502,8 @@ class Scheduler : public Service
 		// jobs which desire matchmaking.
 	HashTable <PROC_ID, ClassAd *> *resourcesByProcID;
   
+	bool usesLocalStartd() const { return m_use_startd_for_local;}
+	
 private:
 	
 	// information about this scheduler
@@ -611,7 +617,8 @@ private:
 
 	// Information to pass to shadows for contacting file transfer queue
 	// manager.
-	MyString m_xfer_queue_contact;
+	bool m_have_xfer_queue_contact;
+	std::string m_xfer_queue_contact;
 
 	// useful names
 	char*			CondorAdministrator;
@@ -625,6 +632,7 @@ private:
 
 	// utility functions
 	int				count_jobs();
+	bool			fill_submitter_ad(ClassAd & pAd, int owner_num, int flock_level=-1); 
     int             make_ad_list(ClassAdList & ads, ClassAd * pQueryAd=NULL);
     int             command_query_ads(int, Stream* stream);
 	void   			check_claim_request_timeouts( void );
@@ -733,6 +741,13 @@ private:
 		// Mark a job as clean
 	int clear_dirty_job_attrs_handler(int, Stream *stream);
 
+		// Command handlers for direct startd
+   int receive_startd_update(int, Stream *s);
+   int receive_startd_invalidate(int, Stream *s);
+
+   int local_startd_reaper(int pid, int status);
+   int launch_local_startd();
+
 		// A bit that says wether or not we've sent email to the admin
 		// about a shadow not starting.
 	int sent_shadow_failure_email;
@@ -754,6 +769,11 @@ private:
 
 	StringList m_job_machine_attrs;
 	int m_job_machine_attrs_history_length;
+
+	bool m_use_startd_for_local;
+	int m_local_startd_pid;
+	std::map<std::string, ClassAd *> m_unclaimedLocalStartds;
+	std::map<std::string, ClassAd *> m_claimedLocalStartds;
 };
 
 
@@ -775,7 +795,8 @@ extern bool holdJob( int cluster, int proc, const char* reason = NULL,
 					 bool use_transaction = false, 
 					 bool notify_shadow = true,  
 					 bool email_user = false, bool email_admin = false,
-					 bool system_hold = true);
+					 bool system_hold = true,
+					 bool write_to_user_log = true);
 extern bool releaseJob( int cluster, int proc, const char* reason = NULL, 
 					 bool use_transaction = false, 
 					 bool email_user = false, bool email_admin = false,

@@ -73,8 +73,9 @@ static bool parse_abort(Dag *dag,
 		const char *filename, int lineNumber);
 static bool parse_dot(Dag *dag, 
 		const char *filename, int lineNumber);
-static bool parse_vars(Dag *dag, 
-		const char *filename, int lineNumber);
+static bool parse_vars(Dag *dag,
+		const char *filename, int lineNumber,
+		std::list<std::string>* varq);
 static bool parse_priority(Dag *dag, 
 		const char *filename, int lineNumber);
 static bool parse_category(Dag *dag, const char *filename, int lineNumber);
@@ -176,10 +177,12 @@ bool parse (Dag *dag, const char *filename, bool useDagDir) {
 	char *line;
 	int lineNumber = 0;
 
+	std::list<std::string> vars_to_save;
 	//
 	// This loop will read every line of the input file
 	//
 	while ( ((line=getline(fp)) != NULL) ) {
+		std::string varline(line);
 		lineNumber++;
 
 		//
@@ -287,7 +290,8 @@ bool parse (Dag *dag, const char *filename, bool useDagDir) {
 		// Handle a Vars spec
 		// Example syntax is: Vars JobName var1="val1" var2="val2"
 		else if(strcasecmp(token, "VARS") == 0) {
-			parsed_line_successfully = parse_vars(dag, filename, lineNumber);
+			vars_to_save.push_back(varline);	
+			parsed_line_successfully = parse_vars(dag, filename, lineNumber, &vars_to_save);
 		}
 
 		// Handle a Priority spec
@@ -372,12 +376,22 @@ bool parse (Dag *dag, const char *filename, bool useDagDir) {
 
 	fclose(fp);
 
-
 	// always remember which were the inital and final nodes for this dag.
 	// If this dag is used as a splice, then this information is very
 	// important to preserve when building dependancy links.
 	dag->LiftSplices(SELF);
 	dag->RecordInitialAndFinalNodes();
+	
+	for(std::list<std::string>::iterator p = vars_to_save.begin(); p != vars_to_save.end(); ++p) {
+		char* varline = strnewp(p->c_str());
+		strtok(varline, DELIMITERS); // Drop the VARS token
+		bool parsed_line_successfully = parse_vars(dag,filename,0,0);
+		if(!parsed_line_successfully) {
+			delete[] varline;
+			return false;
+		}
+		delete[] varline;
+	}	
 
 	if ( useDagDir ) {
 		MyString	errMsg;
@@ -420,7 +434,7 @@ parse_node( Dag *dag, Job::job_type_t nodeType,
 	Dag *tmp = NULL;
 
 	MyString expectedSyntax;
-	expectedSyntax.sprintf( "Expected syntax: %s%s nodename %s "
+	expectedSyntax.formatstr( "Expected syntax: %s%s nodename %s "
 				"[DIR directory] [NOOP] [DONE]", nodeTypeKeyword, inlineOrExt,
 				submitOrDagFile );
 
@@ -541,7 +555,7 @@ parse_node( Dag *dag, Job::job_type_t nodeType,
 		nestedDagFile.replaceString( DAG_SUBMIT_FILE_SUFFIX, "" );
 		debug_printf( DEBUG_NORMAL, "Warning: the use of the JOB "
 					"keyword for nested DAGs is deprecated; please "
-					"use SUBDAG EXTERNAL instead" );
+					"use SUBDAG EXTERNAL instead\n" );
 		check_warning_strictness( DAG_STRICT_3 );
 	}
 
@@ -1137,7 +1151,7 @@ static bool parse_dot(Dag *dag, const char *filename, int lineNumber)
 //           Vars JobName VarName1="value1" VarName2="value2" etc
 //           Whitespace surrounding the = sign is permissible
 //-----------------------------------------------------------------------------
-static bool parse_vars(Dag *dag, const char *filename, int lineNumber) {
+static bool parse_vars(Dag *dag, const char *filename, int lineNumber, std::list<std::string>* varq) {
 	const char* example = "Vars JobName VarName1=\"value1\" VarName2=\"value2\"";
 	MyString varName;
 	MyString varValue;
@@ -1157,7 +1171,18 @@ static bool parse_vars(Dag *dag, const char *filename, int lineNumber) {
 	if(job == NULL) {
 		debug_printf(DEBUG_QUIET, "%s (line %d): Unknown Job %s\n",
 					filename, lineNumber, jobNameOrig);
-		return false;
+		if(varq) {
+			debug_printf(DEBUG_QUIET, "Queueing this line up to try later\n");
+			return true;
+		} else {
+			return false;
+		}
+	} else {
+			// The line we are searching for should be at the back of the list
+			// unless we have lifted, in which case it is empty
+		if(varq && !varq->empty()) {
+			varq->pop_back();
+		}
 	}
 
 	char *str = strtok(NULL, "\n"); // just get all the rest -- we'll be doing this by hand
@@ -1178,8 +1203,19 @@ static bool parse_vars(Dag *dag, const char *filename, int lineNumber) {
 		}
 
 		// copy name char-by-char until we hit a symbol or whitespace
-		// names are limited to alphanumerics and underscores
-		while( isalnum(*str) || *str == '_' ) {
+		// names are limited to alphanumerics and underscores (except
+		// that '+' is legal as the first character)
+		int varnamestate = 0; // 0 means not within a varname
+		while( isalnum(*str) || *str == '_' || *str == '+' ) {
+			if (*str == '+' ) {
+				if ( varnamestate != 0 ) {
+					debug_printf( DEBUG_QUIET,
+							"%s (line %d): '+' can only be first character of macroname (%s)\n",
+							filename, lineNumber, varName.Value() );
+					return false;
+				}
+			}
+			varnamestate = 1;
 			varName += *str++;
 		}
 
@@ -1189,13 +1225,19 @@ static bool parse_vars(Dag *dag, const char *filename, int lineNumber) {
 				lineNumber, *str);
 			return false;
 		}
+
+		if ( varName == "+" ) {
+			debug_printf(DEBUG_QUIET,
+				"%s (line %d): macroname (%s) must contain at least one alphanumeric character\n",
+				filename, lineNumber, varName.Value() );
+			return false;
+		}
 		
 		// burn through any whitespace there may be afterwards
 		while(isspace(*str))
 			str++;
 		if(*str != '=') {
-			debug_printf(DEBUG_QUIET, "%s (line %d): No \"=\" for \"%s\"\n", filename,
-				lineNumber, varName.Value());
+			debug_printf( DEBUG_QUIET, "%s (line %d): Illegal character (%c) in or after macroname %s\n", filename, lineNumber, *str, varName.Value() );
 			return false;
 		}
 		str++;
@@ -1260,28 +1302,28 @@ static bool parse_vars(Dag *dag, const char *filename, int lineNumber) {
 		}
 		// This will be inefficient for jobs with lots of variables
 		// As in O(N^2)
-		job->varNamesFromDag->Rewind();
-		job->varValsFromDag->Rewind();
-		while(MyString* s = job->varNamesFromDag->Next()){
-			job->varValsFromDag->Next(); // To keep up with varNamesFromDag
-			if(varName == *s){
+		job->varsFromDag->Rewind();
+		while(Job::NodeVar *var = job->varsFromDag->Next()){
+			if ( varName == var->_name ) {
 				debug_printf(DEBUG_NORMAL,"Warning: VAR \"%s\" "
 					"is already defined in job \"%s\" "
 					"(Discovered at file \"%s\", line %d)\n",
-					varName.Value(),job->GetJobName(),filename,
+					varName.Value(), job->GetJobName(), filename,
 					lineNumber);
 				check_warning_strictness( DAG_STRICT_2 );
 				debug_printf(DEBUG_NORMAL,"Warning: Setting VAR \"%s\" "
-					"= \"%s\"\n",varName.Value(),varValue.Value());
-				job->varNamesFromDag->DeleteCurrent();
-				job->varValsFromDag->DeleteCurrent();
+					"= \"%s\"\n", varName.Value(), varValue.Value());
+				job->varsFromDag->DeleteCurrent();
 			}
 		}
-		debug_printf(DEBUG_DEBUG_1, "Argument added, Name=\"%s\"\tValue=\"%s\"\n", varName.Value(), varValue.Value());
+		debug_printf(DEBUG_DEBUG_1,
+					"Argument added, Name=\"%s\"\tValue=\"%s\"\n",
+					varName.Value(), varValue.Value());
+		Job::NodeVar *var = new Job::NodeVar();
+		var->_name = varName;
+		var->_value = varValue;
 		bool appendResult;
-		appendResult = job->varNamesFromDag->Append(new MyString(varName));
-		ASSERT( appendResult );
-		appendResult = job->varValsFromDag->Append(new MyString(varValue));
+		appendResult = job->varsFromDag->Append( var );
 		ASSERT( appendResult );
 	}
 
@@ -1812,7 +1854,7 @@ parse_reject(
 	}
 
 	MyString location;
-	location.sprintf( "%s (line %d)", filename, lineNumber );
+	location.formatstr( "%s (line %d)", filename, lineNumber );
 	debug_printf( DEBUG_QUIET, "REJECT specification at %s "
 				"will cause this DAG to fail\n", location.Value() );
 

@@ -48,7 +48,7 @@ extern FILESQL *FILEObj;
 
 //extern ClassAd *JobAd;
 
-const char * ULogEventNumberNames[] = {
+const char ULogEventNumberNames[][30] = {
 	"ULOG_SUBMIT",					// Job submitted
 	"ULOG_EXECUTE",					// Job now running
 	"ULOG_EXECUTABLE_ERROR",		// Error in executable
@@ -82,10 +82,11 @@ const char * ULogEventNumberNames[] = {
 	"ULOG_JOB_STATUS_KNOWN",		// Job status known
 	"ULOG_JOB_STAGE_IN",			// Job staging in input files
 	"ULOG_JOB_STAGE_OUT",			// Job staging out output files
-	"ULOG_ATTRIBUTE_UPDATE"			// Job attribute updated
+	"ULOG_ATTRIBUTE_UPDATE",			// Job attribute updated
+	"ULOG_PRESKIP"					// PRE_SKIP event for DAGMan
 };
 
-const char * ULogEventOutcomeNames[] = {
+const char * const ULogEventOutcomeNames[] = {
   "ULOG_OK       ",
   "ULOG_NO_EVENT ",
   "ULOG_RD_ERROR ",
@@ -207,6 +208,9 @@ instantiateEvent (ULogEventNumber event)
 	case ULOG_ATTRIBUTE_UPDATE:
 		return new AttributeUpdate;
 
+	case ULOG_PRESKIP:
+		return new PreSkipEvent;
+
 	default:
 		dprintf( D_ALWAYS, "Invalid ULogEventNumber: %d\n", event );
 		// Return NULL/0 here instead of EXCEPTing to fix Gnats PR 706.
@@ -228,6 +232,13 @@ ULogEvent::ULogEvent(void)
 	(void) time ((time_t *)&eventclock);
 	tm = localtime ((time_t *)&eventclock);
 	eventTime = *tm;
+
+#ifdef ULOG_MICROSECONDS
+	::gettimeofday(&eventTimeval, 0);
+	tm = localtime(&eventTimeval.tv_sec);
+	eventTime = *tm;
+#endif
+
 	scheddname = NULL;
 	m_gjid = NULL;
 }
@@ -304,11 +315,20 @@ ULogEvent::writeHeader (FILE *file)
 	int       retval;
 
 	// write header
+#ifdef ULOG_MICROSECONDS
+	retval = fprintf (file, "%03d (%03d.%03d.%03d) %02d/%02d %02d:%02d:%02d.%06d ",
+					  eventNumber,
+					  cluster, proc, subproc,
+					  eventTime.tm_mon+1, eventTime.tm_mday,
+					  eventTime.tm_hour, eventTime.tm_min, eventTime.tm_sec, (int)eventTimeval.tv_usec);
+#else
 	retval = fprintf (file, "%03d (%03d.%03d.%03d) %02d/%02d %02d:%02d:%02d ",
 					  eventNumber,
 					  cluster, proc, subproc,
 					  eventTime.tm_mon+1, eventTime.tm_mday,
 					  eventTime.tm_hour, eventTime.tm_min, eventTime.tm_sec);
+
+#endif
 
 	// check if all fields were sucessfully written
 	if (retval < 0)
@@ -334,94 +354,94 @@ ULogEvent::toClassAd(void)
 	switch( (ULogEventNumber) eventNumber )
 	{
 	  case ULOG_SUBMIT:
-		myad->SetMyTypeName("SubmitEvent");
+		SetMyTypeName(*myad, "SubmitEvent");
 		break;
 	  case ULOG_EXECUTE:
-		myad->SetMyTypeName("ExecuteEvent");
+		SetMyTypeName(*myad, "ExecuteEvent");
 		break;
 	  case ULOG_EXECUTABLE_ERROR:
-		myad->SetMyTypeName("ExecutableErrorEvent");
+		SetMyTypeName(*myad, "ExecutableErrorEvent");
 		break;
 	  case ULOG_CHECKPOINTED:
-		myad->SetMyTypeName("CheckpointedEvent");
+		SetMyTypeName(*myad, "CheckpointedEvent");
 		break;
 	  case ULOG_JOB_EVICTED:
-		myad->SetMyTypeName("JobEvictedEvent");
+		SetMyTypeName(*myad, "JobEvictedEvent");
 		break;
 	  case ULOG_JOB_TERMINATED:
-		myad->SetMyTypeName("JobTerminatedEvent");
+		SetMyTypeName(*myad, "JobTerminatedEvent");
 		break;
 	  case ULOG_IMAGE_SIZE:
-		myad->SetMyTypeName("JobImageSizeEvent");
+		SetMyTypeName(*myad, "JobImageSizeEvent");
 		break;
 	  case ULOG_SHADOW_EXCEPTION:
-		myad->SetMyTypeName("ShadowExceptionEvent");
+		SetMyTypeName(*myad, "ShadowExceptionEvent");
 		break;
 	  case ULOG_GENERIC:
-		myad->SetMyTypeName("GenericEvent");
+		SetMyTypeName(*myad, "GenericEvent");
 		break;
 	  case ULOG_JOB_ABORTED:
-		myad->SetMyTypeName("JobAbortedEvent");
+		SetMyTypeName(*myad, "JobAbortedEvent");
 		break;
 	  case ULOG_JOB_SUSPENDED:
-		myad->SetMyTypeName("JobSuspendedEvent");
+		SetMyTypeName(*myad, "JobSuspendedEvent");
 		break;
 	  case ULOG_JOB_UNSUSPENDED:
-		myad->SetMyTypeName("JobUnsuspendedEvent");
+		SetMyTypeName(*myad, "JobUnsuspendedEvent");
 		break;
 	  case ULOG_JOB_HELD:
-		myad->SetMyTypeName("JobHeldEvent");
+		SetMyTypeName(*myad, "JobHeldEvent");
 		break;
 	  case ULOG_JOB_RELEASED:
-		myad->SetMyTypeName("JobReleaseEvent");
+		SetMyTypeName(*myad, "JobReleaseEvent");
 		break;
 	  case ULOG_NODE_EXECUTE:
-		myad->SetMyTypeName("NodeExecuteEvent");
+		SetMyTypeName(*myad, "NodeExecuteEvent");
 		break;
 	  case ULOG_NODE_TERMINATED:
-		myad->SetMyTypeName("NodeTerminatedEvent");
+		SetMyTypeName(*myad, "NodeTerminatedEvent");
 		break;
 	  case ULOG_POST_SCRIPT_TERMINATED:
-		myad->SetMyTypeName("PostScriptTerminatedEvent");
+		SetMyTypeName(*myad, "PostScriptTerminatedEvent");
 		break;
 	  case ULOG_GLOBUS_SUBMIT:
-		myad->SetMyTypeName("GlobusSubmitEvent");
+		SetMyTypeName(*myad, "GlobusSubmitEvent");
 		break;
 	  case ULOG_GLOBUS_SUBMIT_FAILED:
-		myad->SetMyTypeName("GlobusSubmitFailedEvent");
+		SetMyTypeName(*myad, "GlobusSubmitFailedEvent");
 		break;
 	  case ULOG_GLOBUS_RESOURCE_UP:
-		myad->SetMyTypeName("GlobusResourceUpEvent");
+		SetMyTypeName(*myad, "GlobusResourceUpEvent");
 		break;
 	  case ULOG_GLOBUS_RESOURCE_DOWN:
-		myad->SetMyTypeName("GlobusResourceDownEvent");
+		SetMyTypeName(*myad, "GlobusResourceDownEvent");
 		break;
 	case ULOG_REMOTE_ERROR:
-		myad->SetMyTypeName("RemoteErrorEvent");
+		SetMyTypeName(*myad, "RemoteErrorEvent");
 		break;
 	case ULOG_JOB_DISCONNECTED:
-		myad->SetMyTypeName("JobDisconnectedEvent");
+		SetMyTypeName(*myad, "JobDisconnectedEvent");
 		break;
 	case ULOG_JOB_RECONNECTED:
-		myad->SetMyTypeName("JobReconnectedEvent");
+		SetMyTypeName(*myad, "JobReconnectedEvent");
 		break;
 	case ULOG_JOB_RECONNECT_FAILED:
-		myad->SetMyTypeName("JobReconnectFailedEvent");
+		SetMyTypeName(*myad, "JobReconnectFailedEvent");
 		break;
 	case ULOG_GRID_RESOURCE_UP:
-		myad->SetMyTypeName("GridResourceUpEvent");
+		SetMyTypeName(*myad, "GridResourceUpEvent");
 		break;
 	case ULOG_GRID_RESOURCE_DOWN:
-		myad->SetMyTypeName("GridResourceDownEvent");
+		SetMyTypeName(*myad, "GridResourceDownEvent");
 		break;
 	case ULOG_GRID_SUBMIT:
-		myad->SetMyTypeName("GridSubmitEvent");
+		SetMyTypeName(*myad, "GridSubmitEvent");
 		break;
 	case ULOG_JOB_AD_INFORMATION:
-		myad->SetMyTypeName("JobAdInformationEvent");
+		SetMyTypeName(*myad, "JobAdInformationEvent");
 		break;
 	case ULOG_ATTRIBUTE_UPDATE:
-		myad->SetMyTypeName("AttributeUpdateEvent");
+		SetMyTypeName(*myad, "AttributeUpdateEvent");
 		break;
 	  default:
 		delete myad;
@@ -545,6 +565,7 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 			key = iter->first;
 		}
 		if (key.size() != 0) {
+			title_case(key); // capitalize it to make it consistent for map lookup.
 			SlotResTermSumy * psumy = useMap[key];
 			if ( ! psumy) {
 				psumy = new SlotResTermSumy();
@@ -598,9 +619,9 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 	}
 
 	MyString fmt;
-	fmt.sprintf("\tPartitionable Resources : %%%ds %%%ds %%%ds\n", cchUse, cchReq, MAX(cchAlloc,9));
+	fmt.formatstr("\tPartitionable Resources : %%%ds %%%ds %%%ds\n", cchUse, cchReq, MAX(cchAlloc,9));
 	fprintf(file, fmt.Value(), "Usage", "Request", cchAlloc ? "Allocated" : "");
-	fmt.sprintf("\t   %%-%ds : %%%ds %%%ds %%%ds\n", cchRes+8, cchUse, cchReq, MAX(cchAlloc,9));
+	fmt.formatstr("\t   %%-%ds : %%%ds %%%ds %%%ds\n", cchRes+8, cchUse, cchReq, MAX(cchAlloc,9));
 	//fputs(fmt.Value(), file);
 	for (std::map<std::string, SlotResTermSumy*>::iterator it = useMap.begin();
 		 it != useMap.end();
@@ -610,6 +631,7 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 		if (lbl.compare("Memory") == 0) lbl += " (MB)";
 		else if (lbl.compare("Disk") == 0) lbl += " (KB)";
 		fprintf(file, fmt.Value(), lbl.c_str(), psumy->use.c_str(), psumy->req.c_str(), psumy->alloc.c_str());
+		delete psumy;
 	}
 	//fprintf(file, "\t  *See Section %d.%d in the manual for information about requesting resources\n", 2, 5);
 }
@@ -687,13 +709,13 @@ static void readUsageAd(FILE * file, /* in,out */ ClassAd ** ppusageAd)
 			pszTbl[ixUse] = 0;
 			pszTbl[ixReq] = 0;
 			std::string exprstr;
-			sprintf(exprstr, "%sUsage = %s", pszLbl, pszTbl);
+			formatstr(exprstr, "%sUsage = %s", pszLbl, pszTbl);
 			puAd->Insert(exprstr.c_str());
-			sprintf(exprstr, "Request%s = %s", pszLbl, &pszTbl[ixUse+1]);
+			formatstr(exprstr, "Request%s = %s", pszLbl, &pszTbl[ixUse+1]);
 			puAd->Insert(exprstr.c_str());
 			if (ixAlloc > 0) {
 				pszTbl[ixAlloc] = 0;
-				sprintf(exprstr, "%s = %s", pszLbl, &pszTbl[ixReq+1]);
+				formatstr(exprstr, "%s = %s", pszLbl, &pszTbl[ixReq+1]);
 				puAd->Insert(exprstr.c_str());
 			}
 		}
@@ -1437,7 +1459,7 @@ RemoteErrorEvent::writeEvent(FILE *file)
 		insertCommonIdentifiers(tmpCl2);
 
 		MyString tmp;
-		tmp.sprintf("endtype = null");
+		tmp.formatstr("endtype = null");
 		tmpCl2.Insert(tmp.Value());
 
 			// critical error means this run is ended.
@@ -1759,16 +1781,16 @@ ExecuteEvent::writeEvent (FILE *file)
 
 	tmpCl1.Assign("endts", (int)eventclock);
 
-	tmp.sprintf("endtype = -1");
+	tmp.formatstr("endtype = -1");
 	tmpCl1.Insert(tmp.Value());
 
-	tmp.sprintf("endmessage = \"UNKNOWN ERROR\"");
+	tmp.formatstr("endmessage = \"UNKNOWN ERROR\"");
 	tmpCl1.Insert(tmp.Value());
 
 	// this inserts scheddname, cluster, proc, etc
 	insertCommonIdentifiers(tmpCl2);
 
-	tmp.sprintf("endtype = null");
+	tmp.formatstr("endtype = null");
 	tmpCl2.Insert(tmp.Value());
 
 	if (FILEObj) {
@@ -1890,7 +1912,7 @@ ExecutableErrorEvent::writeEvent (FILE *file)
 	// this inserts scheddname, cluster, proc, etc
 	insertCommonIdentifiers(tmpCl2);
 
-	tmp.sprintf( "endtype = null");
+	tmp.formatstr( "endtype = null");
 	tmpCl2.Insert(tmp.Value());
 
 	if (FILEObj) {
@@ -2398,7 +2420,7 @@ JobEvictedEvent::writeEvent( FILE *file )
   tmpCl1.Assign("endts", (int)eventclock);
   tmpCl1.Assign("endtype", ULOG_JOB_EVICTED);
 
-  tmp.sprintf( "endmessage = \"%s%s\"", messagestr, terminatestr);
+  tmp.formatstr( "endmessage = \"%s%s\"", messagestr, terminatestr);
   tmpCl1.Insert(tmp.Value());
 
   tmpCl1.Assign("wascheckpointed", checkpointedstr);
@@ -2408,7 +2430,7 @@ JobEvictedEvent::writeEvent( FILE *file )
   // this inserts scheddname, cluster, proc, etc
   insertCommonIdentifiers(tmpCl2);
 
-  tmp.sprintf( "endtype = null");
+  tmp.formatstr( "endtype = null");
   tmpCl2.Insert(tmp.Value());
 
   if (FILEObj) {
@@ -2968,7 +2990,7 @@ JobTerminatedEvent::writeEvent (FILE *file)
   // this inserts scheddname, cluster, proc, etc
   insertCommonIdentifiers(tmpCl2);
 
-  tmp.sprintf( "endtype = null");
+  tmp.formatstr( "endtype = null");
   tmpCl2.Insert(tmp.Value());
 
   if (FILEObj) {
@@ -3138,20 +3160,20 @@ JobImageSizeEvent::~JobImageSizeEvent(void)
 int
 JobImageSizeEvent::writeEvent (FILE *file)
 {
-	if (fprintf (file, "Image size of job updated: %"PRId64"\n", image_size_kb) < 0)
+	if (fprintf (file, "Image size of job updated: %" PRId64"\n", image_size_kb) < 0)
 		return 0;
 
 	// when talking to older starters, memory_usage, rss & pss may not be set
 	if (memory_usage_mb >= 0 && 
-		fprintf (file, "\t%"PRId64"  -  MemoryUsage of job (MB)\n", memory_usage_mb) < 0)
+		fprintf (file, "\t%" PRId64"  -  MemoryUsage of job (MB)\n", memory_usage_mb) < 0)
 		return 0;
 
 	if (resident_set_size_kb >= 0 &&
-		fprintf (file, "\t%"PRId64"  -  ResidentSetSize of job (KB)\n", resident_set_size_kb) < 0)
+		fprintf (file, "\t%" PRId64"  -  ResidentSetSize of job (KB)\n", resident_set_size_kb) < 0)
 		return 0;
 
 	if (proportional_set_size_kb >= 0 &&
-		fprintf (file, "\t%"PRId64"  -  ProportionalSetSize of job (KB)\n", proportional_set_size_kb) < 0)
+		fprintf (file, "\t%" PRId64"  -  ProportionalSetSize of job (KB)\n", proportional_set_size_kb) < 0)
 		return 0;
 
 	return 1;
@@ -3162,7 +3184,7 @@ int
 JobImageSizeEvent::readEvent (FILE *file)
 {
 	int retval;
-	if ((retval=fscanf(file,"Image size of job updated: %"PRId64, &image_size_kb)) != 1)
+	if ((retval=fscanf(file,"Image size of job updated: %" PRId64, &image_size_kb)) != 1)
 		return 0;
 
 	// These fields were added to this event in 2012, so we need to tolerate the
@@ -3185,7 +3207,7 @@ JobImageSizeEvent::readEvent (FILE *file)
 		}
 
 		int64_t val; lbl[0] = 0;
-		if (2 == sscanf(sz, "\t%"PRId64"  -  %48s", &val, lbl)) {
+		if (2 == sscanf(sz, "\t%" PRId64"  -  %48s", &val, lbl)) {
 			if (!strcmp(lbl,"MemoryUsage")) {
 				memory_usage_mb = val;
 			} else if (!strcmp(lbl, "ResidentSetSize")) {
@@ -3211,22 +3233,22 @@ JobImageSizeEvent::toClassAd(void)
 	char buf0[250];
 
 	if( image_size_kb >= 0 ) {
-		snprintf(buf0, sizeof(buf0), "Size = %"PRId64, image_size_kb);
+		snprintf(buf0, sizeof(buf0), "Size = %" PRId64, image_size_kb);
 		buf0[sizeof(buf0)-1] = 0;
 		if( !myad->Insert(buf0) ) return NULL;
 	}
 	if( memory_usage_mb >= 0 ) {
-		snprintf(buf0, sizeof(buf0), "MemoryUsage = %"PRId64, memory_usage_mb);
+		snprintf(buf0, sizeof(buf0), "MemoryUsage = %" PRId64, memory_usage_mb);
 		buf0[sizeof(buf0)-1] = 0;
 		if( !myad->Insert(buf0) ) return NULL;
 	}
 	if( resident_set_size_kb >= 0 ) {
-		snprintf(buf0, sizeof(buf0), "ResidentSetSize = %"PRId64, resident_set_size_kb);
+		snprintf(buf0, sizeof(buf0), "ResidentSetSize = %" PRId64, resident_set_size_kb);
 		buf0[sizeof(buf0)-1] = 0;
 		if( !myad->Insert(buf0) ) return NULL;
 	}
 	if( proportional_set_size_kb >= 0 ) {
-		snprintf(buf0, sizeof(buf0), "ProportionalSetSize = %"PRId64, proportional_set_size_kb);
+		snprintf(buf0, sizeof(buf0), "ProportionalSetSize = %" PRId64, proportional_set_size_kb);
 		buf0[sizeof(buf0)-1] = 0;
 		if( !myad->Insert(buf0) ) return NULL;
 	}
@@ -3313,7 +3335,7 @@ ShadowExceptionEvent::writeEvent (FILE *file)
 		// this inserts scheddname, cluster, proc, etc
 		insertCommonIdentifiers(tmpCl2);
 
-		tmp.sprintf( "endtype = null");
+		tmp.formatstr( "endtype = null");
 		tmpCl2.Insert(tmp.Value());
 
 		if (FILEObj) {
@@ -3938,7 +3960,7 @@ ULogEvent::readRusage (FILE *file, rusage &usage)
 }
 
 char*
-ULogEvent::rusageToStr (rusage usage)
+ULogEvent::rusageToStr (const rusage &usage)
 {
 	char* result = (char*) malloc(128);
 	ASSERT( result != NULL );
@@ -5450,7 +5472,7 @@ JobAdInformationEvent::writeEvent(FILE *file, ClassAd *jobad_arg)
 	fprintf(file,"Job ad information event triggered.\n");
 
 	if ( jobad_arg ) {
-		retval = jobad_arg->fPrint(file);
+		retval = fPrintAd(file, *jobad_arg);
 	}
 
     return retval;
@@ -5493,7 +5515,7 @@ JobAdInformationEvent::toClassAd(void)
 	MergeClassAds(myad,jobad,false);
 
 		// Reset MyType in case MergeClassAds() clobbered it.
-	myad->SetMyTypeName("JobAdInformationEvent");
+	SetMyTypeName(*myad, "JobAdInformationEvent");
 
 	return myad;
 }
@@ -5862,5 +5884,120 @@ AttributeUpdate::setOldValue(const char* attr_value)
 	}
 	if (attr_value) {
 		old_value = strdup(attr_value);
+	}
+}
+
+
+PreSkipEvent::PreSkipEvent(void) : skipEventLogNotes(0)
+{
+	eventNumber = ULOG_PRESKIP;
+}
+
+PreSkipEvent::~PreSkipEvent(void)
+{
+	delete [] skipEventLogNotes;
+}
+
+int PreSkipEvent::readEvent (FILE *file)
+{
+	delete[] skipEventLogNotes;
+	skipEventLogNotes = NULL;
+	MyString line;
+	if( !line.readLine(file) ) {
+		return 0;
+	}
+	setSkipNote(line.Value()); // allocate memory
+
+	// check if event ended without specifying the DAG node.
+	// in this case, the submit host would be the event delimiter
+	if ( strncmp(skipEventLogNotes,"...",3)==0 ) {
+			// This should not happen. The event should have a 
+			// DAGMan node associated with it.
+		skipEventLogNotes[0] = '\0';
+		// Backup to leave event delimiter unread go past \n too
+		fseek( file, -4, SEEK_CUR );
+		return 0;
+	}
+	char s[8192];
+	
+	// This event must have a DAG Node attached to it.
+	fpos_t fpos;
+	fgetpos(file,&fpos);
+	if(!fgets(s,8192,file) || strcmp( s,"...\n" ) == 0 ) {
+		fsetpos(file,&fpos);
+		return 0;
+	}
+	char* newline = strchr(s,'\n');
+	if(newline) {
+		*newline = '\0';
+	}
+		// some users of this library (dagman) depend on whitespace
+		// being stripped from the beginning of the log notes field
+	char const *strip_s = s;
+	while( *strip_s && isspace(*strip_s) ) {
+		strip_s++;
+	}
+	char *p = s;
+		// Don't use strcpy because the strings "may not overlap"
+		// according to strcpy(3) man page
+	if (p != strip_s) {
+		while((*p++ = *strip_s++)) {}
+	}
+	delete [] skipEventLogNotes;
+	skipEventLogNotes = strnewp(s);
+	return ( !skipEventLogNotes || strlen(skipEventLogNotes) == 0 )?0:1;
+}
+
+int PreSkipEvent::writeEvent (FILE* file)
+{
+	int retval = fprintf (file, "PRE script return value is PRE_SKIP value\n");
+		// 
+	if (!skipEventLogNotes || retval < 0)
+	{
+		return 0;
+	}
+	retval = fprintf( file, "    %.8191s\n", skipEventLogNotes );
+	if( retval < 0 ) {
+		return 0;
+	}
+	return (1);
+}
+
+ClassAd* PreSkipEvent::toClassAd(void)
+{
+	ClassAd* myad = ULogEvent::toClassAd();
+	if( !myad ) return NULL;
+
+	if( skipEventLogNotes && skipEventLogNotes[0] ) {
+		if( !myad->InsertAttr("SkipEventLogNotes",skipEventLogNotes) ) return NULL;
+	}
+	return myad;
+}
+
+void PreSkipEvent::initFromClassAd(ClassAd* ad)
+{
+	ULogEvent::initFromClassAd(ad);
+
+	if( !ad ) return;
+	char* mallocstr = NULL;
+	ad->LookupString("SkipEventLogNotes", &mallocstr);
+	if( mallocstr ) {
+		setSkipNote(mallocstr);
+		free(mallocstr);
+		mallocstr = NULL;
+	}
+}
+
+void PreSkipEvent::setSkipNote(const char* s)
+{
+	if( skipEventLogNotes ) {
+		delete[] skipEventLogNotes;
+	}
+	if( s ) {
+		skipEventLogNotes = strnewp(s);
+		ASSERT( skipEventLogNotes );
+	}
+	else {
+		skipEventLogNotes = NULL;
 	}
 }

@@ -16,7 +16,22 @@ of all the remote machines running a parallel or mpi universe job.
 %%% ClassAd attribute: Args
 \index{ClassAd job attribute!Args}
 \index{Args!job ClassAd attribute}
-\item[\AdAttr{Args}:]  String representing the arguments passed to the job.
+\item[\AdAttr{Args}:]  A string representing the command line arguments 
+passed to the job, when those arguments are specified using the
+\emph{old} syntax, as specified in section~\ref{man-condor-submit-arguments}.
+
+%%% ClassAd attribute: Arguments
+\index{ClassAd job attribute!Arguments}
+\index{Arguments!job ClassAd attribute}
+\item[\AdAttr{Arguments}:]  A string representing the command line arguments 
+passed to the job, when those arguments are specified using the
+\emph{new} syntax, as specified in section~\ref{man-condor-submit-arguments}.
+
+%%% ClassAd attribute: BatchQueue
+\index{ClassAd job attribute!BatchQueue}
+\index{BatchQueue!job ClassAd attribute}
+\item[\AdAttr{BatchQueue}:]  For grid universe jobs destined for 
+PBS, LSF or SGE, the name of the queue in the remote batch system.
 
 %%% ClassAd attribute: CkptArch
 \index{ClassAd job attribute!CkptArch}
@@ -134,7 +149,8 @@ due to this job.
 \item[\AdAttr{DAGManJobId}:] For a DAGMan node job only,
 the \Attr{ClusterId} job ClassAd attribute
 of the \Condor{dagman} job which is the parent of this node job.
-It is only one layer deep for nested DAGs.
+For nested DAGs, this attribute holds only the \Attr{ClusterId} of
+the job's immediate parent.
 
 %%% ClassAd attribute: DAGParentNodeNames
 \index{ClassAd job attribute!DAGParentNodeNames}
@@ -150,6 +166,47 @@ contain
 \begin{verbatim}
   -append +DAGParentNodeNames=B,C
 \end{verbatim}
+
+%%% ClassAd attribute: DAGManNodesLog
+\index{ClassAd job attribute!DAGManNodesLog}
+\index{DAGManNodesLog!job ClassAd attribute}
+\item[\AdAttr{DAGManNodesLog}:] For a DAGMan node job only, gives the path to
+an event log used exclusively by DAGMan to monitor the state of the DAG's jobs.
+Events are written to this log file in addition to any log file
+specified in the job's submit description file.
+
+%%% ClassAd attribute: DAGManNodesLogMask
+\index{ClassAd job attribute!DAGManNodesMask}
+\index{DAGManNodesMask!job ClassAd attribute}
+\item[\AdAttr{DAGManNodesMask}:] For a DAGMan node job only, 
+a comma-separated list of the event codes that should be written
+to the log specified by \Attr{DAGManNodesLog}, 
+known as the auxiliary log.
+All events not specified in the
+\Attr{DAGManNodesMask} string are not written to the auxiliary event log.
+The value of this attribute is determined
+by DAGMan, and it is passed to the job via the \Condor{submit} command line.
+By default, the following events are written to the
+auxiliary job log:  
+\begin{itemize}
+ \item \Expr{Submit}, event code is 0
+ \item \Expr{Execute}, event code is 1
+ \item \Expr{Executable error}, event code is 2
+ \item \Expr{Job evicted}, event code is 4
+ \item \Expr{Job terminated}, event code is 5
+ \item \Expr{Shadow exception}, event code is 7
+ \item \Expr{Job aborted}, event code is 9
+ \item \Expr{Job suspended}, event code is 10
+ \item \Expr{Job unsuspended}, event code is 11
+ \item \Expr{Job held}, event code is 12
+ \item \Expr{Job released}, event code is 13
+ \item \Expr{Post script terminated}, event code is 16
+ \item \Expr{Globus submit}, event code is 17
+ \item \Expr{Grid submit}, event code is 27
+\end{itemize}
+If \Attr{DAGManNodesLog} is
+not defined, it has no effect. The value of \Attr{DAGManNodesMask} does not
+affect events recorded in the user log file referred to by \Attr{UserLog}.
 
 %%% ClassAd attribute: DelegateJobGSICredentialsLifetime
 \index{ClassAd job attribute!DelegateJobGSICredentialsLifetime}
@@ -354,6 +411,32 @@ a string taken from the definition of the submit description file command
 \SubmitCmd{ec2\_key\_pair}.
 Defines the key pair associated with the EC2 instance. 
 
+%%% ClassAd attribute: EC2SpotPrice
+\index{ClassAd job attribute!EC2SpotPrice}
+\index{EC2SpotPrice!job ClassAd attribute}
+\item[\AdAttr{EC2SpotPrice}:] 
+Used for grid type ec2 jobs;
+a string taken from the definition of the submit description file command
+\SubmitCmd{ec2\_spot\_price}.
+Defines the maximum amount per hour a job submitter is willing to 
+pay to run this job.
+
+%%% ClassAd attribute: EC2SpotRequestID
+\index{ClassAd job attribute!EC2SpotRequestID}
+\index{EC2SpotRequestID!job ClassAd attribute}
+\item[\AdAttr{EC2SpotRequestID}:] 
+Used for grid type ec2 jobs;
+identifies the spot request HTCondor made on behalf of this job.
+
+%%% ClassAd attribute: EC2StatusReasonCode
+\index{ClassAd job attribute!EC2StatusReasonCode}
+\index{EC2StatusReasonCode!job ClassAd attribute}
+\item[\AdAttr{EC2StatusReasonCode}:] 
+Used for grid type ec2 jobs;
+reports the reason for the most recent EC2-level state transition.
+Can be used to determine if a spot request was terminated
+due to a rise in the spot price.
+
 %%% ClassAd attribute: EC2TagNames
 \index{ClassAd job attribute!EC2TagNames}
 \index{EC2TagNames!job ClassAd attribute}
@@ -435,9 +518,23 @@ its value will be included in the e-mail notification upon job completion.
 epoch time of when the job entered into its current status
 So for example, if the job is on hold, the ClassAd expression
 \begin{verbatim}
-    CurrentTime - EnteredCurrentStatus
+    time() - EnteredCurrentStatus
 \end{verbatim}
 will equal the number of seconds that the job has been on hold.
+
+%%% ClassAd attribute: Env
+\index{ClassAd job attribute!Env}
+\index{Args!job ClassAd attribute}
+\item[\AdAttr{Args}:]  A string representing the environment variables 
+passed to the job, when those arguments are specified using the
+\emph{old} syntax, as specified in section~\ref{man-condor-submit-environment}.
+
+%%% ClassAd attribute: Environment
+\index{ClassAd job attribute!Environment}
+\index{Arguments!job ClassAd attribute}
+\item[\AdAttr{Arguments}:]  A string representing the environment variables
+passed to the job, when those arguments are specified using the
+\emph{new} syntax, as specified in section~\ref{man-condor-submit-environment}.
 
 %%% ClassAd attribute: ExecutableSize
 \index{ClassAd job attribute!ExecutableSize}
@@ -495,6 +592,22 @@ reported by the remote job management system.
 of the the submit description file command \SubmitCmd{grid\_resource}.
 It specifies the target grid type, plus additional parameters
 specific to the grid type.
+
+%%% ClassAd attribute: AcctGroup
+\index{ClassAd job attribute!AcctGroup}
+\index{AcctGroup!job ClassAd attribute}
+\item[\AdAttr{AcctGroup}:] The accounting group name, as set in the
+\Condor{submit} file via the accounting\_group command.  This attribute
+is only present if an accounting group was requested by the
+submission. See section~\ref{sec:group-accounting} for more 
+information about accounting groups.
+
+%%% ClassAd attribute: AcctGroupUser
+\index{ClassAd job attribute!AcctGroupUser}
+\index{AcctGroupUser!job ClassAd attribute}
+\item[\AdAttr{AcctGroupUser}:] The user name associated with the
+accounting group.  This attribute is only present if an
+accounting group was requested by the submission.
 
 %%% ClassAd attribute: HoldKillSig
 \index{ClassAd job attribute!HoldKillSig}
@@ -563,6 +676,8 @@ reason that a job was put on hold.
 25 & Invalid cron settings. \\ \hline
 26 & \Macro{SYSTEM\_PERIODIC\_HOLD} evaluated to true. \\ \hline
 27 & The system periodic job policy evaluated to undefined. \\ \hline
+32 & The maximum total input file transfer size was exceeded.  (See \Macro{MAX\_TRANSFER\_INPUT\_MB}.) \\ \hline
+33 & The maximum total output file transfer size was exceeded. (See \Macro{MAX\_TRANSFER\_OUTPUT\_MB}.) \\ \hline
 \end{tabular}
 \end{table}
 \end{center}
@@ -612,7 +727,7 @@ in order to refresh an HTCondor job's initial working directory.
 The value will be \Expr{True}, unless a job explicitly adds this
 attribute, setting it to \Expr{False}.
 
-%%% ClassAd attriute: JobAdInformationAttrs
+%%% ClassAd attribute: JobAdInformationAttrs
 \index{ClassAd job attribute!JobAdInformationAttrs}
 \index{JobAdInformationAttrs!job ClassAd attribute}
 \label{JobAdInformationAttrs-job-attribute}
@@ -623,6 +738,17 @@ This is the same as the configuration setting
 \MacroNI{EVENT\_LOG\_INFORMATION\_ATTRS} (see
 page~\pageref{param:EventLogJobAdInformationAttrs}) but it applies to
 the user log instead of the system event log.
+
+%%% ClassAd attribute: JobDescription
+\index{ClassAd job attribute!JobDescription}
+\index{JobDescription!job ClassAd attribute}
+\label{JobDescription-job-attribute}
+\item[\AdAttr{JobDescription}:]  A string that may be defined for
+a job by setting \SubmitCmd{description} in the submit description file.
+When set, tools which display the executable such as \Condor{q}
+will instead use this string.
+For interactive jobs that do not have a submit description file,
+this string will default to \Expr{"Interactive job"}.
 
 %%% ClassAd attribute: JobCurrentStartDate
 \index{ClassAd job attribute!JobCurrentStartDate}
@@ -665,6 +791,24 @@ See section~\ref{sec:Job-Lease} for details on job leases.
 the time in seconds requested by the job for being allowed to
 gracefully shut down.
 
+%%% ClassAd attribute: JobNotification
+\index{ClassAd job attribute!JobNotification}
+\index{JobNotification!job ClassAd attribute}
+\item[\AdAttr{JobNotification}:] An integer indicating what events should
+be emailed to the user. The integer values correspond to the user 
+choices for the submit command \SubmitCmd{notification}.
+\begin{center}
+\begin{table}[hbt]
+\begin{tabular}{|p{2cm}p{10cm}|} \hline
+\emph{Value} & \emph{Notification value} \\ \hline \hline
+0 & Never \\ \hline
+1 & Always \\ \hline
+2 & Complete \\ \hline
+3 & Error \\ \hline
+\end{tabular}
+\end{table}
+\end{center}
+
 %%% ClassAd attribute: JobPrio
 \index{ClassAd job attribute!JobPrio}
 \index{JobPrio!job ClassAd attribute}
@@ -704,6 +848,7 @@ status of the job.
 4 & Completed \\ \hline
 5 & Held \\ \hline
 6 & Transferring Output \\ \hline
+7 & Suspended \\ \hline
 \end{tabular}
 \end{table}
 \end{center}
@@ -712,7 +857,19 @@ status of the job.
 \index{ClassAd job attribute!JobUniverse}
 \index{JobUniverse!job ClassAd attribute}
 \index{job!universe}
-\index{universe!job attribute definitions}
+\index{universe!job ClassAd attribute definitions!standard = 1}
+\index{universe!job ClassAd attribute definitions!pipe = 2 (no longer used)}
+\index{universe!job ClassAd attribute definitions!linda = 3 (no longer used)}
+\index{universe!job ClassAd attribute definitions!pvm = 4 (no longer used)}
+\index{universe!job ClassAd attribute definitions!vanilla = 5}
+\index{universe!job ClassAd attribute definitions!pvmd = 6 (no longer used)}
+\index{universe!job ClassAd attribute definitions!scheduler = 7}
+\index{universe!job ClassAd attribute definitions!mpi = 8}
+\index{universe!job ClassAd attribute definitions!grid = 9}
+\index{universe!job ClassAd attribute definitions!parallel = 10}
+\index{universe!job ClassAd attribute definitions!java = 11}
+\index{universe!job ClassAd attribute definitions!local = 12}
+\index{universe!job ClassAd attribute definitions!vm = 13}
 \item[\AdAttr{JobUniverse}:]  Integer which indicates the job
 universe.
 
@@ -880,6 +1037,41 @@ like to claim. As long as \AdAttr{CurrentHosts} is the same as
 job run uninterrupted before kicking it off when it is being preempted.
 This can only decrease the amount of time from what the corresponding
 startd expression allows.
+
+%%% ClassAd attribute: MaxTransferInputMB
+\index{ClassAd job attribute!MaxTransferInputMB}
+\index{MaxTransferInputMB!job ClassAd attribute}
+\item[\AdAttr{MaxTransferInputMB}:]
+This integer expression specifies the maximum allowed total size in
+Mbytes of the input files that are transferred for a job.  This
+expression does \emph{not} apply to grid universe, standard universe, or
+files transferred via file transfer plug-ins.  The expression may refer
+to attributes of the job.  The special value -1 indicates no limit.
+If not set, the system setting \Macro{MAX\_TRANSFER\_INPUT\_MB} is
+used.  If the observed size of all input files at submit time is
+larger than the limit, the job will be immediately placed on hold with
+a \Attr{HoldReasonCode} value of 32.
+If the job passes this initial test, but the size of
+the input files increases or the limit decreases so that the limit is
+violated, the job will be placed on hold at the time when the file
+transfer is attempted.
+
+%%% ClassAd attribute: MaxTransferOutputMB
+\index{ClassAd job attribute!MaxTransferOutputMB}
+\index{MaxTransferOutputMB!job ClassAd attribute}
+\item[\AdAttr{MaxTransferOutputMB}:]
+This integer expression specifies the maximum allowed total size in
+Mbytes of the output files that are transferred for a job.  This
+expression does \emph{not} apply to grid universe, standard universe, or
+files transferred via file transfer plug-ins.  The expression may refer
+to attributes of the job.  The special value -1 indicates no limit.
+If not set, the system setting \Macro{MAX\_TRANSFER\_OUTPUT\_MB} is
+used.  If the total size of the job's output files to be transferred
+is larger than the limit, the job will be placed on hold with 
+a \Attr{HoldReasonCode} value of 33.
+The output will be transferred up to the point when the
+limit is hit, so some files may be fully transferred, some partially,
+and some not at all.
 
 %%% ClassAd attribute: MemoryUsage
 \index{ClassAd job attribute!MemoryUsage}
@@ -1321,6 +1513,16 @@ If \Expr{False}, then the job's input is taken from a file on the
 remote machine (pre-staged), and 
 the name of the file is given by the job attribute \Attr{In}.
 
+%%% ClassAd attribute: TransferInputSizeMB
+\index{ClassAd job attribute!TransferInputSizeMB}
+\index{TransferInputSizeMB!job ClassAd attribute}
+\item[\AdAttr{TransferInputSizeMB}:]
+The total size in Mbytes of input files to be transferred for the
+job.  Files transferred via file transfer plug-ins are not included.
+This attribute is automatically set by \Condor{submit}; jobs submitted
+via other submission methods, such as SOAP, may not define this
+attribute.
+
 %%% ClassAd attribute: TransferOut
 \index{ClassAd job attribute!TransferOut}
 \index{TransferOut!job ClassAd attribute}
@@ -1334,6 +1536,36 @@ by job attribute \Attr{Out}.
 If \Expr{False}, no transfer takes place (remote to submit machine),
 and the name of the file is the file referred to
 by job attribute \Attr{Out}.
+
+%%% ClassAd attribute: TransferringInput
+\index{ClassAd job attribute!TransferringInput}
+\index{TransferringInput!job ClassAd attribute}
+\item[\AdAttr{TransferringInput}:]
+A boolean value that indicates whether the job is currently
+transferring input files.  The value is \Expr{Undefined} if the job is
+not scheduled to run or has not yet attempted to start transferring
+input.  When this value is \Expr{True}, to see whether the transfer is
+active or queued, check \AdAttr{TransferQueued}.
+
+%%% ClassAd attribute: TransferringOutput
+\index{ClassAd job attribute!TransferringOutput}
+\index{TransferringOutput!job ClassAd attribute}
+\item[\AdAttr{TransferringOutput}:]
+A boolean value that indicates whether the job is currently
+transferring output files.  The value is \Expr{Undefined} if the job
+is not scheduled to run or has not yet attempted to start transferring
+output.  When this value is \Expr{True}, to see whether the transfer
+is active or queued, check \AdAttr{TransferQueued}.
+
+%%% ClassAd attribute: TransferQueued
+\index{ClassAd job attribute!TransferQueued}
+\index{TransferQueued!job ClassAd attribute}
+\item[\AdAttr{TransferQueued}:]
+
+A boolean value that indicates whether the job is currently waiting to
+transfer files because of limits placed by
+\Macro{MAX\_CONCURRENT\_DOWNLOADS} or
+\Macro{MAX\_CONCURRENT\_UPLOADS}.
 
 %%% ClassAd attribute: UserLog
 \index{ClassAd job attribute!UserLog}
@@ -1468,4 +1700,109 @@ This attribute is currently limited to apply only to Xen virtual machines.
 %\index{ClassAd job attribute!VM\_VCPUS}
 %\item[\AdAttr{VM\_VCPUS}:] Definition here.
 
+\end{description}
+
+\label{Job-ClassAd-DAGAttributes}
+The following job ClassAd attributes appear in the job ClassAd
+only for the \Condor{dagman}
+job submitted under DAGMan.
+They represent status information for the DAG.
+
+\begin {description}
+
+%%% ClassAd attribute: DAG_InRecovery
+\index{ClassAd job attribute!DAG\_InRecovery}
+\index{DAG\_InRecovery!job ClassAd attribute}
+\label{AttrDAGInRecovery}
+\item[\AdAttr{DAG\_InRecovery}:]   
+The value 1 if the DAG is in recovery mode, and
+The value 0 otherwise. 
+
+%%% ClassAd attribute: DAG_NodesDone
+\index{ClassAd job attribute!DAG\_NodesDone}
+\index{DAG\_NodesDone!job ClassAd attribute}
+\label{AttrDAGNodesDone}
+\item[\AdAttr{DAG\_NodesDone}:]   
+The number of DAG nodes that have finished successfully.
+This means that the entire node has finished, 
+not only an actual HTCondor job or jobs.
+
+%%% ClassAd attribute: DAG_NodesFailed
+\index{ClassAd job attribute!DAG\_NodesFailed}
+\index{DAG\_NodesFailed!job ClassAd attribute}
+\label{AttrDAGNodesFailed}
+\item[\AdAttr{DAG\_NodesFailed}:]
+The number of DAG nodes that have failed.
+This value includes all retries, if there are any.
+
+%%% ClassAd attribute: DAG_NodesPostrun
+\index{ClassAd job attribute!DAG\_NodesPostrun}
+\index{DAG\_NodesPostrun!job ClassAd attribute}
+\label{AttrDAGNodesPostrun}
+\item[\AdAttr{DAG\_NodesPostrun}:]
+The number of DAG nodes for which a POST script is running 
+or has been deferred because of a POST script throttle setting. 
+
+%%% ClassAd attribute: DAG_NodesPrerun
+\index{ClassAd job attribute!DAG\_NodesPrerun}
+\index{DAG\_NodesPrerun!job ClassAd attribute}
+\label{AttrDAGNodesPrerun}
+\item[\AdAttr{DAG\_NodesPrerun}:]
+The number of DAG nodes for which a PRE script is running 
+or has been deferred because of a PRE script throttle setting. 
+
+%%% ClassAd attribute: DAG_NodesQueued
+\index{ClassAd job attribute!DAG\_NodesQueued}
+\index{DAG\_NodesQueued!job ClassAd attribute}
+\label{AttrDAGNodesQueued}
+\item[\AdAttr{DAG\_NodesQueued}:]
+The number of DAG nodes for which the actual HTCondor job or jobs 
+are queued.
+The queued jobs may be in any state.
+
+%%% ClassAd attribute: DAG_NodesReady
+\index{ClassAd job attribute!DAG\_NodesReady}
+\index{DAG\_NodesReady!job ClassAd attribute}
+\label{AttrDAGNodesReady}
+\item[\AdAttr{DAG\_NodesReady}:]
+The number of DAG nodes that are ready to run,
+but which have not yet started running.
+
+%%% ClassAd attribute: DAG_NodesTotal
+\index{ClassAd job attribute!DAG\_NodesTotal}
+\index{DAG\_NodesTotal!job ClassAd attribute}
+\label{AttrDAGNodesTotal}
+\item[\AdAttr{DAG\_NodesTotal}:]   
+The total number of nodes in the DAG, including the FINAL node, if there
+is a FINAL node.
+
+%%% ClassAd attribute: DAG_NodesUnready
+\index{ClassAd job attribute!DAG\_NodesUnready}
+\index{DAG\_NodesUnready!job ClassAd attribute}
+\label{AttrDAGNodesUnready}
+\item[\AdAttr{DAG\_NodesUnready}:]   
+The number of DAG nodes that are not ready to run.
+This is a node in which one or more of the parent nodes has not yet finished. 
+
+%%% ClassAd attribute: DAG_Status
+\index{ClassAd job attribute!DAG\_Status}
+\index{DAG\_Status!job ClassAd attribute}
+\label{AttrDAGStatus}
+\item[\AdAttr{DAG\_Status}:]   
+The overall status of the DAG, with the same values as the \Env{\_DAG\_STATUS}
+macro.
+\begin{center}
+\begin{table}[hbt]
+\begin{tabular}{|p{2cm}p{10cm}|} \hline
+\emph{Value} & \emph{Status} \\ \hline \hline
+0 & OK \\ \hline
+1 & error; an error condition different than those listed here \\ \hline
+2 & one or more nodes in the DAG have failed \\ \hline
+3 & the DAG has been aborted by an ABORT-DAG-ON specification  \\ \hline
+4 & removed; the DAG has been removed by \Condor{rm} \\ \hline
+5 & a cycle was found in the DAG \\ \hline
+6 & the DAG has been suspended (see section~\ref{sec:DagSuspend}) \\ \hline
+\end{tabular}
+\end{table}
+\end{center}
 \end{description}

@@ -22,6 +22,7 @@
 #include "classad/classadItor.h"
 #include "classad/source.h"
 #include "classad/sink.h"
+#include "classad/classadCache.h"
 
 using namespace std;
 
@@ -33,6 +34,19 @@ namespace classad {
 // from an older version of ClassAds with slightly different evaluation
 // semantics. It will be removed without warning in a future release.
 bool _useOldClassAdSemantics = false;
+
+// Should parsed expressions be cached and shared between multiple ads.
+// The default is false.
+static bool doExpressionCaching = false;
+
+void ClassAdSetExpressionCaching(bool do_caching) {
+	doExpressionCaching = do_caching;
+}
+
+bool ClassAdGetExpressionCaching()
+{
+	return doExpressionCaching;
+}
 
 // This is probably not the best place to put these. However, 
 // I am reconsidering how we want to do errors, and this may all
@@ -89,15 +103,19 @@ CopyFrom( const ClassAd &ad )
 	bool                        succeeded;
 
     succeeded = true;
-	if (this == &ad) {
+	if (this == &ad) 
+	{
 		succeeded = false;
-	} else {
+	} else 
+	{
 		Clear( );
-        ExprTree::CopyFrom(ad);
+		
+		// copy scoping attributes
+		ExprTree::CopyFrom(ad);
 		chained_parent_ad = ad.chained_parent_ad;
 		alternateScope = ad.alternateScope;
 		
-		DisableDirtyTracking();
+		this->do_dirty_tracking = false;
 		for( itr = ad.attrList.begin( ); itr != ad.attrList.end( ); itr++ ) {
 			if( !( tree = itr->second->Copy( ) ) ) {
 				Clear( );
@@ -106,10 +124,14 @@ CopyFrom( const ClassAd &ad )
                 succeeded = false;
                 break;
 			}
-			tree->SetParentScope(this); // ajr
-			attrList[itr->first] = tree;
+			
+			Insert(itr->first, tree, false);
+			if (ad.do_dirty_tracking && ad.IsAttributeDirty(itr->first)) {
+				dirtyAttrList.insert(itr->first);
+			}
 		}
-		EnableDirtyTracking();
+
+		do_dirty_tracking = ad.do_dirty_tracking;
 	}
 	return succeeded;
 }
@@ -141,14 +163,16 @@ SameAs(const ExprTree *tree) const
 {
     bool is_same;
 
-    if (this == tree) {
+    const ExprTree * pSelfTree = tree->self();
+    
+    if (this == pSelfTree) {
         is_same = true;
-   } else if (tree->GetKind() != CLASSAD_NODE) {
+    } else if (pSelfTree->GetKind() != CLASSAD_NODE) {
         is_same = false;
    } else {
        const ClassAd *other_classad;
 
-       other_classad = (const ClassAd *) tree;
+       other_classad = (const ClassAd *) pSelfTree;
 
        if (attrList.size() != other_classad->attrList.size()) {
            is_same = false;
@@ -199,31 +223,6 @@ Clear( )
 	attrList.clear( );
 }
 
-
-ClassAd *ClassAd::
-MakeClassAd( vector< pair< string, ExprTree* > > &attrs )
-{
-	vector< pair<string, ExprTree*> >::iterator	itr;
-	ClassAd *newAd = new ClassAd( );
-
-	if( !newAd ) {
-		CondorErrno = ERR_MEM_ALLOC_FAILED;
-		CondorErrMsg = "";
-		return( NULL );
-	};
-
-	for( itr = attrs.begin( ); itr != attrs.end( ); itr++ ) {
-		if( !newAd->Insert( itr->first, itr->second ) ) {
-			delete newAd;
-			return( NULL );
-		}
-		itr->first = "";
-		itr->second = NULL;
-	}
-	return( newAd );
-}
-
-
 void ClassAd::
 GetComponents( vector< pair< string, ExprTree* > > &attrs ) const
 {
@@ -240,14 +239,62 @@ GetComponents( vector< pair< string, ExprTree* > > &attrs ) const
 bool ClassAd::
 InsertAttr( const string &name, int value, Value::NumberFactor f )
 {
+	ExprTree* plit;
 	Value val;
+	
 	val.SetIntegerValue( value );
-	return( Insert( name, Literal::MakeLiteral( val, f ) ) );
+	plit  = Literal::MakeLiteral( val, f );
+	
+	return( Insert( name, plit ) );
+}
+
+
+bool ClassAd::
+InsertAttr( const string &name, long value, Value::NumberFactor f )
+{
+	ExprTree* plit;
+	Value val;
+
+	val.SetIntegerValue( value );
+	plit = Literal::MakeLiteral( val, f );
+	return( Insert( name, plit ) );
+}
+
+
+bool ClassAd::
+InsertAttr( const string &name, long long value, Value::NumberFactor f )
+{
+	ExprTree* plit;
+	Value val;
+
+	val.SetIntegerValue( value );
+	plit = Literal::MakeLiteral( val, f );
+	return( Insert( name, plit ) );
 }
 
 
 bool ClassAd::
 DeepInsertAttr( ExprTree *scopeExpr, const string &name, int value, 
+	Value::NumberFactor f )
+{
+	ClassAd *ad = _GetDeepScope( scopeExpr );
+	if( !ad ) return( false );
+	return( ad->InsertAttr( name, value, f ) );
+}
+
+
+bool ClassAd::
+DeepInsertAttr( ExprTree *scopeExpr, const string &name, long value, 
+	Value::NumberFactor f )
+{
+	ClassAd *ad = _GetDeepScope( scopeExpr );
+	if( !ad ) return( false );
+	return( ad->InsertAttr( name, value, f ) );
+}
+
+
+bool ClassAd::
+DeepInsertAttr( ExprTree *scopeExpr, const string &name, long long value, 
 	Value::NumberFactor f )
 {
 	ClassAd *ad = _GetDeepScope( scopeExpr );
@@ -262,9 +309,13 @@ DeepInsertAttr( ExprTree *scopeExpr, const string &name, int value,
 bool ClassAd::
 InsertAttr( const string &name, double value, Value::NumberFactor f )
 {
+	ExprTree* plit;
 	Value val;
+	
 	val.SetRealValue( value );
-	return( Insert( name, Literal::MakeLiteral( val, f ) ) );
+	plit  = Literal::MakeLiteral( val, f );
+	
+	return( Insert( name, plit ) );
 }
 	
 
@@ -284,9 +335,13 @@ DeepInsertAttr( ExprTree *scopeExpr, const string &name, double value,
 bool ClassAd::
 InsertAttr( const string &name, bool value )
 {
+	ExprTree* plit ;
 	Value val;
+	
 	val.SetBooleanValue( value );
-	return( Insert( name, Literal::MakeLiteral( val ) ) );
+	plit  = Literal::MakeLiteral( val );
+	
+	return( Insert( name, plit ) );
 }
 
 
@@ -305,11 +360,13 @@ DeepInsertAttr( ExprTree *scopeExpr, const string &name, bool value )
 bool ClassAd::
 InsertAttr( const string &name, const char *value )
 {
-	// We could do a cast and call InsertAttr() again, but
-	// we'll avoid a copy if avoid the cast.
+	ExprTree* plit;
 	Value val;
+	
 	val.SetStringValue( value );
-	return( Insert( name, Literal::MakeLiteral( val ) ) );
+	plit  = Literal::MakeLiteral( val );
+	
+	return( Insert( name, plit ) );
 }
 
 bool ClassAd::
@@ -323,9 +380,13 @@ DeepInsertAttr( ExprTree *scopeExpr, const string &name, const char *value )
 bool ClassAd::
 InsertAttr( const string &name, const string &value )
 {
+	ExprTree* plit ;
 	Value val;
+	
 	val.SetStringValue( value );
-	return( Insert( name, Literal::MakeLiteral( val ) ) );
+	plit  = Literal::MakeLiteral( val );
+	
+	return( Insert( name, plit ) );
 }
 
 
@@ -338,40 +399,157 @@ DeepInsertAttr( ExprTree *scopeExpr, const string &name, const string &value )
 }
 // --- end string attribute insertion
 
-
-
-// --- begin expression insertion 
-bool ClassAd::
-Insert( const string &name, ExprTree *tree )
+bool ClassAd::Insert( const std::string& serialized_nvp)
 {
+
+  bool bRet = false;
+  string name, szValue;
+  size_t pos, npos, vpos;
+  size_t bpos = 0;
+  
+  // comes in as "name = value" "name= value" or "name =value"
+  npos=pos=serialized_nvp.find("=");
+  
+  // only try to process if the string is valid 
+  if ( pos != string::npos  )
+  {
+    while (npos > 0 && serialized_nvp[npos-1] == ' ')
+    {
+      npos--;
+    }
+    while (bpos < npos && serialized_nvp[bpos] == ' ')
+    {
+      bpos++;
+    }
+    name = serialized_nvp.substr(bpos, npos - bpos);
+
+    vpos=pos+1;
+    while (serialized_nvp[vpos] == ' ')
+    {
+      vpos++;
+    }
+
+    szValue = serialized_nvp.substr(vpos);
+
+	if ( name[0] == '\'' ) {
+		// We don't handle quoted attribute names for caching here.
+		// Hand the name-value-pair off to the parser as a one-attribute
+		// ad and merge the results into this ad.
+		ClassAdParser parser;
+		ClassAd new_ad;
+		name = "[" + serialized_nvp + "]";
+		if ( parser.ParseClassAd( name, new_ad, true ) ) {
+			return Update( new_ad );
+		} else {
+			return false;
+		}
+	}
+
+    // here is the special logic to check
+    CachedExprEnvelope * cache_check = NULL;
+	if ( doExpressionCaching ) {
+		cache_check = CachedExprEnvelope::check_hit( name, szValue );
+	}
+    if ( cache_check ) 
+    {
+	ExprTree * in = cache_check;
+	bRet = Insert( name, in, false );
+    }
+    else
+    {
+      ClassAdParser parser;
+      ExprTree * newTree=0;
+
+      // we did not hit in the cache... parse the expression
+      newTree = parser.ParseExpression(szValue);
+
+      if ( newTree )
+      {
+		// if caching is enabled, and we got to here then we know that the 
+		// cache doesn't already have an entry for this name:value, so add
+		// it to the cache now. 
+		if (doExpressionCaching) {
+			newTree = CachedExprEnvelope::cache(name, szValue, newTree);
+		}
+		bRet = Insert(name, newTree, false);
+      }
+
+    }
+    
+  } // end if pos != string::npos
+
+  return bRet;
+}
+
+
+bool ClassAd::Insert( const std::string& attrName, ClassAd *& expr, bool cache )
+{
+    ExprTree * tree = expr;
+    bool bRet =  Insert( attrName, tree, cache );
+    
+    expr = (ClassAd *)tree;
+    return (bRet);
+	
+}
+
+bool ClassAd::Insert( const std::string& attrName, ExprTree *& pRef, bool cache )
+{
+	bool bRet = false;
+	ExprTree * tree = pRef;
+	const std::string * pstrAttr = &attrName;
+#ifndef WIN32
+	std::string strName; // in case we want to insert attrName into the cache
+#endif
+	
 		// sanity checks
-	if( name == "" ) {
+	if( attrName.empty() ) {
 		CondorErrno = ERR_MISSING_ATTRNAME;
 		CondorErrMsg= "no attribute name when inserting expression in classad";
 		return( false );
 	}
-	if( !tree ) {
+	if( !pRef ) {
 		CondorErrno = ERR_BAD_EXPRESSION;
-		CondorErrMsg = "no expression when inserting attribute " + name +
-				" in classad";
+		CondorErrMsg = "no expression when inserting attribute in classad";
 		return( false );
 	}
 
-	// parent of the expression is this classad
-	tree->SetParentScope( this );
-
-	pair<AttrList::iterator,bool> insert_result =
-		attrList.insert( AttrList::value_type(name,tree) );
-
-	if( !insert_result.second ) {
-			// replace existing value
-		delete insert_result.first->second;
-		insert_result.first->second = tree;
+	if (doExpressionCaching && cache)
+	{
+	  std::string empty; // an empty string to tell the cache to unparse the pRef
+#ifndef WIN32
+	  // when inserting an attrib into the cache, strName can get overwritten
+	  // by the string sharing code.  if it does we want to use strName from now on.
+	  strName = attrName; pstrAttr = &strName;
+	  tree = CachedExprEnvelope::cache(strName, empty, pRef);
+#else
+	  // std:string based string sharing is disabled on windows.
+	  tree = CachedExprEnvelope::cache(attrName, empty, pRef);
+#endif
+	  // what goes in may be destroyed in preference for cache.
+	  pRef = (ExprTree *)tree->self(); 
 	}
+	
+	if (tree)
+	{
+		
+		// parent of the expression is this classad
+		tree->SetParentScope( this );
+				
+		pair<AttrList::iterator,bool> insert_result =
+			attrList.insert( AttrList::value_type(*pstrAttr,tree) );
 
-	MarkAttributeDirty(name);
-        
-	return( true );
+		if( !insert_result.second ) {
+				// replace existing value
+			delete insert_result.first->second;
+			insert_result.first->second = tree;
+		}
+
+		MarkAttributeDirty(*pstrAttr);
+
+		bRet = true;
+	}
+	
+	return( bRet );
 }
 
 
@@ -510,7 +688,10 @@ Delete( const string &name )
 		
 		undefined_value.SetUndefinedValue();
 		deleted_attribute = true;
-		Insert(name, Literal::MakeLiteral(undefined_value));
+	
+		ExprTree* plit  = Literal::MakeLiteral( undefined_value );
+	
+		Insert(name, plit);
 	}
 
 	if (!deleted_attribute) {
@@ -559,7 +740,8 @@ Remove( const string &name )
 		
 		Value undefined_value;
 		undefined_value.SetUndefinedValue();
-		Insert(name, Literal::MakeLiteral(undefined_value));
+		ExprTree* plit  = Literal::MakeLiteral( undefined_value );
+		Insert(name, plit);
 	}
 	return tree;
 }
@@ -587,7 +769,8 @@ Update( const ClassAd& ad )
 {
 	AttrList::const_iterator itr;
 	for( itr=ad.attrList.begin( ); itr!=ad.attrList.end( ); itr++ ) {
-		if(!Insert( itr->first, itr->second->Copy( ) )) {
+		ExprTree * cpy = itr->second->Copy();
+		if(!Insert( itr->first, cpy, false)) {
 			return false;
 		}
 	}
@@ -700,8 +883,7 @@ Copy( ) const
 			CondorErrMsg = "";
 			return( NULL );
 		}
-		tree->SetParentScope(newAd); // ajr
-		newAd->attrList[itr->first] = tree;
+		newAd->Insert(itr->first,tree,false);
 	}
 	newAd->EnableDirtyTracking();
 	return newAd;
@@ -859,6 +1041,20 @@ EvaluateAttrInt( const string &attr, int &i )  const
 }
 
 bool ClassAd::
+EvaluateAttrInt( const string &attr, long &i )  const
+{
+	Value val;
+	return( EvaluateAttr( attr, val ) && val.IsIntegerValue( i ) );
+}
+
+bool ClassAd::
+EvaluateAttrInt( const string &attr, long long &i )  const
+{
+	Value val;
+	return( EvaluateAttr( attr, val ) && val.IsIntegerValue( i ) );
+}
+
+bool ClassAd::
 EvaluateAttrReal( const string &attr, double &r )  const
 {
 	Value val;
@@ -867,6 +1063,20 @@ EvaluateAttrReal( const string &attr, double &r )  const
 
 bool ClassAd::
 EvaluateAttrNumber( const string &attr, int &i )  const
+{
+	Value val;
+	return( EvaluateAttr( attr, val ) && val.IsNumber( i ) );
+}
+
+bool ClassAd::
+EvaluateAttrNumber( const string &attr, long &i )  const
+{
+	Value val;
+	return( EvaluateAttr( attr, val ) && val.IsNumber( i ) );
+}
+
+bool ClassAd::
+EvaluateAttrNumber( const string &attr, long long &i )  const
 {
 	Value val;
 	return( EvaluateAttr( attr, val ) && val.IsNumber( i ) );
@@ -900,19 +1110,36 @@ EvaluateAttrBool( const string &attr, bool &b ) const
 	return( EvaluateAttr( attr, val ) && val.IsBooleanValue( b ) );
 }
 
+#if 0
+// disabled (see header)
 bool ClassAd::
 EvaluateAttrClassAd( const string &attr, ClassAd *&classad ) const
 {
 	Value val;
+		// TODO: filter out shared_ptr<ClassAd> values that would
+		// go out of scope here (if such a thing is ever added),
+		// or return a shared_ptr and make a copy here of the
+		// ClassAd if it is not already managed by a shared_ptr.
 	return( EvaluateAttr( attr, val ) && val.IsClassAdValue( classad ) );
 }
+#endif
 
+#if 0
+// disabled (see header)
 bool ClassAd::
 EvaluateAttrList( const string &attr, ExprList *&l ) const
 {
     Value val;
-	return( EvaluateAttr( attr, val ) && val.IsListValue( l ) );
+		// This version of EvaluateAttrList() can only succeed
+		// if the result is LIST_VALUE, not SLIST_VALUE, because
+		// the shared_ptr<ExprList> goes out of scope before
+		// returning to the caller.  Either do as below and filter
+		// out SLIST_VALUE, or return a shared_ptr and create a
+		// copy of the list here if it is not already managed
+		// by a shared_ptr.
+	return( EvaluateAttr( attr, val ) && val.GetType() == LIST_VALUE && val.IsListValue( l ) );
 }
+#endif
 
 bool ClassAd::
 GetExternalReferences( const ExprTree *tree, References &refs, bool fullNames )
@@ -1097,6 +1324,9 @@ _GetExternalReferences( const ExprTree *expr, ClassAd *ad,
             return( true );
         }
 
+		case EXPR_ENVELOPE: {
+			return _GetExternalReferences( ((CachedExprEnvelope*)expr)->get(), ad, state, refs, fullNames );
+		}
 
         default:
             return false;
@@ -1245,6 +1475,9 @@ _GetExternalReferences( const ExprTree *expr, ClassAd *ad,
             return( true );
         }
 
+		case EXPR_ENVELOPE: {
+			return _GetExternalReferences( ( (CachedExprEnvelope*)expr )->get(), ad, state, refs );
+		}
 
         default:
             return false;
@@ -1483,7 +1716,12 @@ _GetInternalReferences( const ExprTree *expr, ClassAd *ad,
 
             return true;
         break;
-                            }
+            }
+        
+		case EXPR_ENVELOPE: {
+			return _GetInternalReferences( ((CachedExprEnvelope*)expr)->get(), ad, state, refs,fullNames);
+		}
+           
 
         default:
             return false;
@@ -1759,6 +1997,39 @@ void ClassAd::ChainToAd(ClassAd *new_chain_parent_ad)
 	return;
 }
 
+int ClassAd::PruneChildAd()
+{
+	int iRet =0;
+	
+	if (chained_parent_ad)
+	{
+		// loop through cleaning all expressions which are the same.
+		AttrList::const_iterator	itr= attrList.begin( );
+		ExprTree 					*tree;
+	
+		while (itr != attrList.end() )
+		{
+			tree = chained_parent_ad->Lookup(itr->first);
+				
+			if(  tree && tree->SameAs(itr->second) ) {
+				AttrList::const_iterator rm_itr = itr;
+				itr++; // once 
+				// 1st remove from dirty list
+				MarkAttributeClean(rm_itr->first);
+				delete rm_itr->second;
+				attrList.erase( rm_itr->first );
+				iRet++;
+			}
+			else
+			{
+				itr++;
+			}
+		}
+	}
+	
+	return iRet;
+}
+
 void ClassAd::Unchain(void)
 {
 	chained_parent_ad = NULL;
@@ -1792,7 +2063,7 @@ void ClassAd::MarkAttributeClean(const string &name)
 	return;
 }
 
-bool ClassAd::IsAttributeDirty(const string &name)
+bool ClassAd::IsAttributeDirty(const string &name) const
 {
 	bool is_dirty;
 

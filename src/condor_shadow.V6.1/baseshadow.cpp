@@ -33,7 +33,6 @@
 #include "classad_helpers.h"
 #include "classad_merge.h"
 #include "dc_startd.h"
-
 #include <math.h>
 
 // these are declared static in baseshadow.h; allocate space here
@@ -42,7 +41,8 @@ BaseShadow* BaseShadow::myshadow_ptr = NULL;
 
 
 // this appears at the bottom of this file:
-extern "C" int display_dprintf_header(char **buf,int *bufpos,int *buflen);
+//extern "C" int display_dprintf_header(char **buf,int *bufpos,int *buflen);
+int display_dprintf_header(char **buf,int *bufpos,int *buflen);
 extern bool sendUpdatesToSchedd;
 
 // some helper functions
@@ -51,8 +51,6 @@ int getJobAdExitedBySignal(ClassAd *jad, int &exited_by_signal);
 int getJobAdExitSignal(ClassAd *jad, int &exit_signal);
 
 BaseShadow::BaseShadow() {
-	spool = NULL;
-	fsDomain = uidDomain = NULL;
 	jobAd = NULL;
 	remove_requested = false;
 	cluster = proc = -1;
@@ -77,8 +75,6 @@ BaseShadow::BaseShadow() {
 }
 
 BaseShadow::~BaseShadow() {
-	if (spool) free(spool);
-	if (fsDomain) free(fsDomain);
 	if (jobAd) FreeJobAd(jobAd);
 	if (gjid) free(gjid); 
 	if (scheddAddr) free(scheddAddr);
@@ -274,24 +270,6 @@ void BaseShadow::startdClaimedCB(DCMsgCallback *) {
 
 void BaseShadow::config()
 {
-	if (spool) free(spool);
-	spool = param("SPOOL");
-	if (!spool) {
-		EXCEPT("SPOOL not specified in config file.");
-	}
-
-	if (fsDomain) free(fsDomain);
-	fsDomain = param( "FILESYSTEM_DOMAIN" );
-	if (!fsDomain) {
-		EXCEPT("FILESYSTEM_DOMAIN not specified in config file.");
-	}
-
-	if (uidDomain) free(uidDomain);
-	uidDomain = param( "UID_DOMAIN" );
-	if (!uidDomain) {
-		EXCEPT("UID_DOMAIN not specified in config file.");
-	}
-
 	reconnect_ceiling = param_integer( "RECONNECT_BACKOFF_CEILING", 300 );
 
 	reconnect_e_factor = 0.0;
@@ -328,7 +306,7 @@ int BaseShadow::cdToIwd() {
 				"He who travels without bounds\n"
 				"Can't locate data.\n\n" );
 		MyString hold_reason;
-		hold_reason.sprintf("Cannot access initial working directory %s: %s",
+		hold_reason.formatstr("Cannot access initial working directory %s: %s",
 		                    iwd.Value(), strerror(chdir_errno));
 		dprintf( D_ALWAYS, "%s\n",hold_reason.Value());
 		holdJobAndExit(hold_reason.Value(),CONDOR_HOLD_CODE_IwdError,chdir_errno);
@@ -573,7 +551,7 @@ BaseShadow::terminateJob( update_style_t kind ) // has a default argument of US_
 	/* The first thing we do is record that we are in a termination pending
 		state. */
 	if (kind == US_NORMAL) {
-		str.sprintf("%s = TRUE", ATTR_TERMINATION_PENDING);
+		str.formatstr("%s = TRUE", ATTR_TERMINATION_PENDING);
 		jobAd->Insert(str.Value());
 	}
 
@@ -606,7 +584,7 @@ BaseShadow::terminateJob( update_style_t kind ) // has a default argument of US_
 
 		if (exited_by_signal == TRUE) {
 			reason = JOB_COREDUMPED;
-			str.sprintf("%s = \"%s\"", ATTR_JOB_CORE_FILENAME, core_file_name);
+			str.formatstr("%s = \"%s\"", ATTR_JOB_CORE_FILENAME, core_file_name);
 			jobAd->Insert(str.Value());
 		} else {
 			reason = JOB_EXITED;
@@ -637,7 +615,7 @@ BaseShadow::terminateJob( update_style_t kind ) // has a default argument of US_
 	/* also store the corefilename into the jobad so we can recover this 
 		during a termination pending scenario. */
 	if( reason == JOB_COREDUMPED ) {
-		str.sprintf("%s = \"%s\"", ATTR_JOB_CORE_FILENAME, getCoreName());
+		str.formatstr("%s = \"%s\"", ATTR_JOB_CORE_FILENAME, getCoreName());
 		jobAd->Insert(str.Value());
 	}
 
@@ -727,7 +705,7 @@ BaseShadow::evictJob( int reason )
 	MyString from_where;
 	MyString machine;
 	if( getMachineName(machine) ) {
-		from_where.sprintf(" from %s",machine.Value());
+		from_where.formatstr(" from %s",machine.Value());
 	}
 	dprintf( D_ALWAYS, "Job %d.%d is being evicted%s\n",
 			 getCluster(), getProc(), from_where.Value() );
@@ -829,43 +807,51 @@ BaseShadow::emailUser( const char *subjectline )
 
 void BaseShadow::initUserLog()
 {
-	MyString logfilename;
+	MyString logfilename,dagmanLogFile;
 	int  use_xml;
-	bool result;
 
 		// we expect job_updater to already be initialized, in case we
 		// need to put the job on hold as a result of failure to open
 		// the log
 	ASSERT( job_updater );
 
+	std::vector<const char*> logfiles;
 	if ( getPathToUserLog(jobAd, logfilename) ) {
-		result = uLog.initialize (owner.Value(), domain.Value(), logfilename.Value(), cluster, proc, 0, gjid);
-		// It is important to NOT ignore a failure to initialize the user log,
-		// since if we fail to initialize here, then all event logging 
-		// in the shadow from this point forward are effectively ignored.
-		// So if we fail to initialize the user log, put this job on hold.
-		// Future work: it would be good to pass use the error stack to 
-		// figure out -why- the initialization failed, allowing the shadow
-		// to retry automatically -vs- go on hold depending upon the details
-		// of the failure.
-		if ( result == false ) {
+		logfiles.push_back(logfilename.Value());
+		dprintf(D_FULLDEBUG, "%s = %s\n", ATTR_ULOG_FILE, logfilename.Value());	
+	}
+	if ( getPathToUserLog(jobAd, dagmanLogFile, ATTR_DAGMAN_WORKFLOW_LOG) ) {
+		logfiles.push_back(dagmanLogFile.Value());
+		dprintf(D_FULLDEBUG, "%s = %s\n", ATTR_DAGMAN_WORKFLOW_LOG, dagmanLogFile.Value());	
+	}
+	if( !logfiles.empty()) {
+		if( !uLog.initialize (owner.Value(), domain.Value(), logfiles,
+				cluster, proc, 0, gjid)) {
 			MyString hold_reason;
-			hold_reason.sprintf(
-				"Failed to initialize user log to %s", logfilename.Value());
+			hold_reason.formatstr("Failed to initialize user log to %s or %s",
+				logfilename.Value(), dagmanLogFile.Value());
 			dprintf( D_ALWAYS, "%s\n",hold_reason.Value());
-			holdJobAndExit(hold_reason.Value(),CONDOR_HOLD_CODE_UnableToInitUserLog,0);
-			// holdJobAndExit() should not return, but just in case it does EXCEPT
-			EXCEPT("Failed to initialize user log to %s",logfilename.Value());
+			holdJobAndExit(hold_reason.Value(),
+					CONDOR_HOLD_CODE_UnableToInitUserLog,0);
+				// holdJobAndExit() should not return, but just in case it does
+				// EXCEPT
+			EXCEPT("Failed to initialize user log: %s",hold_reason.Value());
 		}
-		if (jobAd->LookupBool(ATTR_ULOG_USE_XML, use_xml)
-			&& use_xml) {
-			uLog.setUseXML(true);
-		} else {
-			uLog.setUseXML(false);
+		uLog.setUseXML(jobAd->LookupBool(ATTR_ULOG_USE_XML, use_xml) &&
+			use_xml);
+		if(logfiles.size() > 1) {
+			MyString msk;
+			jobAd->LookupString(ATTR_DAGMAN_WORKFLOW_MASK, msk);
+			Tokenize(msk.Value());
+			dprintf(D_FULLDEBUG, "Mask is \"%s\"\n", msk.Value());
+			while(const char* mask = GetNextToken(",",true)) {
+				dprintf(D_FULLDEBUG, "Adding \"%s\" to mask\n",mask);
+				uLog.AddToMask(ULogEventNumber(atoi(mask)));
+			}
 		}
-		dprintf(D_FULLDEBUG, "%s = %s\n", ATTR_ULOG_FILE, logfilename.Value());
 	} else {
 		dprintf(D_FULLDEBUG, "no %s found\n", ATTR_ULOG_FILE);
+		dprintf(D_FULLDEBUG, "and no %s found\n", ATTR_DAGMAN_WORKFLOW_LOG);
 	}
 }
 
@@ -903,35 +889,43 @@ int getJobAdExitSignal(ClassAd *jad, int &exit_signal)
 static void set_usageAd (ClassAd* jobAd, ClassAd ** ppusageAd) 
 {
 	std::string resslist;
-	if ( ! jobAd->LookupString("PartitionableResources", resslist))
+	if ( ! jobAd->LookupString("ProvisionedResources", resslist))
 		resslist = "Cpus, Disk, Memory";
 
 	StringList reslist(resslist.c_str());
 	if (reslist.number() > 0) {
-		int64_t int64_value = 0;
 		ClassAd * puAd = new ClassAd();
 		puAd->Clear(); // get rid of default "CurrentTime = time()" value.
 
 		reslist.rewind();
-		char * resname = NULL;
-		while ((resname = reslist.next()) != NULL) {
-			MyString attr;
-			int64_value = -1;
-			attr.sprintf("%s", resname); // provisioned value
-			if (jobAd->LookupInteger(attr.Value(), int64_value)) {
-				puAd->Assign(resname, int64_value);
-			} 
+		while (const char * resname = reslist.next()) {
+			std::string attr;
+			std::string res = resname;
+			title_case(res); // capitalize it to make it print pretty.
+			const int copy_ok = classad::Value::ERROR_VALUE | classad::Value::BOOLEAN_VALUE | classad::Value::INTEGER_VALUE | classad::Value::REAL_VALUE;
+			classad::Value value;
+			attr = res + "Provisioned";	 // provisioned value
+			if (jobAd->EvalAttr(attr.c_str(), NULL, value) && (value.GetType() & copy_ok) != 0) {
+				classad::ExprTree * plit = classad::Literal::MakeLiteral(value);
+				if (plit) {
+					puAd->Insert(resname, plit); // usage ad has attribs like they appear in Machine ad
+				}
+			}
 			// /*for debugging*/ else { puAd->Assign(resname, 42); }
-			int64_value = -2;
-			attr.sprintf("Request%s", resname);	// requested value
-			if (jobAd->LookupInteger(attr.Value(), int64_value)) {
-				puAd->Assign(attr.Value(), int64_value);
+			attr = "Request"; attr += res;   	// requested value
+			if (jobAd->EvalAttr(attr.c_str(), NULL, value)&& (value.GetType() & copy_ok) != 0) {
+				classad::ExprTree * plit = classad::Literal::MakeLiteral(value);
+				if (plit) {
+					puAd->Insert(attr.c_str(), plit);
+				}
 			}
 			// /*for debugging*/ else { puAd->Assign(attr.Value(), 99); }
-			int64_value = -3;
-			attr.sprintf("%sUsage", resname); // usage value
-			if (jobAd->LookupInteger(attr.Value(), int64_value)) {
-				puAd->Assign(attr.Value(), int64_value);
+			attr = res + "Usage"; // usage value
+			if (jobAd->EvalAttr(attr.c_str(), NULL, value) && (value.GetType() & copy_ok) != 0) {
+				classad::ExprTree * plit = classad::Literal::MakeLiteral(value);
+				if (plit) {
+					puAd->Insert(attr.c_str(), plit);
+				}
 			}
 		}
 		*ppusageAd = puAd;
@@ -1065,19 +1059,19 @@ BaseShadow::logTerminateEvent( int exitReason, update_style_t kind )
 		while ((resname = reslist.next()) != NULL) {
 			MyString attr;
 			int64_value = -1;
-			attr.sprintf("%s", resname); // provisioned value
+			attr.formatstr("%s", resname); // provisioned value
 			if (jobAd->LookupInteger(attr.Value(), int64_value)) {
 				puAd->Assign(resname, int64_value);
 			} 
 			// /*for debugging*/ else { puAd->Assign(resname, 42); }
 			int64_value = -2;
-			attr.sprintf("Request%s", resname);	// requested value
+			attr.formatstr("Request%s", resname);	// requested value
 			if (jobAd->LookupInteger(attr.Value(), int64_value)) {
 				puAd->Assign(attr.Value(), int64_value);
 			}
 			// /*for debugging*/ else { puAd->Assign(attr.Value(), 99); }
 			int64_value = -3;
-			attr.sprintf("%sUsage", resname); // usage value
+			attr.formatstr("%sUsage", resname); // usage value
 			if (jobAd->LookupInteger(attr.Value(), int64_value)) {
 				puAd->Assign(attr.Value(), int64_value);
 			}
@@ -1274,15 +1268,56 @@ BaseShadow::updateJobInQueue( update_t type )
 		// value hasn't changed, it won't show up as dirty and we
 		// won't actually connect to the job queue for it.  we do this
 		// here since we want it for all kinds of updates...
-	MyString buf;
-	buf.sprintf( "%s = %f", ATTR_BYTES_SENT, (prev_run_bytes_sent +
-											  bytesReceived()) );
-	jobAd->Insert( buf.Value() );
-	buf.sprintf( "%s = %f", ATTR_BYTES_RECVD, (prev_run_bytes_recvd +
-											   bytesSent()) );
-	jobAd->Insert( buf.Value() );
+	ClassAd ftAd;
+	ftAd.Assign(ATTR_BYTES_SENT, (prev_run_bytes_sent + bytesReceived()) );
+
+	ftAd.Assign(ATTR_BYTES_RECVD, (prev_run_bytes_recvd + bytesSent()) );
+
+	FileTransferStatus upload_status = XFER_STATUS_UNKNOWN;
+	FileTransferStatus download_status = XFER_STATUS_UNKNOWN;
+	getFileTransferStatus(upload_status,download_status);
+	switch(upload_status) {
+	case XFER_STATUS_UNKNOWN:
+		break;
+	case XFER_STATUS_QUEUED:
+		ftAd.Assign(ATTR_TRANSFER_QUEUED,true);
+		ftAd.Assign(ATTR_TRANSFERRING_INPUT,true);
+		break;
+	case XFER_STATUS_ACTIVE:
+		ftAd.Assign(ATTR_TRANSFER_QUEUED,false);
+		ftAd.Assign(ATTR_TRANSFERRING_INPUT,true);
+		break;
+	case XFER_STATUS_DONE:
+		ftAd.Assign(ATTR_TRANSFER_QUEUED,false);
+		ftAd.Assign(ATTR_TRANSFERRING_INPUT,false);
+		break;
+	}
+	switch(download_status) {
+	case XFER_STATUS_UNKNOWN:
+		break;
+	case XFER_STATUS_QUEUED:
+		ftAd.Assign(ATTR_TRANSFER_QUEUED,true);
+		ftAd.Assign(ATTR_TRANSFERRING_OUTPUT,true);
+		break;
+	case XFER_STATUS_ACTIVE:
+		ftAd.Assign(ATTR_TRANSFER_QUEUED,false);
+		ftAd.Assign(ATTR_TRANSFERRING_OUTPUT,true);
+		break;
+	case XFER_STATUS_DONE:
+		ftAd.Assign(ATTR_TRANSFER_QUEUED,false);
+		ftAd.Assign(ATTR_TRANSFERRING_OUTPUT,false);
+		break;
+	}
+
+	MergeClassAdsCleanly(jobAd,&ftAd);
 
 	ASSERT( job_updater );
+
+	if( type == U_PERIODIC ) {
+			// Make an update happen soon.
+		job_updater->resetUpdateTimer();
+		return true;
+	}
 
 		// Now that the ad is current, just let our QmgrJobUpdater
 		// object take care of the rest...
@@ -1400,7 +1435,8 @@ void BaseShadow::dprintf_va( int flags, const char* fmt, va_list args )
 {
 		// Print nothing in this version.  A subclass like MPIShadow
 		// might like to say ::dprintf( flags, "(res %d)"
-	::_condor_dprintf_va( flags, fmt, args );
+	const DPF_IDENT ident = 0; // REMIND: maybe something useful here??
+	::_condor_dprintf_va( flags, ident, fmt, args );
 }
 
 void BaseShadow::dprintf( int flags, const char* fmt, ... )
@@ -1418,8 +1454,9 @@ extern BaseShadow *Shadow;
 
 // This function is called by dprintf - always display our job, proc,
 // and pid in our log entries. 
-extern "C" 
+//extern "C" 
 int
+//display_dprintf_header(char **buf,int *bufpos,int *buflen)
 display_dprintf_header(char **buf,int *bufpos,int *buflen)
 {
 	static pid_t mypid = 0;
@@ -1439,7 +1476,7 @@ display_dprintf_header(char **buf,int *bufpos,int *buflen)
 		return sprintf_realloc( buf, bufpos, buflen, "(%d.%d) (%ld): ", mycluster, myproc, (long)mypid );
 	} else {
 		return sprintf_realloc( buf, bufpos, buflen, "(?.?) (%ld): ", (long)mypid );
-	}	
+	}
 
 	return 0;
 }
@@ -1483,10 +1520,13 @@ BaseShadow::handleUpdateJobAd( int sig )
 bool
 BaseShadow::jobWantsGracefulRemoval()
 {
-	bool job_wants_graceful_removal = false;
+	bool job_wants_graceful_removal = param_boolean("GRACEFULLY_REMOVE_JOBS", true);
+	bool job_request;
 	ClassAd *thejobAd = getJobAd();
 	if( thejobAd ) {
-		thejobAd->LookupBool( ATTR_WANT_GRACEFUL_REMOVAL, job_wants_graceful_removal );
+		if( thejobAd->LookupBool( ATTR_WANT_GRACEFUL_REMOVAL, job_request ) ) {
+			job_wants_graceful_removal = job_request;
+		}
 	}
 	return job_wants_graceful_removal;
 }

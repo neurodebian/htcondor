@@ -62,7 +62,7 @@ int IOProxy::connect_callback( Stream * /*stream*/ )
 	success = server->accept(*client);
 	if(success) {
 		if(get_local_ipaddr().compare_address(client->peer_addr())) {
-			dprintf(D_ALWAYS,"IOProxy: accepting connection from %s\n",client->peer_ip_str());
+			dprintf(D_FULLDEBUG,"IOProxy: accepting connection from %s\n",client->peer_ip_str());
 			accept_client = true;
 		} else {
 			dprintf(D_ALWAYS,"IOProxy: rejecting connection from %s: invalid ip addr\n",client->peer_ip_str());
@@ -152,7 +152,7 @@ bool IOProxy::init( const char *config_file )
 	failure:
 	if(cookie) free(cookie);
 	if(file) fclose(file);
-	unlink(config_file);
+	IGNORE_RETURN unlink(config_file);
 	server->close();
 	return false;
 }

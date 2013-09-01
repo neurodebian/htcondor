@@ -77,7 +77,7 @@ int IOProxyHandler::handle_request( Stream *s )
 		}
 		return KEEP_STREAM;
 	} else {
-		dprintf(D_ALWAYS,"IOProxyHandler: closing connection to %s\n",r->peer_ip_str());
+		dprintf(D_FULLDEBUG,"IOProxyHandler: closing connection to %s\n",r->peer_ip_str());
 		delete this;
 		return ~KEEP_STREAM;
 	}
@@ -232,7 +232,17 @@ void IOProxyHandler::handle_standard_request( ReliSock *r, char *line )
 			} else if(!strncmp(url,"buffer:remote:",14)) {
 				strncpy(path,url+14,CHIRP_LINE_MAX);
 			} else {
-				EXCEPT("File %s maps to url %s, which I don't know how to open.\n",path,url);
+				// Condor 7.9.6 dropped the remote: and buffer:remote prefix for the vanilla shadow
+				// so it's not longer correct to assert then these prefixes are missing.
+				// TJ: for some reason get_peer_version() is not set here, so I have to assume that the other side
+				// *might* be 7.9.6 and tolerate the missing url prefix.
+				const CondorVersionInfo *vi = r->get_peer_version();
+				dprintf(D_SYSCALLS | D_VERBOSE,"File %s maps to url %s, peer version is %d.%d.%d\n", path, url, 
+					    vi ? vi->getMajorVer() : 0, vi ? vi->getMinorVer() : 0, vi ? vi->getSubMinorVer() : 0);
+				if (vi && ! vi->built_since_version(7,9,6)) {
+					EXCEPT("File %s maps to url %s, which I don't know how to open.\n",path,url);
+				}
+				strncpy(path,url,CHIRP_LINE_MAX);
 			}
 		} else {
 			EXCEPT("Unable to map file %s to a url: %s\n",path,strerror(errno));
@@ -570,7 +580,7 @@ void IOProxyHandler::handle_standard_request( ReliSock *r, char *line )
 		sprintf(line, "%d", convert(result, errno));
 		r->put_line_raw(line);
 
-		if(result >= 0) {
+		if ((length > 0) && (result >= 0)) {
 			char *buffer = (char*) malloc(length);
 			if(buffer) {
 				result = r->get_bytes_raw(buffer,length);

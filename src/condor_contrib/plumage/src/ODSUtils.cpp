@@ -60,10 +60,10 @@ bool areSame(double a, double b) {
 const char* 
 plumage::util::formatReal(double x) {
     if (areSame(x,0.0) || areSame(x,1.0)) {
-        formatter.sprintf("%.1G", x);
+        formatter.formatstr("%.1G", x);
     }
     else {
-        formatter.sprintf("%.6G", x);
+        formatter.formatstr("%.6G", x);
     }
     return formatter.Value();
 }

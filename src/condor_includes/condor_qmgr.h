@@ -98,7 +98,7 @@ const int DESTROYPROC_EACCES = -2; // DestroyProc failed: wrong user or other ac
 const int DESTROYPROC_ENOENT = -3; // DestroyProc failed: cluster.proc doesn't exist.
 /** Remove job with cluster_id and proc_id from the queue.  This is a
 	low-level mechanism.  Normally, to remove jobs from the queue, set the
-	job status to REMOVED and send a KILL_FRGN_JOB command to the schedd.
+	job status to REMOVED and send a DEACTIVATE_CLAIM_FORCIBLY command to the schedd.
 	@return: 0 or greater is success.  Specific results are DESTROYPROC_SUCCESS(0) = job removed and DESTROYPROC_SUCCESS_DELAY(1) = job not _yet_ removed, but "done".  Negative numbers indicate failure.  Specific failures are DESTROYPROC_ERROR(-1) = Unknown/non-specific error, DESTROYPROC_EACCESS(-2) = Owner failed, and DESTROYPROC_ENOENT(-3) = Job doesn't exist.
 */
 int DestroyProc(int cluster_id, int proc_id);
@@ -318,7 +318,7 @@ void MarkJobClean(PROC_ID job_id);
 void MarkJobClean(int cluster_id, int proc_id);
 void MarkJobClean(const char* job_id_str);
 
-int rusage_to_float(struct rusage, float *, float *);
+int rusage_to_float(const struct rusage &, float *, float *);
 int float_to_rusage(float, float, struct rusage *);
 
 bool Reschedule();

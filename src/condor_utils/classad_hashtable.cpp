@@ -24,7 +24,7 @@
 
 void HashKey::sprint(MyString &s)
 {
-	s.sprintf("%s", key);
+	s.formatstr("%s", key);
 }
 
 HashKey& HashKey::operator= (const HashKey& from)

@@ -39,7 +39,8 @@ typedef enum {
 	U_REQUEUE,
 	U_EVICT,
 	U_CHECKPOINT,
-	U_X509
+	U_X509,
+	U_STATUS
 } update_t;
 
 
@@ -159,8 +160,8 @@ public:
 
 	virtual void startUpdateTimer( void ) {return;}
 	virtual bool updateJob( update_t /*type*/, SetAttributeFlags_t  /*commit_flags*/ = 0 ) { return true;}
-	virtual bool updateAttr( const char *  /*name*/, const char * /*expr*/, bool  /*updateMaster*/ ) { return true;}
-	virtual bool updateAttr( const char * /*name*/, int  /*value*/, bool  /*updateMaster*/ ) { return true;}
+	virtual bool updateAttr( const char *  /*name*/, const char * /*expr*/, bool  /*updateMaster*/, bool log=false ) { if (log) {} return true;}
+	virtual bool updateAttr( const char * /*name*/, int  /*value*/, bool  /*updateMaster*/, bool log=false ) { if (log) {} return true;}
 	virtual bool watchAttribute( const char*  /*attr*/, update_t /*type*/ = U_NONE ) { return true;}
 };
 

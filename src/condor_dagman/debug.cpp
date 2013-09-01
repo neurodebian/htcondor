@@ -43,8 +43,12 @@ static int cache_size = 0;
 // from condor_util_lib/dprintf.c
 // from condor_util_lib/dprintf_common.c
 //extern "C" {
+#ifdef D_CATEGORY_MASK
+extern unsigned int DebugHeaderOptions;	// for D_FID, D_PID, D_CAT, D_NOHEADER & D_TIMESTAMP
+#else
 extern int DebugFlags;
 extern int DebugUseTimestamps;
+#endif
 //}
 
 static void debug_cache_insert(int flags, const char *fmt, va_list args);
@@ -53,6 +57,7 @@ static void debug_cache_insert(int flags, const char *fmt, va_list args);
 /*--------------------------------------------------------------------------*/
 void
 debug_printf( debug_level_t level, const char *fmt, ... ) {
+	const DPF_IDENT ident = 0; // REMIND: maybe have something useful here?
 	if( DEBUG_LEVEL( level ) ) {
 		if (cache_enabled == false ||
 			(cache_enabled == true && cache_is_caching == false))
@@ -60,7 +65,7 @@ debug_printf( debug_level_t level, const char *fmt, ... ) {
 			// let it go through right away
 			va_list args;
 			va_start( args, fmt );
-			_condor_dprintf_va( D_ALWAYS, fmt, args );
+			_condor_dprintf_va( D_ALWAYS, ident, fmt, args );
 			va_end( args );
 		} else {
 			// store it for later flushing
@@ -75,6 +80,7 @@ debug_printf( debug_level_t level, const char *fmt, ... ) {
 /*--------------------------------------------------------------------------*/
 void
 debug_dprintf( int flags, debug_level_t level, const char *fmt, ... ) {
+	const DPF_IDENT ident = 0; // REMIND: maybe have something useful here?
 
 	if( DEBUG_LEVEL( level ) ) {
 
@@ -97,7 +103,7 @@ debug_dprintf( int flags, debug_level_t level, const char *fmt, ... ) {
 
 		va_list args;
 		va_start( args, fmt );
-		_condor_dprintf_va( flags, fmt, args );
+		_condor_dprintf_va( flags, ident, fmt, args );
 		va_end( args );
 			
 	}
@@ -106,7 +112,7 @@ debug_dprintf( int flags, debug_level_t level, const char *fmt, ... ) {
 /*--------------------------------------------------------------------------*/
 void
 debug_error( int error, debug_level_t level, const char *fmt, ... ) {
-
+	const DPF_IDENT ident = 0;
 	// make sure these come out before emitting the error
 	debug_cache_flush();
 	debug_cache_stop_caching();
@@ -115,7 +121,7 @@ debug_error( int error, debug_level_t level, const char *fmt, ... ) {
     if( DEBUG_LEVEL( level ) ) {
         va_list args;
         va_start( args, fmt );
-        _condor_dprintf_va( D_ALWAYS, fmt, args );
+        _condor_dprintf_va( D_ALWAYS | D_FAILURE, ident, fmt, args );
         va_end( args );
     }
 	DC_Exit( error );
@@ -167,9 +173,16 @@ debug_cache_insert(int flags, const char *fmt, va_list args)
 	time_t clock_now;
 	struct tm *tm = NULL;
 
-	MyString tstamp, fds, line, pid;
+	MyString tstamp, fds, line, pid, cid;
 	pid_t my_pid;
 
+#ifdef D_CATEGORY_MASK
+	int HdrFlags = (DebugHeaderOptions|flags) & ~D_CATEGORY_RESERVED_MASK;
+	bool UseTimestamps = (DebugHeaderOptions & D_TIMESTAMP) != 0;
+#else
+	int HdrFlags = DebugFlags|flags;
+	int UseTimestamps = DebugUseTimestamps;
+#endif
 	// XXX TODO
 	// handle flags...
 	// For now, always assume D_ALWAYS since the caller assumes it as well.
@@ -180,47 +193,53 @@ debug_cache_insert(int flags, const char *fmt, va_list args)
 	// function, but this is a quick hack for LIGO. I'll come back to it
 	// and do it better later when I have time.
 	clock_now = time(NULL);
-	if (!DebugUseTimestamps) {
+	if (!UseTimestamps) {
 		tm = localtime(&clock_now);
 	}
 
-	if (((DebugFlags|flags) & D_NOHEADER) == 0) {
-		if (DebugUseTimestamps) {
-			tstamp.sprintf("(%d) ", (int)clock_now);
+	if ((HdrFlags & D_NOHEADER) == 0) {
+		if (UseTimestamps) {
+			tstamp.formatstr("(%d) ", (int)clock_now);
 		} else {
-			tstamp.sprintf("%d/%d %02d:%02d:%02d ",
+			tstamp.formatstr("%d/%d %02d:%02d:%02d ",
 				tm->tm_mon + 1, tm->tm_mday, tm->tm_hour,
 				tm->tm_min, tm->tm_sec );
 		}
 
-		if ((DebugFlags|flags) & D_FDS) {
+		if (HdrFlags & D_FDS) {
 				// Because of Z's dprintf changes, we no longer have
 				// access to the dprintf FP.  For now we're just going
 				// to skip figuring out the FD *while caching*.
 				// wenger 2011-05-18
-			fds.sprintf("(fd:?) " );
+			fds.formatstr("(fd:?) " );
 		}
 
-		if ((DebugFlags|flags) & D_PID) {
+		if (HdrFlags & D_PID) {
 #ifdef WIN32
 			my_pid = (int) GetCurrentProcessId();
 #else
 			my_pid = (int) getpid();
 #endif
-			pid.sprintf("(pid:%d) ", my_pid );
+			pid.formatstr("(pid:%d) ", my_pid );
 
 		}
 
+#if 0  // not currently used by dagman.
+		if (HdrFlags & D_IDENT) {
+			const void * ident = 0;
+			cid.formatstr("(ident:%p) ", ident);
+		}
+#endif
 		// We skip running of the DebugId function, since it needs to
 		// emit to a FILE* and we can't store it in the cache. It, as of this
 		// time, isn't used in condor_dagman.
 	}
 
 	// figure out the line the user needs to emit.
-	line.vsprintf(fmt, args);
+	line.vformatstr(fmt, args);
 
 	// build the cached line and add it to the cache
-	cache += (tstamp + fds + line);
+	cache += (tstamp + fds + line + cid);
 
 	// if the cache has surpassed the highwater mark, then flush it.
 	if (cache.Length() > cache_size) {
