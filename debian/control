@@ -145,8 +145,6 @@ Description: Condor classads expression language - development library
 
 
 Package: libclassad5
-Replaces: libclassad3
-Conflicts: libclassad3
 Section: libs
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
