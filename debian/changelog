@@ -1,6 +1,7 @@
 condor (8.0.1~dfsg.1-1) unstable; urgency=low
 
-  * New upstream version
+  [ Brian Lin ]
+  * New upstream version (Closes: #714364)
     - Fixed a bug that prevented per-slot settings of the STARTD_ATTRS
       configuration variable from being set correctly for partitionable slots
       named with a SLOTX_ prefix. (Ticket #3726).
@@ -29,6 +30,16 @@ condor (8.0.1~dfsg.1-1) unstable; urgency=low
   * Add Debconf template translations:
     - Japanese -- courtesy of victory <victory.deb@gmail.com>.
       (Closes: #718923)
+  * Add patch campus_factory_syntax to fix a syntax error the campus_factory
+    script.
+  * Bumped Standards-version to 3.9.4; no changes necessary.
+  * Add new dependency on libboost-test-dev.
+  * Disable installation of obsolete Pearl modules.
+  * Fix DEP5 syntax error in debian/copyright.
+
+  [ Michael Hanke ]
+  * Remove Debian-specific condor_qsub script which has been integrated
+    upstream and is now shipped in an improved form.
 
  -- Brian Lin <blin@cs.wisc.edu>  Tue, 23 Jul 2013 19:25:55 -0400
 
