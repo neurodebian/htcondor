@@ -35,11 +35,12 @@ override_dh_auto_configure:
 		-DHAVE_EXT_LIBXML2:BOOL=ON \
 		-DHAVE_EXT_OPENSSL:BOOL=ON \
 		-DHAVE_EXT_PCRE:BOOL=ON \
-		-DWITH_LIBCGROUP:BOOL=OFF
+		-DWITH_LIBCGROUP:BOOL=OFF \
+		-DWANT_CONTRIB:BOOL=OFF \
+		-DWITH_BOSCO:BOOL=OFF \
+		-DWITH_CAMPUSFACTORY:BOOL=OFF
 		# upstream says: tests aren't reliable enough yet
 		#-DBUILD_TESTS:BOOL=OFF \
-		# upstream says: contrib is to unstable for initial packaging
-		#-DWANT_CONTRIB:BOOL=OFF \
 		#-DHAVE_EXT_POSTGRESQL:BOOL=OFF \
 		#-DEXTERNAL_INCLUDES:STRING="/usr/include/postgresql"
 
