@@ -1,4 +1,4 @@
-condor (8.0.1~dfsg.1-1) unstable; urgency=low
+condor (8.0.1~dfsg.1-1) UNRELEASED; urgency=low
 
   [ Brian Lin ]
   * New upstream version (Closes: #714364)
