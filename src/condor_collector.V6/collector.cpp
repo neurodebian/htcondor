@@ -167,8 +167,13 @@ void CollectorDaemon::Init()
 		(CommandHandler)receive_query_cedar,"receive_query_cedar",NULL,READ);
 	daemonCore->Register_CommandWithPayload(QUERY_LICENSE_ADS,"QUERY_LICENSE_ADS",
 		(CommandHandler)receive_query_cedar,"receive_query_cedar",NULL,READ);
-	daemonCore->Register_CommandWithPayload(QUERY_COLLECTOR_ADS,"QUERY_COLLECTOR_ADS",
-		(CommandHandler)receive_query_cedar,"receive_query_cedar",NULL,ADMINISTRATOR);
+	if(param_boolean("PROTECT_COLLECTOR_ADS", false)) {
+		daemonCore->Register_CommandWithPayload(QUERY_COLLECTOR_ADS,"QUERY_COLLECTOR_ADS",
+			(CommandHandler)receive_query_cedar,"receive_query_cedar",NULL,ADMINISTRATOR);
+	} else {
+		daemonCore->Register_CommandWithPayload(QUERY_COLLECTOR_ADS,"QUERY_COLLECTOR_ADS",
+			(CommandHandler)receive_query_cedar,"receive_query_cedar",NULL,READ);
+	}
 	daemonCore->Register_CommandWithPayload(QUERY_STORAGE_ADS,"QUERY_STORAGE_ADS",
 		(CommandHandler)receive_query_cedar,"receive_query_cedar",NULL,READ);
 	daemonCore->Register_CommandWithPayload(QUERY_NEGOTIATOR_ADS,"QUERY_NEGOTIATOR_ADS",
@@ -968,6 +973,26 @@ void CollectorDaemon::process_query_public (AdTypes whichAds,
 		return;
 	}
 
+	// See if we should exclude Collector Ads from generic queries.  Still
+	// give them out for specific collector queries, which is registered as
+	// ADMINISTRATOR when PROTECT_COLLECTOR_ADS is true.  This setting is
+	// designed only for use at the UW, and as such this knob is not present
+	// in the param table.
+	if ((whichAds != COLLECTOR_AD) && param_boolean("PROTECT_COLLECTOR_ADS", false)) {
+		dprintf(D_FULLDEBUG, "Received query with generic type; filtering collector ads\n");
+		MyString modified_filter;
+		modified_filter.formatstr("(%s) && (MyType =!= \"Collector\")",
+			ExprTreeToString(__filter__));
+		query->AssignExpr(ATTR_REQUIREMENTS,modified_filter.Value());
+		__filter__ = query->LookupExpr(ATTR_REQUIREMENTS);
+		if ( __filter__ == NULL ) {
+			dprintf (D_ALWAYS, "Failed to parse modified filter: %s\n", 
+				modified_filter.Value());
+			return;
+		}
+		dprintf(D_FULLDEBUG,"Query after modification: *%s*\n",modified_filter.Value());
+	}
+
 	// If ABSENT_REQUIREMENTS is defined, rewrite filter to filter-out absent ads 
 	// if ATTR_ABSENT is not alrady referenced in the query.
 	if ( filterAbsentAds ) {	// filterAbsentAds is true if ABSENT_REQUIREMENTS defined
@@ -1332,7 +1357,7 @@ void CollectorDaemon::Config()
         free(tmp);
         cvh.rewind();
         while (char* vhost = cvh.next()) {
-            Daemon* vhd = new DCCollector(vhost);
+            DCCollector* vhd = new DCCollector(vhost);
             Sinful view_addr( vhd->addr() );
             Sinful my_addr( daemonCore->publicNetworkIpAddr() );
 
@@ -1344,10 +1369,10 @@ void CollectorDaemon::Config()
             dprintf(D_ALWAYS, "Will forward ads on to View Server %s\n", vhost);
 
             Sock* vhsock = NULL;
-            if (vhd->hasUDPCommandPort()) {
-                vhsock = new SafeSock();
-            } else {
+            if (vhd->useTCPForUpdates()) {
                 vhsock = new ReliSock();
+            } else {
+                vhsock = new SafeSock();
             }
 
             vc_list.push_back(vc_entry());
@@ -1595,7 +1620,7 @@ void CollectorDaemon::send_classad_to_sock(int cmd, ClassAd* theAd) {
     }
 
     for (vector<vc_entry>::iterator e(vc_list.begin());  e != vc_list.end();  ++e) {
-        Daemon* view_coll = e->collector;
+        DCCollector* view_coll = e->collector;
         Sock* view_sock = e->sock;
         const char* view_name = e->name.c_str();
 
@@ -1608,9 +1633,15 @@ void CollectorDaemon::send_classad_to_sock(int cmd, ClassAd* theAd) {
             if (view_sock_timeslice.isTimeToRun()) {
                 dprintf(D_ALWAYS,"Connecting to CONDOR_VIEW_HOST %s\n", view_name);
 
-                view_sock_timeslice.setStartTimeNow();
+                // Only run timeslice timer for TCP, since connect on UDP 
+                // is instantaneous.
+                if (view_sock->type() == Stream::reli_sock) {
+	                view_sock_timeslice.setStartTimeNow();
+                }
                 view_coll->connectSock(view_sock,20);
-                view_sock_timeslice.setFinishTimeNow();
+                if (view_sock->type() == Stream::reli_sock) {
+	                view_sock_timeslice.setFinishTimeNow();
+                }
 
                 if (!view_sock->is_connected()) {
                     dprintf(D_ALWAYS,"Failed to connect to CONDOR_VIEW_HOST %s so not forwarding ad.\n", view_name);
@@ -1627,8 +1658,21 @@ void CollectorDaemon::send_classad_to_sock(int cmd, ClassAd* theAd) {
             raw_command = true;
         }
 
-        if (! view_coll->startCommand(cmd, view_sock, 20, NULL, NULL, raw_command)) {
-            dprintf( D_ALWAYS, "Can't send command %d to View Collector %s\n", cmd, view_name);
+        // Run timeslice timer if raw_command is false, since this means 
+        // startCommand() may need to initiate an authentication round trip 
+        // and thus could block if the remote view collector is unresponsive.
+        if ( raw_command == false ) {
+	        view_sock_timeslice.setStartTimeNow();
+        }
+        bool start_command_result = 
+			view_coll->startCommand(cmd, view_sock, 20, NULL, NULL, raw_command);
+        if ( raw_command == false ) {
+	        view_sock_timeslice.setFinishTimeNow();
+        }
+
+        if (! start_command_result ) {
+            dprintf( D_ALWAYS, "Can't send command %d to View Collector %s\n", 
+					cmd, view_name);
             view_sock->end_of_message();
             view_sock->close();
             continue;

@@ -1469,7 +1469,7 @@ negotiationTime ()
                 GroupEntry* group = *j;
                 dprintf(D_FULLDEBUG, "group quotas: group= %s  quota= %g  requested= %g  allocated= %g  unallocated= %g\n",
                         group->name.c_str(), group->quota, group->requested+group->allocated, group->allocated, group->requested);
-                groupQuotasHash->insert(MyString(group->name.c_str()), group->allocated);
+                groupQuotasHash->insert(MyString(group->name.c_str()), group->quota);
                 requested_total += group->requested;
                 allocated_total += group->allocated;
                 if (group->allocated > 0) served_groups += 1;
@@ -1906,7 +1906,7 @@ void Matchmaker::hgq_assign_quotas(GroupEntry* group, double quota) {
 
         if (child->static_quota && (q < child->config_quota)) {
             dprintf(D_ALWAYS, "group quotas: WARNING: static quota for group %s rescaled from %g to %g\n", child->name.c_str(), child->config_quota, q);
-        } else if (Zd > 1) {
+        } else if (Zd - 1 > 0.0001) {
             dprintf(D_ALWAYS, "group quotas: WARNING: dynamic quota for group %s rescaled from %g to %g\n", child->name.c_str(), child->config_quota, child->config_quota / Zd);
         }
 
@@ -2943,7 +2943,7 @@ obtainAdsFromCollector (
 
 	if (!ConsiderPreemption) {
 		const char *projectionString =
-			"ifThenElse(State == \"Claimed\",\"Name State Activity StartdIpAddr AccountingGroup Owner RemoteUser Requirements SlotWeight\",\"\") ";
+			"ifThenElse(State == \"Claimed\",\"Name State Activity StartdIpAddr AccountingGroup Owner RemoteUser Requirements SlotWeight ConcurrencyLimits\",\"\") ";
 		publicQuery.setDesiredAttrsExpr(projectionString);
 
 		dprintf(D_ALWAYS, "Not considering preemption, therefore constraining idle machines with %s\n", projectionString);
@@ -4232,14 +4232,8 @@ matchmakingAlgorithm(const char *scheddName, const char *scheddAddr, ClassAd &re
 			MatchList->sort();
 			dprintf(D_FULLDEBUG,"Finished sorting MatchList\n");
 		}
-		// compare
-		ClassAd *bestCached = MatchList->pop_candidate();
-		// TODO - do bestCached and bestSoFar refer to the same
-		// machine preference? (sanity check)
-		if(bestCached != bestSoFar) {
-			dprintf(D_ALWAYS, "INSANE: bestCached != bestSoFar\n");
-		}
-		bestCached = NULL; // just to remove unused variable warning
+		// Pop top candidate off the list to hand out as best match
+		bestSoFar = MatchList->pop_candidate();
 	}
 
 	if(!bestSoFar)

@@ -223,6 +223,25 @@ The \Condor{master} uses this configuration variable,
 and the prefix of \MacroNI{MASTER.} causes this configuration
 to be specific to the \Condor{master} daemon.
 
+Evaluation works in an unexpected way
+when combining the definition of a macro with
+use of a prefix that gives the subsystem name and a period. 
+Consider the example
+\begin{verbatim}
+  FILESPEC = A
+  MASTER.FILESPEC = B 
+\end{verbatim}
+combined with a later definition that incorporates \Expr{FILESPEC}
+in a macro:
+\begin{verbatim}
+  USEFILE = mydir/$(FILESPEC)
+\end{verbatim}
+When the \Condor{master} evaluates variable \MacroNI{USEFILE},
+it evaluates to \Expr{mydir/A}, 
+\emph{not} the (expected) value of \Expr{mydir/B}.
+When any other subsystem evaluates variable \MacroNI{USEFILE},
+it evaluates to \Expr{mydir/A}.
+
 % the local functionality added in 7.1.4
 This syntax has been further expanded to allow for the
 specification of a local name on the command line 
@@ -435,6 +454,7 @@ the changed value.
   \begin{itemize}
   \label{list:subsystem names}
   \item \verb@C_GAHP@
+  \item \verb@C_GAHP_WORKER_THREAD@
   \item \verb@CKPT_SERVER@
   \item \verb@COLLECTOR@
   \item \verb@DBMSD@
@@ -1929,7 +1949,7 @@ Log files may optionally be specified per debug level as follows:
 
 The following macros control where and what is written to the 
 event log,
-a file that receives job user log events, 
+a file that receives job events, 
 but across all users and user's jobs.
 
 \begin{description}
@@ -2299,9 +2319,10 @@ which use DaemonCore).
 
 \label{param:MaxAcceptsPerCycle}
 \item[\Macro{MAX\_ACCEPTS\_PER\_CYCLE}]
-  An integer value that defaults to 4.
+  An integer value that defaults to 8.
   It is a limit on the number of accepts of new, incoming, 
   socket connect requests per DaemonCore event cycle.
+  A value of zero or less means no limit.
   It has the most noticeable effect on the \Condor{schedd},
   and would be given a higher integer value for tuning purposes when 
   there is a high number of jobs starting and exiting per second.
@@ -2878,51 +2899,30 @@ Tracking process family by login "cndrusr1"
 
 \label{param:FilesystemDomain}
 \item[\Macro{FILESYSTEM\_DOMAIN}]
-  The \MacroNI{FILESYSTEM\_DOMAIN}
-  macro is an arbitrary string that is used to decide if
-  two machines (a submitting machine and an execute machine) share a
-  file system.
-  Although the macro name contains the word ``DOMAIN'',
-  the macro is not required to be a domain name. 
+  An arbitrary string that is used to decide if
+  the two machines, a submit machine and an execute machine,
+  share a file system.
+  Although this configuration variable name contains the word ``DOMAIN'',
+  its value is not required to be a domain name. 
   It often is a domain name.
-
-  % NO LONGER TRUE
-  % Vanilla Unix jobs currently require a shared file system in order to
-  % share any data files or see the output of the program.
-  % HTCondor decides if there is a shared filesystem by comparing the values
-  % of 
-  % \MacroUNI{FILESYSTEM\_DOMAIN}
-  % of both the submitting and execute machines.
-  % If the values are the same,
-  % HTCondor assume there is a shared file system.
-  % HTCondor implements the check
-  % by extending the Requirements for your job.
-  % You can see these requirements by using the \oArg{-v} argument
-  % to \Condor{submit}.
 
   Note that this implementation is not ideal: machines may share some
   file systems but not others. HTCondor currently has no way to express
-  this automatically. You can express the need to use a
-  particular file system by adding additional attributes to your machines
-  and submit files, similar to the example given in 
-  Frequently Asked Questions, 
-  section~\ref{sec:FAQ} on
-  how to run jobs only on machines that have 
-  certain software packages.
+  this automatically. 
+  A job can express the need to use a particular file system where
+  machines advertise an additional ClassAd attribute
+  and the job requires machines with the attribute, 
+  as described on the question within the
+  \URL{https://htcondor-wiki.cs.wisc.edu/index.cgi/wiki?p=HowToAdminRecipes}
+  page for how to run jobs on a subset of machines that have required
+  software installed.
 
   Note that if you do not set 
-  \MacroUNI{FILESYSTEM\_DOMAIN}, HTCondor defaults
-  to setting the macro's value to be the fully qualified host name
-  of the local machine.
+  \MacroUNI{FILESYSTEM\_DOMAIN}, the value defaults
+  to the fully qualified host name of the local machine.
   Since each machine will have a different
   \MacroUNI{FILESYSTEM\_DOMAIN},
   they will not be considered to have shared file systems.
-
-  
-  % no longer used, and gone from the sample config file as of 5/30/03.
-  %\item[\Macro{HAS\_AFS}] \label{param:HasAfs} Set this macro to \Expr{True} if
-  %  all the machines you plan on adding in your pool can all access a
-  %  common set of AFS fileservers.  Otherwise, set it to \Expr{False}.
   
 \label{param:ReserveAfsCache}
 \item[\Macro{RESERVE\_AFS\_CACHE}]
@@ -5219,6 +5219,12 @@ MAX_JOBS_RUNNING	= \
   when the limit is hit, so some files may be fully transferred, some
   partially, and some not at all.
 
+\label{param:MaxTransferQueueAge}
+\item[\Macro{MAX\_TRANSFER\_QUEUE\_AGE}]
+  The number of seconds after which an aged and queued transfer may be
+  dequeued from the transfer queue, as it is presumably hung.
+  Defaults to 7200 seconds, which is 120 minutes.
+
 \label{param:TransferIoReportInterval}
 \item[\Macro{TRANSFER\_IO\_REPORT\_INTERVAL}]
   The sampling interval in seconds for collecting I/O statistics for
@@ -6040,6 +6046,45 @@ SYSTEM_PERIODIC_REMOVE = \
   If this variable is not defined for a particular \Expr{<Name>},
   then the default value will be \Expr{60*60*24*7}, which is one week's time.
 
+\label{param:SignificantAttributes}
+\item[\Macro{SIGNIFICANT\_ATTRIBUTES}]
+  A comma and/or space separated list of job ClassAd attributes that
+  are to be added to the list of attributes for determining
+  the sets of jobs considered as a unit (an auto cluster) in negotiation,
+  when auto clustering is enabled.
+
+\label{param:ScheddAuditLog}
+\item[\Macro{SCHEDD\_AUDIT\_LOG}]
+  The path and file name of the \Condor{schedd} log that records
+  user-initiated commands that modify the job queue.
+  If not defined, there will be no \Condor{schedd} audit log.
+
+\label{param:MaxScheddAuditLog}
+\item[\Macro{MAX\_SCHEDD\_AUDIT\_LOG}]
+  Controls the maximum amount of time that a log will be allowed to grow. 
+  When it is time to rotate a log file, 
+  it will be saved to a file with an ISO timestamp suffix. 
+  The oldest rotated file receives the file name suffix \Expr{.old}. 
+  The \Expr{.old} files are overwritten each time the maximum number of 
+  rotated files 
+  (determined by the value of \MacroNI{MAX\_NUM\_SCHEDD\_AUDIT\_LOG})
+  is exceeded. 
+  A value of 0 specifies that the file may grow without bounds.
+  The following suffixes may be used to qualify the integer: 
+\begin{description}
+  \item{\Expr{Sec} for seconds}
+  \item{\Expr{Min} for minutes}
+  \item{\Expr{Hr} for hours}
+  \item{\Expr{Day} for days}
+  \item{\Expr{Wk} for weeks}
+\end{description}
+
+\label{param:MaxNumScheddAuditLog}
+\item[\Macro{MAX\_NUM\_SCHEDD\_AUDIT\_LOG}]
+  The integer that controls the maximum number of rotations that
+  the \Condor{schedd} audit log is allowed to perform,
+  before the oldest one will be rotated away. The default value is 1. 
+
 \end{description}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -6500,6 +6545,13 @@ REM Run the actual job now
   A \Expr{True} value is useful when private file system mounts are
   permitted and \Prog{autofs} (for NFS) is not used.
 
+\label{param:DynamicRunAccountLocalGroup} 
+\item[\Macro{DYNAMIC\_RUN\_ACCOUNT\_LOCAL\_GROUP}]
+  For Windows platforms, a value that sets the local group to a group other 
+  than the default \Expr{Users} for the \Expr{condor-reuse-slot<X>} run account.
+  Do \emph{not} place the local group name within quotation marks.
+
+
 \end{description}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -6713,7 +6765,7 @@ do not specify their own with:
 \label{param:LogOnNfsIsError}
 \item[\Macro{LOG\_ON\_NFS\_IS\_ERROR}]
   A boolean value that controls whether \Condor{submit} prohibits
-  job submit files with user log files on NFS.  If
+  job submit description files with job event log files on NFS.  If
   \MacroNI{LOG\_ON\_NFS\_IS\_ERROR} is set to \Expr{True}, such
   submit files will be rejected.  If \MacroNI{LOG\_ON\_NFS\_IS\_ERROR}
   is set to \Expr{False},
@@ -7714,16 +7766,11 @@ The following configuration macros affect negotiation for group users.
 
 \label{param:GroupSortExpr}
 \item[\Macro{GROUP\_SORT\_EXPR}]
-  \fbox{This definition is not complete.}
-  A ClassAd expression that controls the order in which the 
+  A floating point ClassAd expression that controls the order in which the 
   \Condor{negotiator} considers groups when allocating resources.
+  The largest magnitude positive value goes first.
   The default value is set such that group \Expr{<none>} always
   goes last when considering hierarchical group quotas.
-%  The default value uses the expression
-%\footnotesize
-%\begin{verbatim}
-%\end{verbatim}
-%\normalsize
 
 \label{param:NegotiatorAllowQuotaOversubscription}
 \item[\Macro{NEGOTIATOR\_ALLOW\_QUOTA\_OVERSUBSCRIPTION}]
@@ -9007,7 +9054,7 @@ in section~\ref{sec:DAG-configuration}.
 \label{param:DAGManLogOnNfsIsError}
 \item[\Macro{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR}]
   A boolean value that controls whether \Condor{dagman} prohibits
-  node job submit description files with user log files on NFS.
+  node job submit description files with job event log files on NFS.
   This value is ignored if \MacroNI{CREATE\_LOCKS\_ON\_LOCAL\_DISK} is 
   \Expr{True} and
   \MacroNI{ENABLE\_USERLOG\_LOCKING} is \Expr{True}.
@@ -9100,7 +9147,7 @@ in section~\ref{sec:DAG-configuration}.
   will print a report of pending nodes to the \File{dagman.out} file.
   The report will only be printed if \Condor{dagman} has
   been waiting at least \MacroNI{DAGMAN\_PENDING\_REPORT\_INTERVAL}
-  seconds without seeing any node job user log events, in order to
+  seconds without seeing any node job events, in order to
   avoid cluttering the \File{dagman.out} file.
   This feature is mainly intended to help diagnose \Condor{dagman} processes 
   that are stuck waiting indefinitely for a job to finish.
@@ -9170,11 +9217,16 @@ in section~\ref{sec:DAG-configuration}.
 
 \label{param:DAGManDefaultNodeLog}
 \item[\Macro{DAGMAN\_DEFAULT\_NODE\_LOG}]
-  The name of a file to be used as a user log by any node jobs that
-  do not define their own log files.
+  The default name of a file to be used as a job event log by all node jobs
+  of a DAG.
+  Note that even if \Macro{DAGMAN\_ALWAYS\_USE\_NODE\_LOG} is set to
+  \Expr{False}, the default log file will be used by any node jobs for which
+  a log file is not defined in the job's submit description file.
   The default value if not defined is \File{<DagFile>.nodes.log},
   where \verb@<DagFile>@ is replaced by the command line argument
   to \Condor{submit\_dag} that specifies the DAG input file.
+  If more than one DAG input file is specified, the name of the first is
+  used to name the default log file.
 
 \label{param:DAGManGenerateSubDagSubmits}
 \item[\Macro{DAGMAN\_GENERATE\_SUBDAG\_SUBMITS}]
@@ -9239,7 +9291,7 @@ in section~\ref{sec:DAG-configuration}.
 \label{param:DAGManAllowLogError}
 \item[\Macro{DAGMAN\_ALLOW\_LOG\_ERROR}]
   A boolean value defining whether \Condor{dagman} will still attempt
-  to run a node job, even if errors are detected in the user log
+  to run a node job, even if errors are detected in the job event log
   specification.  This setting has an effect only on nodes that are
   Stork jobs (not HTCondor jobs).  The default value if not defined is
   \Expr{False}.
@@ -9277,14 +9329,16 @@ in section~\ref{sec:DAG-configuration}.
 
 \label{param:DAGmanAlwaysUseNodeLog}
 \item[\Macro{DAGMAN\_ALWAYS\_USE\_NODE\_LOG}]
-  A boolean value defining whether \Condor{dagman} watches for events in its
-  default node log.
-  The default log is defined by the value of \Macro{DAGMAN\_DEFAULT\_NODE\_LOG}.
+  A boolean value defining whether \Condor{dagman} reads events from
+  its default node log file, as defined by
+  \Macro{DAGMAN\_DEFAULT\_NODE\_LOG}, instead of from the log file(s)
+  defined in the node job submit description files.
+  If \Macro{DAGMAN\_ALWAYS\_USE\_NODE\_LOG} is \Expr{True},
+  \Condor{dagman} will read events only from the default log
+  file, and POST script terminated events will
+  be written only to the default log file, and not to the
+  log file(s) defined in the node job submit description files.
   The default value is \Expr{True}.
-  If \Expr{True},
-  then \Condor{dagman} writes POST script terminate events to the default log,
-  and not to the user log specified in the submit description file.
-  \Condor{dagman} will also only read events from the default log file.
   This variable must be \Expr{False} if \Condor{dagman} from Condor
   version 7.9.0 or later is submitting jobs to a \Condor{schedd} daemon
   or using a \Condor{submit} executable that is older than Condor version 7.9.0.

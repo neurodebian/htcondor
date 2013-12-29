@@ -48,15 +48,12 @@ submit description file.
 Each cluster must specify a single executable.
 
 The job ClassAd attribute \Attr{ClusterId} identifies a cluster.
-See specifics for this attribute
-in the Appendix on page~\pageref{sec:Job-ClassAd-Attributes}.
 
 Note that submission of jobs from a Windows machine requires
 a stashed password to allow HTCondor to impersonate the user submitting
 the job.
 To stash a password, use the \Condor{store\_cred} command.
-See the manual page at
-page~\pageref{man-condor-store-cred} for details.
+See the manual page for details.
 
 For lengthy lines within the submit description file,
 the backslash (\Bs) is a line continuation character.
@@ -123,7 +120,7 @@ Each new command is given in a separate \Opt{-append} option.
 Commands with spaces in them will need to be enclosed in double quote
 marks.}
 
-\OptItem{\Opt{-spool}}{Spool all required input files, user log, and
+\OptItem{\Opt{-spool}}{Spool all required input files, job event log, and
 proxy over the connection to the \Condor{schedd}.
 After submission, modify
 local copies of the files without affecting your jobs. Any output
@@ -155,7 +152,7 @@ files for completed jobs need to be retrieved with \Condor{transfer\_data}.}
 
 \OptItem{\Arg{submit description file}}{The path and file name of 
 the submit description file. 
-If this optional argument is missing or is the dash character (Expr{-}),
+If this optional argument is missing or is the dash character (\Expr{-}),
 then the commands are taken from standard input.}
 
 \end{Options}

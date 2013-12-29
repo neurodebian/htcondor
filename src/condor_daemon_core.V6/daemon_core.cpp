@@ -3194,6 +3194,9 @@ void DaemonCore::Driver()
 		selector.reset();
 		min_deadline = 0;
 		for (i = 0; i < nSock; i++) {
+				// NOTE: keep the following logic for building the
+				// fdset in sync with DaemonCore::ServiceCommandSocket()
+
 				// if a valid entry not already being serviced, add to select
 			if ( (*sockTable)[i].iosock && 
 				 (*sockTable)[i].servicing_tid==0 &&
@@ -4144,6 +4147,9 @@ int DaemonCore::ServiceCommandSocket()
 		else if( ((*sockTable)[i].iosock) && 
 				 (i != initial_command_sock) && 
 				 ((*sockTable)[i].waiting_for_data) &&
+				 ((*sockTable)[i].servicing_tid==0) &&
+				 ((*sockTable)[i].remove_asap == false) &&
+				 ((*sockTable)[i].is_reverse_connect_pending == false) &&
 				 ((*sockTable)[i].is_connect_pending == false)) {
 			selector.add_fd( (*sockTable)[i].iosock->get_file_desc(), Selector::IO_READ );
 		}
@@ -9206,17 +9212,6 @@ int DaemonCore::HungChildTimeout()
 	else {
 	pidentry->was_not_responding = TRUE;
 	}
-
-	// now we give the child one last chance to save itself.  we do this by
-	// servicing any waiting commands, since there could be a child_alive
-	// command sitting there in our receive buffer.  the reason we do this
-	// is to handle the case where both the child _and_ the parent have been
-	// hung for a period of time (e.g. perhaps the log files are on a hard
-	// mounted NFS volume, and everyone was blocked until the NFS server
-	// returned).  in this situation we should try to avoid killing the child.
-	// so service the buffered commands and check if the was_not_responding
-	// flag flips back to false.
-	ServiceCommandSocket();
 
 	// Now make certain that this pid did not exit by verifying we still
 	// exist in the pid table.  We must do this because ServiceCommandSocket

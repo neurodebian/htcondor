@@ -31,6 +31,7 @@
 #include "daemon.h"
 #include "dc_schedd.h"
 #include "MyString.h"
+#include "util_lib_proto.h"   // for blankline()
 
 void
 usage(char name[])
@@ -59,6 +60,7 @@ main(int argc, char *argv[])
 	bool UseConstraint = false;
 	MyString schedd_name;
 	MyString pool_name;
+	ExprTree* value_expr;
 
 	myDistro->Init( argc, argv );
 	config();
@@ -183,14 +185,44 @@ main(int argc, char *argv[])
 		if (ProtectedAttribute(argv[nextarg])) {
 			fprintf(stderr, "Update of attribute \"%s\" is not allowed.\n",
 					argv[nextarg]);
+			fprintf(stderr,
+				"Transaction failed.  No attributes were set.\n");
 			exit(1);
 		}
+
+		// Check validity of attribute-name
+		if ( blankline(argv[nextarg]) ||
+			 !IsValidAttrName(argv[nextarg]) )
+		{
+			fprintf(stderr,
+				"Update aborted, illegal attribute-name specified for attribute \"%s\".\n",
+				argv[nextarg]);
+			fprintf(stderr,
+				"Transaction failed.  No attributes were set.\n");
+			exit(1);
+		}
+
+		// Check validity of attribute-value
+		value_expr = NULL;
+		if ( blankline(argv[nextarg+1]) ||
+			 !IsValidAttrValue(argv[nextarg+1]) ||
+			 ParseClassAdRvalExpr(argv[nextarg+1], value_expr) )
+		{
+			fprintf(stderr,
+				"Update aborted, illegal attribute-value specified for attribute \"%s\".\n",
+				argv[nextarg]);
+			fprintf(stderr,
+				"Transaction failed.  No attributes were set.\n");
+			exit(1);
+		}
+		if (value_expr) delete value_expr;
+
 		if (UseConstraint) {
 			// Try to communicate with the newer protocol first
 			if (SetAttributeByConstraint(constraint.Value(),
 							argv[nextarg],
 							argv[nextarg+1],
-							SETDIRTY|SHOULDLOG) < 0) {
+							SETDIRTY) < 0) {
 				if (SetAttributeByConstraint(constraint.Value(),
 							argv[nextarg],
 							argv[nextarg+1]) < 0) {
@@ -198,15 +230,19 @@ main(int argc, char *argv[])
 					fprintf(stderr,
 						"Failed to set attribute \"%s\" by constraint: %s\n",
 						argv[nextarg], constraint.Value());
+					fprintf(stderr,
+						"Transaction failed.  No attributes were set.\n");
 					exit(1);
 				}
 			}
 		} else {
 			if (SetAttribute(cluster, proc, argv[nextarg],
-							 argv[nextarg+1], SETDIRTY|SHOULDLOG) < 0) {
+							 argv[nextarg+1], SETDIRTY) < 0) {
 				fprintf(stderr,
 						"Failed to set attribute \"%s\" for job %d.%d.\n",
 						argv[nextarg], cluster, proc);
+				fprintf(stderr,
+						"Transaction failed.  No attributes were set.\n");
 				exit(1);
 			}
 		}

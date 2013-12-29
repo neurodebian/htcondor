@@ -140,7 +140,6 @@ MSC_DISABLE_WARNING(6262) // function uses more than 16k of stack
 EC2Job::EC2Job( ClassAd *classad )
 	: BaseJob( classad ), probeNow( false )
 {
-dprintf( D_ALWAYS, "================================>  EC2Job::EC2Job 1 \n");
 	string error_string = "";
 	char *gahp_path = NULL;
 	char *gahp_log = NULL;
@@ -310,6 +309,7 @@ dprintf( D_ALWAYS, "================================>  EC2Job::EC2Job 1 \n");
         SetRequestID( m_spot_request_id.c_str() );
     }
 
+	value.clear();
 	jobAd->LookupString( ATTR_GRID_JOB_ID, value );
 	if ( !value.empty() ) {
 		const char *token;
@@ -1945,7 +1945,7 @@ StringList* EC2Job::build_groupnames()
 	//    the default security group (by just keeping group_names is empty).
 	
 	if ( jobAd->LookupString( ATTR_EC2_SECURITY_GROUPS, &buffer ) ) {
-		group_names = new StringList( buffer, " " );
+		group_names = new StringList( buffer, ", " );
 	} else {
 		group_names = new StringList();
 	}
