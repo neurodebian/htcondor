@@ -12,7 +12,7 @@ gitver = $(shell [ -x /usr/bin/git ] && git describe --tags --match 'V[0-9]_[0-9
 
 # one ring to rule them all ...
 %:
-	dh $@
+	dh $@ --with autotools_dev --with python2
 
 
 override_dh_auto_configure:
@@ -98,6 +98,7 @@ override_dh_install:
 	dh_install
 	# fix permissions
 	chmod -x debian/condor/etc/default/condor
+	chmod -x debian/condor/usr/lib/condor/libexec/interactive.sub
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
 	# kill the default local config -- debconf will handle that

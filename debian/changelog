@@ -1,32 +1,24 @@
-condor (8.0.1~dfsg.1-1) UNRELEASED; urgency=low
+condor (8.0.5~dfsg.1-1) UNRELEASED; urgency=low
+
+  [ Michael Hanke ]
+  * Acknowledge NMU, thanks Mattias Ellert.
+  * New upstream version (Closes: #714364). This is the first packaged
+    version of an 8.x release with many improvements and fixes.
+  * Bump debhelper compat level to 9 to enabled hardening and python helper
+    support.
+  * Enable Python bindings (only for the default Python version for now).
+    New build-dependencies libboost-python-dev, python-support and python-dev
+    added.
+  * Enable automatic updating of autotools infrastructure via dh_autoreconf.
+    New build-dependencies dh-autoreconf and autotools-dev added.
+  * Fix for CVE-2013-4255 is contained since 8.0.3 (Closes: #721693).
+  * Remove Debian-specific condor_qsub script which has been integrated
+    upstream and is now shipped in an improved form.
+  * Add patch to source LSB init function in Condor's init script.
+  * Add patch to replace sprintf wrapper call without a format string argument
+    with the corresponding non-formating function call.
 
   [ Brian Lin ]
-  * New upstream version (Closes: #714364)
-    - Fixed a bug that prevented per-slot settings of the STARTD_ATTRS
-      configuration variable from being set correctly for partitionable slots
-      named with a SLOTX_ prefix. (Ticket #3726).
-    - Fixed a bug that caused condor_status -submitters to report twice as many
-      jobs running as were actually running. This bug appeared in HTCondor
-      versions 7.9.6 and 8.0.0. (Ticket #3713).
-    - Fixed a bug with hierarchical group quotas in the condor_negotiator in
-      which group hierarchies with parent groups that set configuration variable
-      GROUP_ACCEPT_SURPLUS to False would be assigned allocations above their
-      quota. (Ticket #3695).
-    - Fixed a bug in which scheduler universe jobs that have an on_exit_hold
-      expression that evaluates to True could have duplicate hold messages in
-      the user log. (Ticket #3651).
-    - Fixed a bug in which condor_dagman would submit multiple copies of the
-      same job, fail, write a Rescue DAG, and leave the jobs in the queue. This
-      was due to a warning from condor_submit that the submit description file
-      was not using lines containing the string "cluster". As a fix,
-      condor_dagman will search for the string " submitted to cluster ". This
-      will generate fewer false alarms. If the submission succeeds and
-      condor_dagman gets confused, the jobs will be removed when condor_dagman
-      writes a Rescue DAG. (Ticket #3658).
-    - Fixed a bug that caused some communication layer log messages to end with
-      binary characters. (Ticket #3706).
-    - Removed a bug that caused condor_dagman to have problems restarting after
-      an upgrade from HTCondor version 7.8. (Ticket #3707).
   * Add Debconf template translations:
     - Japanese -- courtesy of victory <victory.deb@gmail.com>.
       (Closes: #718923)
@@ -37,11 +29,14 @@ condor (8.0.1~dfsg.1-1) UNRELEASED; urgency=low
   * Disable installation of obsolete Pearl modules.
   * Fix DEP5 syntax error in debian/copyright.
 
-  [ Michael Hanke ]
-  * Remove Debian-specific condor_qsub script which has been integrated
-    upstream and is now shipped in an improved form.
+ -- Michael Hanke <mih@debian.org>  Tue, 31 Dec 2013 10:22:08 +0100
 
- -- Brian Lin <blin@cs.wisc.edu>  Tue, 23 Jul 2013 19:25:55 -0400
+condor (7.8.8~dfsg.1-2.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Adapt to multiarch globus installation (Closes: #731246).
+
+ -- Mattias Ellert <mattias.ellert@fysast.uu.se>  Mon, 16 Dec 2013 16:40:36 +0100
 
 condor (7.8.8~dfsg.1-2) unstable; urgency=low
 

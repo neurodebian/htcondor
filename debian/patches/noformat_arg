@@ -1,0 +1,13 @@
+diff --git a/src/condor_starter.V6.1/glexec_privsep_helper.linux.cpp b/src/condor_starter.V6.1/glexec_privsep_helper.linux.cpp
+index 9f1c005..0ba4791 100644
+--- a/src/condor_starter.V6.1/glexec_privsep_helper.linux.cpp
++++ b/src/condor_starter.V6.1/glexec_privsep_helper.linux.cpp
+@@ -417,7 +417,7 @@ GLExecPrivSepHelper::create_process(const char* path,
+ 		if( !retry ) {
+ 				// return the most recent glexec error output
+ 			if( error_msg ) {
+-				error_msg->formatstr_cat(glexec_error_msg.Value());
++				*error_msg += glexec_error_msg.Value();
+ 			}
+ 			return 0;
+ 		}
