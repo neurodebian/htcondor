@@ -4,6 +4,8 @@ condor (8.0.5~dfsg.1-1) UNRELEASED; urgency=low
   * Acknowledge NMU, thanks Mattias Ellert.
   * New upstream version (Closes: #714364). This is the first packaged
     version of an 8.x release with many improvements and fixes.
+  * Rename all relevant binary packages to reflect the new upstream name
+    HTCondor. The source package name is kept as 'condor'.
   * Bump debhelper compat level to 9 to enabled hardening and python helper
     support.
   * Enable Python bindings (only for the default Python version for now).

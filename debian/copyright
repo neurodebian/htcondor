@@ -1,11 +1,11 @@
 Format: http://dep.debian.net/deps/dep5/
-Upstream-Name: condor
-Upstream-Contact: Condor Team <condor-admin@cs.wisc.edu>
-Source: http://www.cs.wisc.edu/condor
+Upstream-Name: htcondor
+Upstream-Contact: HTCondor Team <htcondor-admin@cs.wisc.edu>
+Source: http://www.cs.wisc.edu/htcondor
 
 
 Files: *
-Copyright: 1990-2012, Condor Team, Computer Sciences Department,
+Copyright: 1990-2013, HTCondor Team, Computer Sciences Department,
                       University of Wisconsin-Madison, WI.
 License: Apache-2.0
 

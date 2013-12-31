@@ -97,12 +97,12 @@ override_dh_auto_install:
 override_dh_install:
 	dh_install
 	# fix permissions
-	chmod -x debian/condor/etc/default/condor
-	chmod -x debian/condor/usr/lib/condor/libexec/interactive.sub
+	chmod -x debian/htcondor/etc/default/condor
+	chmod -x debian/htcondor/usr/lib/condor/libexec/interactive.sub
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
 	# kill the default local config -- debconf will handle that
-	rm debian/condor/etc/condor/condor_config.local
+	rm debian/htcondor/etc/condor/condor_config.local
 	# modify condor config file with default Debian config
 	sed -i \
 		-e 's,^[#]*\(REQUIRE_LOCAL_CONFIG_FILE\s*=\).*,\1 FALSE,'  \
@@ -117,7 +117,7 @@ override_dh_install:
 		-e 's,^\(CRED_STORE_DIR\s*=\).*,\1 \$$(LOCAL_DIR)/lib/condor/cred_dir,' \
 		-e 's,^[#]*\(SSH_TO_JOB_SSHD_CONFIG_TEMPLATE\s*=\).*,\1 /etc/condor/condor_ssh_to_job_sshd_config_template,'  \
 		-e 's,^\(JAVA_BENCHMARK_TIME\s*=\).*,\1 0,' \
-		debian/condor/etc/condor/condor_config
+		debian/htcondor/etc/condor/condor_config
 
 
 override_dh_auto_clean:
@@ -152,11 +152,11 @@ override_dh_compress:
 
 
 override_dh_installinit:
-	dh_installinit -pcondor --onlyscripts --noscripts
+	dh_installinit -phtcondor --onlyscripts --noscripts
 
 
 override_dh_strip:
-	dh_strip --dbg-package=condor-dbg
+	dh_strip --dbg-package=htcondor-dbg
 
 override_dh_auto_test:
 
