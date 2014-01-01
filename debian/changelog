@@ -19,6 +19,7 @@ condor (8.0.5~dfsg.1-1) UNRELEASED; urgency=low
   * Add patch to source LSB init function in Condor's init script.
   * Add patch to replace sprintf wrapper call without a format string argument
     with the corresponding non-formating function call.
+  * Add upstream patch to prevent schedd crash (Ticket #38936).
 
   [ Brian Lin ]
   * Add Debconf template translations:
