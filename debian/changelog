@@ -1,4 +1,4 @@
-condor (8.0.5~dfsg.1-1) UNRELEASED; urgency=low
+condor (8.0.5~dfsg.1-1) unstable; urgency=low
 
   [ Michael Hanke ]
   * Acknowledge NMU, thanks Mattias Ellert.
