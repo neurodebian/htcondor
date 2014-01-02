@@ -55,6 +55,8 @@ override_dh_auto_build: doc/build
 	#$(MAKE) -C src/condor_chirp/chirp/java/client/
 	#cp src/condor_chirp/chirp/java/client/Chirp.jar src/condor_chirp/
 
+override_dh_python2:
+	dh_python2 $@ --no-guessing-versions
 
 override_dh_shlibdeps:
 	dh_shlibdeps -l$(CURDIR)/debian/tmp/usr/lib/
