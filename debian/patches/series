@@ -1,7 +1,7 @@
 # in order of upstream compatibility and invasiveness
 debian_init
 no_java_for_now
-enable_pythonbindings
+#enable_pythonbindings
 no_compress
 globus-multi-arch
 gsoap_symbols
