@@ -1,6 +1,6 @@
 condor (8.0.6~dfsg.1-1) unstable; urgency=medium
 
-  * New upstream maintainence release for the 8.0 series. Changelog excerpt:
+  * New upstream maintenance release for the 8.0 series. Changelog excerpt:
     - HTCondor now forces proxies that it delegates to be a minimum of
       1024 bits. (Ticket #4168).
     - Fixed a bug in the condor_schedd which would cause it to crash when
@@ -17,6 +17,8 @@ condor (8.0.6~dfsg.1-1) unstable; urgency=medium
     Michael Cree (Closes: #736689).
   * Disable Python bindings again -- they do not build nicely for all
     supported Python versions right now.
+  * Update java build-dependencies to use default-jdk as first option. Thanks
+    lintian.
 
  -- Michael Hanke <mih@debian.org>  Sun, 25 May 2014 16:15:55 +0200
 
