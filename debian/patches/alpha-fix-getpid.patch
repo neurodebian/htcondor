@@ -1,37 +1,34 @@
-From: Michael Cree <mcree@orcon.net.nz>
-Subject: condor FTBFS on Alpha: patch to fix getpid syscall
-
-Alpha Linux provides the getxpid syscall (to be compatible with OSF/1).
-
-Bug-Debian: http://bugs.debian.org/685892
-
---- condor-7.8.2~dfsg.1/src/condor_daemon_core.V6/daemon_core.cpp	2012-08-16 18:19:43.000000000 +1200
-+++ condor-7.8.2~dfsg.1-new/src/condor_daemon_core.V6/daemon_core.cpp	2012-08-26 13:43:06.000000000 +1200
-@@ -5323,7 +5323,11 @@
- 		// the pid of the parent process (presumably due to internal
+Index: condor-8.0.5~dfsg.1/src/condor_daemon_core.V6/daemon_core.cpp
+===================================================================
+--- condor-8.0.5~dfsg.1.orig/src/condor_daemon_core.V6/daemon_core.cpp	2014-01-26 12:09:02.000000000 +1300
++++ condor-8.0.5~dfsg.1/src/condor_daemon_core.V6/daemon_core.cpp	2014-01-26 12:17:31.951595080 +1300
+@@ -5427,8 +5427,12 @@
  		// caching in libc).  Therefore, use the syscall to get
  		// the answer directly.
+ 
+-	int retval = syscall(SYS_getpid);
+-
++	pid_t retval;
 +#ifdef __alpha__
-+	return syscall(SYS_getxpid);
++	retval = syscall(SYS_getxpid);
 +#else
- 	return syscall(SYS_getpid);
++	retval = syscall(SYS_getpid);
 +#endif
- #else
- 	return ::getpid();
- #endif
-@@ -5332,7 +5336,14 @@
- #if HAVE_CLONE
+ 		// If we were fork'd with CLONE_NEWPID, we think our PID is 1.
+ 		// In this case, ask the parent!
+ 	if (retval == 1) {
+@@ -5448,7 +5452,13 @@
  		// See above comment for clone_safe_getpid() for explanation of
  		// why we need to do this.
+ 	
+-	int retval = syscall(SYS_getppid);
++	pid_t retval;
 +#if defined(__alpha__) && defined(__GNUC__)
-+	pid_t ppid;
 +	syscall(SYS_getxpid);
-+	__asm__("mov $20, %0" : "=r"(ppid) : :);
-+	return ppid;
++	__asm__("mov $20, %0" : "=r"(retval) : :);
 +#else
- 	return syscall(SYS_getppid);
++	retval = syscall(SYS_getppid);
 +#endif
- #else
- 	return ::getppid();
- #endif
-
+ 
+ 		// If ppid is 0, then either Condor is init (DEAR GOD) or we
+ 		// were created with CLONE_NEWPID; ask the parent!

@@ -2,11 +2,9 @@ gsoap IPv6 support changes the layout struct of soap, breaking builds. This patc
 https://htcondor-wiki.cs.wisc.edu/index.cgi/tktview?tn=3698
 https://htcondor-wiki.cs.wisc.edu/index.cgi/tktview?tn=3740
 
-diff --git a/build/cmake/macros/CondorDaemon.cmake b/build/cmake/macros/CondorDaemon.cmake
-index e55fea25ddea300bd625a0994525fd8decfe1296..9eda18e674a5695c2e5409dbe94993e2b58b9e57 100644
 --- a/build/cmake/macros/CondorDaemon.cmake
 +++ b/build/cmake/macros/CondorDaemon.cmake
-@@ -44,7 +45,11 @@ MACRO (CONDOR_DAEMON _CNDR_TARGET _REMOVE_ELEMENTS _LINK_LIBS _INSTALL_LOC _GEN_
+@@ -44,7 +44,11 @@
  		add_dependencies(condor_${_CNDR_TARGET} gen_${_CNDR_TARGET}_soapfiles)
  		# Do not export gsoap symbols - they may break loadable modules.
  		if ( LINUX )
@@ -19,9 +17,6 @@ index e55fea25ddea300bd625a0994525fd8decfe1296..9eda18e674a5695c2e5409dbe94993e2
  		endif()
  	endif()
  	
-diff --git a/src/condor_daemon_core.V6/daemon.version.proper b/src/condor_daemon_core.V6/daemon.version.proper
-new file mode 100644
-index 0000000000000000000000000000000000000000..3264a0d1ff0a00ab60f7932cd9af305684322e0c
 --- /dev/null
 +++ b/src/condor_daemon_core.V6/daemon.version.proper
 @@ -0,0 +1,13 @@
@@ -38,11 +33,9 @@ index 0000000000000000000000000000000000000000..3264a0d1ff0a00ab60f7932cd9af3056
 +  global: _Z14dc_soap_acceptP4SockPK4soap; _Z13dc_soap_serveP4soap; _Z12dc_soap_freeP4soap; _Z12dc_soap_initRP4soap; soap_putheader; soap_serializeheader; soap_faultstring; soap_faultsubcode; soap_faultcode; soap_getheader; soap_getfault; namespaces; soap_faultdetail; soap_putfault; soap_serializefault; soap_check_faultdetail; soap_markelement; soap_check_faultsubcode; soap_getelement; soap_putelement;
 +  local: *;
 +};
-diff --git a/src/condor_daemon_core.V6/soap_core.cpp b/src/condor_daemon_core.V6/soap_core.cpp
-index ee4c35ae018874d346cef66a6194a5e07226c52e..9f7d47a94026df9ba740fae9ce8725bd7cdda613 100644
 --- a/src/condor_daemon_core.V6/soap_core.cpp
 +++ b/src/condor_daemon_core.V6/soap_core.cpp
-@@ -65,7 +65,19 @@ dc_soap_accept(Sock *socket, const struct soap *soap)
+@@ -65,7 +65,19 @@
  		//   3. increase size of send and receive buffers
  		//   4. set SO_KEEPALIVE [done automatically by CEDAR accept()]
  	cursoap->socket = socket->get_file_desc();
@@ -63,11 +56,9 @@ index ee4c35ae018874d346cef66a6194a5e07226c52e..9f7d47a94026df9ba740fae9ce8725bd
  	cursoap->recvfd = soap->socket;
  	cursoap->sendfd = soap->socket;
  	if ( cursoap->recv_timeout > 0 ) {
-diff --git a/src/condor_includes/condor_sockaddr.h b/src/condor_includes/condor_sockaddr.h
-index 0be7fcb9df92acf3812494ace2c0e2a3fb25d6ff..2744de42968a934c4c3b9427ed78ea4d2b814ecd 100644
 --- a/src/condor_includes/condor_sockaddr.h
 +++ b/src/condor_includes/condor_sockaddr.h
-@@ -53,6 +53,7 @@ public:
+@@ -53,6 +53,7 @@
  	condor_sockaddr(const sockaddr* saddr);
  	condor_sockaddr(const sockaddr_in* sin) ;
  	condor_sockaddr(const sockaddr_in6* sin6);
@@ -75,11 +66,9 @@ index 0be7fcb9df92acf3812494ace2c0e2a3fb25d6ff..2744de42968a934c4c3b9427ed78ea4d
  
  private:
  	void init(uint32_t ip, unsigned port);
-diff --git a/src/condor_utils/condor_sockaddr.cpp b/src/condor_utils/condor_sockaddr.cpp
-index 3669d5c4568fa9dea3e6e406076b68016ad2d6ff..52c94b7c8e2164a37dd44ec253a58f580c14d888 100644
 --- a/src/condor_utils/condor_sockaddr.cpp
 +++ b/src/condor_utils/condor_sockaddr.cpp
-@@ -65,6 +65,11 @@ condor_sockaddr::condor_sockaddr(const sockaddr* sa)
+@@ -65,6 +65,11 @@
  	}
  }
  
@@ -91,7 +80,7 @@ index 3669d5c4568fa9dea3e6e406076b68016ad2d6ff..52c94b7c8e2164a37dd44ec253a58f58
  condor_sockaddr::condor_sockaddr(const sockaddr_in* sin) 
  {
  	init(sin->sin_addr.s_addr, sin->sin_port);
-@@ -85,6 +90,20 @@ sockaddr_in6 condor_sockaddr::to_sin6() const
+@@ -85,6 +90,20 @@
  	return v6;
  }
  
@@ -112,13 +101,11 @@ index 3669d5c4568fa9dea3e6e406076b68016ad2d6ff..52c94b7c8e2164a37dd44ec253a58f58
  bool condor_sockaddr::is_ipv4() const
  {
  	return v4.sin_family == AF_INET;
-diff --git a/externals/bundles/gsoap/2.7.10-p5/CMakeLists.txt b/externals/bundles/gsoap/2.7.10-p5/CMakeLists.txt
-index 21d1588250aec9db5e219ddb0ee0cf51a9b56146..05f67f5f5b17444d7bfbb3c691add016a13ceb8c 100644
 --- a/externals/bundles/gsoap/2.7.10-p5/CMakeLists.txt
 +++ b/externals/bundles/gsoap/2.7.10-p5/CMakeLists.txt
-@@ -45,9 +45,9 @@ if (WITH_GSOAP)
- 							  patch -N --binary -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/nmi_prereq_hack.patch &&
- 							  patch -N --binary -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/openssl_1_0.patch)
+@@ -46,9 +46,9 @@
+ 							  patch -N --binary -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/openssl_1_0.patch &&
+ 							  patch -N --binary -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/version.patch)
  			if(DARWIN AND cxx_11)
 -				set (GSOAP_CONFIGURE ./configure --prefix=${GSOAP_INSTALL_LOC} --disable-dependency-tracking "CPPFLAGS=-I${OPENSSL_INSTALL_LOC}/include/" "CXXFLAGS=-std=c++11 -stdlib=libc++" )
 +				set (GSOAP_CONFIGURE ./configure --prefix=${GSOAP_INSTALL_LOC} --disable-dependency-tracking "CPPFLAGS=-I${OPENSSL_INSTALL_LOC}/include/ -DWITH_IPV6" "CXXFLAGS=-std=c++11 -stdlib=libc++ -DWITH_IPV6" "CFLAGS=-DWITH_IPV6" )
@@ -128,7 +115,7 @@ index 21d1588250aec9db5e219ddb0ee0cf51a9b56146..05f67f5f5b17444d7bfbb3c691add016
  			endif()
  			set (GSOAP_MAKE make )
  			set (GSOAP_INSTALL make install )
-@@ -158,6 +158,9 @@ if (WITH_GSOAP)
+@@ -159,6 +159,9 @@
  		set( SOAPCPP2 ${SOAPCPP2} PARENT_SCOPE )
  		set( GSOAP_SHARE ${GSOAP_SHARE} PARENT_SCOPE )
  		set( HAVE_EXT_GSOAP ON PARENT_SCOPE )

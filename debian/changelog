@@ -1,3 +1,23 @@
+condor (8.0.6~dfsg.1-1) unstable; urgency=medium
+
+  * New upstream maintainence release for the 8.0 series. Changelog excerpt:
+    - HTCondor now forces proxies that it delegates to be a minimum of
+      1024 bits. (Ticket #4168).
+    - Fixed a bug in the condor_schedd which would cause it to crash when
+      running remotely submitted parallel universe jobs. (Ticket #4163).
+    - Fixed a crash of the condor_shadow, triggered when a disconnect from
+      the condor_starter occurs just as the job terminates. (Ticket #4127).
+    - Fixed a bug that caused condor_submit_dag to crash on very large DAG
+      input files, such as those larger than 2 Gbytes (Ticket #4171).
+  * Drop patch for schedd crash-prevention (Ticket #38936) -- contained in new
+    release.
+  * Add missing libkrb5-dev packages to the build-depends. Thanks to Hideki
+    Yamane for the fix (Closes: #747794).
+  * Update patch for missing getpid and getppid syscalls on alpha. Thanks to
+    Michael Cree (Closes: #736689).
+
+ -- Michael Hanke <mih@debian.org>  Sun, 25 May 2014 16:15:55 +0200
+
 condor (8.0.5~dfsg.1-1) unstable; urgency=low
 
   [ Michael Hanke ]

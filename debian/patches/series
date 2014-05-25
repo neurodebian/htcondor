@@ -8,6 +8,5 @@ gsoap_symbols
 campus_factory_syntax.patch
 # should be obsolete in condor 7.7.6+, but cannot confirm
 fix_condor_run
-#alpha-fix-getpid.patch
+alpha-fix-getpid.patch
 noformat_arg
-prevent_schedd_crash

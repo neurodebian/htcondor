@@ -12,7 +12,8 @@ Build-Depends: debhelper (>= 9~), po-debconf, cmake, autotools-dev,
  libboost-system-dev, libboost-regex-dev, libboost-filesystem-dev,
  libexpat1-dev, libxml2-dev, libvirt-dev, zlib1g-dev, gcj-jdk | java-compiler,
  uuid-dev, chrpath, libldap2-dev | libldap-dev,
- help2man, gsoap (>= 2.7.17-1~), libboost-test-dev, libboost-python-dev
+ help2man, gsoap (>= 2.7.17-1~), libboost-test-dev, libboost-python-dev,
+ libkrb5-dev
 Standards-Version: 3.9.4
 Homepage: http://research.cs.wisc.edu/htcondor
 Vcs-Browser: http://git.debian.org/?p=pkg-exppsy/condor.git
