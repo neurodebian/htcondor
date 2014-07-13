@@ -37,6 +37,7 @@
 #include "condor_getcwd.h"
 #include "condor_version.h"
 #include "subsystem_info.h"
+#include "dagman_metrics.h"
 
 void ExitSuccess();
 
@@ -128,7 +129,7 @@ Dagman::Dagman() :
 	rescueFileToRun(""),
 	dumpRescueDag(false),
 	_writePartialRescueDag(true),
-	_defaultNodeLog(NULL),
+	_defaultNodeLog(""),
 	_generateSubdagSubmits(true),
 	_maxJobHolds(100),
 	_runPost(true),
@@ -176,7 +177,7 @@ Dagman::Config()
 						_dagmanConfigFile );
     		DC_Exit( EXIT_ERROR );
 		}
-		process_config_source( _dagmanConfigFile, "DAGMan config",
+		process_config_source( _dagmanConfigFile, 0, "DAGMan config",
 					NULL, true );
 	}
 
@@ -400,10 +401,12 @@ Dagman::Config()
 	debug_printf( DEBUG_NORMAL, "DAGMAN_WRITE_PARTIAL_RESCUE setting: %s\n",
 				_writePartialRescueDag ? "True" : "False" );
 
-	free( _defaultNodeLog );
 	_defaultNodeLog = param( "DAGMAN_DEFAULT_NODE_LOG" );
+	if ( _defaultNodeLog == "" ) {
+		_defaultNodeLog = "@(DAG_DIR)/@(DAG_FILE).nodes.log";
+	}
 	debug_printf( DEBUG_NORMAL, "DAGMAN_DEFAULT_NODE_LOG setting: %s\n",
-				_defaultNodeLog ? _defaultNodeLog : "null" );
+				_defaultNodeLog.Value() );
 
 	_generateSubdagSubmits = 
 		param_boolean( "DAGMAN_GENERATE_SUBDAG_SUBMITS",
@@ -432,16 +435,6 @@ Dagman::Config()
 		free( debugSetting );
 	}
 
-		// Check for the default/node/workflow log being in /tmp
-	if ( _defaultNodeLog &&
-				strstr( _defaultNodeLog, "/tmp" ) == _defaultNodeLog ) {
-		debug_printf( DEBUG_QUIET, "Warning: "
-					"DAGMAN_DEFAULT_NODE_LOG file %s is in /tmp\n",
-					_defaultNodeLog );
-		check_warning_strictness( _submitDagDeepOpts.always_use_node_log ?
-					DAG_STRICT_1 : DAG_STRICT_2 );
-	}
-
 	// enable up the debug cache if needed
 	if (debug_cache_enabled) {
 		debug_cache_set_size(debug_cache_size);
@@ -468,15 +461,18 @@ void
 main_shutdown_fast()
 {
 	dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_RESTART );
+	// Don't report metrics here because we should restart.
     DC_Exit( EXIT_RESTART );
 }
 
 // this can be called by other functions, or by DC when the schedd is
-// shutdown gracefully
+// shutdown gracefully; this also gets called if condor_hold is done
+// on the DAGMan job
 void main_shutdown_graceful() {
 	print_status();
 	dagman.dag->DumpNodeStatus( true, false );
 	dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_RESTART );
+	// Don't report metrics here because we should restart.
 	dagman.CleanUp();
 	DC_Exit( EXIT_RESTART );
 }
@@ -537,6 +533,7 @@ void main_shutdown_rescue( int exitVal, Dag::dag_status dagStatus ) {
 		dagman.dag->DumpNodeStatus( false, true );
 		dagman.dag->GetJobstateLog().WriteDagmanFinished( exitVal );
 	}
+	dagman.dag->ReportMetrics( exitVal );
 	tolerant_unlink( lockFileName ); 
 	dagman.CleanUp();
 	inShutdownRescue = false;
@@ -556,6 +553,7 @@ void ExitSuccess() {
 	print_status();
 	dagman.dag->DumpNodeStatus( false, false );
 	dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_OKAY );
+	dagman.dag->ReportMetrics( EXIT_OKAY );
 	tolerant_unlink( lockFileName ); 
 	dagman.CleanUp();
 	DC_Exit( EXIT_OKAY );
@@ -610,6 +608,8 @@ void main_init (int argc, char ** const argv) {
     }
 
     if (argc < 2) Usage();  //  Make sure an input file was specified
+
+	DagmanMetrics::SetStartTime();
 
 		// get dagman job id from environment, if it's there
 		// (otherwise it will be set to "-1.-1.-1")
@@ -814,30 +814,10 @@ void main_init (int argc, char ** const argv) {
 	dagman.primaryDagFile = dagman.dagFiles.next();
 	dagman.multiDags = (dagman.dagFiles.number() > 1);
 
-	MyString tmpDefaultLog;
-	if ( dagman._defaultNodeLog != NULL ) {
-		tmpDefaultLog = dagman._defaultNodeLog;
-		free( dagman._defaultNodeLog );
-	} else {
-		tmpDefaultLog = dagman.primaryDagFile + ".nodes.log";
-	}
-
-		// Force default log file path to be absolute so it works
-		// with -usedagdir and DIR nodes.
-	CondorError errstack;
-	if ( !MultiLogFiles::makePathAbsolute( tmpDefaultLog, errstack) ) {
-       	debug_printf( DEBUG_QUIET, "Unable to convert default log "
-					"file name to absolute path: %s\n",
-					errstack.getFullText().c_str() );
-		dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_ERROR );
-		DC_Exit( EXIT_ERROR );
-	}
-	dagman._defaultNodeLog = strdup( tmpDefaultLog.Value() );
-	debug_printf( DEBUG_NORMAL, "Default node log file is: <%s>\n",
-				dagman._defaultNodeLog);
+	dagman.ResolveDefaultLog();
 
     //
-    // Check the arguments
+    // Check the arguments...
     //
 
 	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -931,6 +911,15 @@ void main_init (int argc, char ** const argv) {
         Usage();
     }
 
+	if ( !dagman._submitDagDeepOpts.always_use_node_log ) {
+        debug_printf( DEBUG_QUIET, "Warning: setting DAGMAN_ALWAYS_USE_NODE_LOG to false is no longer recommended and will probably be disabled in a future version\n" );
+		check_warning_strictness( DAG_STRICT_1 );
+	}
+
+	//
+	// ...done checking arguments.
+	//
+
     debug_printf( DEBUG_VERBOSE, "DAG Lockfile will be written to %s\n",
                    lockFileName );
 	if ( dagman.dagFiles.number() == 1 ) {
@@ -1012,7 +1001,7 @@ void main_init (int argc, char ** const argv) {
 						  dagman.retryNodeFirst, dagman.condorRmExe,
 						  dagman.storkRmExe, &dagman.DAGManJobId,
 						  dagman.prohibitMultiJobs, dagman.submitDepthFirst,
-						  dagman._defaultNodeLog,
+						  dagman._defaultNodeLog.Value(),
 						  dagman._generateSubdagSubmits,
 						  &dagman._submitDagDeepOpts,
 						  false ); /* toplevel dag! */
@@ -1128,6 +1117,9 @@ void main_init (int argc, char ** const argv) {
 					 	dagFile );
     	}
 	}
+
+		// This must come after splices are lifted.
+	dagman.dag->CreateMetrics( dagman.primaryDagFile.Value(), rescueDagNum );
 
 	dagman.dag->CheckThrottleCats();
 
@@ -1266,7 +1258,8 @@ Dagman::CheckLogFileMode( const CondorVersionInfo &submitFileVersion )
 			// a Pegasus-generated sub-DAG.
 
 			// Check for existence of the default log file
-		bool has_new_default_log = access( dagman._defaultNodeLog, F_OK ) == 0;
+		bool has_new_default_log = access( dagman._defaultNodeLog.Value(),
+					F_OK ) == 0;
 
 			// Note:  we can run into trouble here -- the default log
 			// file can exist if a pre 7.9 DAGMan had a node job
@@ -1297,6 +1290,51 @@ Dagman::DisableDefaultLog()
 	dagman.dag->UseDefaultNodeLog(false);
 }
 
+//---------------------------------------------------------------------------
+void
+Dagman::ResolveDefaultLog()
+{
+	char *dagDir = condor_dirname( primaryDagFile.Value() );
+	const char *dagFile = condor_basename( primaryDagFile.Value() );
+
+	_defaultNodeLog.replaceString( "@(DAG_DIR)", dagDir );
+	_defaultNodeLog.replaceString( "@(DAG_FILE)", dagFile );
+	MyString cluster( DAGManJobId._cluster );
+	_defaultNodeLog.replaceString( "@(CLUSTER)", cluster.Value() );
+	free( dagDir );
+
+	if ( _defaultNodeLog.find( "@" ) >= 0 ) {
+		debug_printf( DEBUG_QUIET, "Warning: "
+					"default node log file %s contains an '@' character -- "
+					"unresolved macro substituion?\n",
+					_defaultNodeLog.Value() );
+		check_warning_strictness( _submitDagDeepOpts.always_use_node_log ?
+					DAG_STRICT_1 : DAG_STRICT_2 );
+	}
+
+		// Force default log file path to be absolute so it works
+		// with -usedagdir and DIR nodes.
+	CondorError errstack;
+	if ( !MultiLogFiles::makePathAbsolute( _defaultNodeLog, errstack) ) {
+       	debug_printf( DEBUG_QUIET, "Unable to convert default log "
+					"file name to absolute path: %s\n",
+					errstack.getFullText().c_str() );
+		dagman.dag->GetJobstateLog().WriteDagmanFinished( EXIT_ERROR );
+		DC_Exit( EXIT_ERROR );
+	}
+
+	if ( _defaultNodeLog.find( "/tmp" ) == 0 ) {
+		debug_printf( DEBUG_QUIET, "Warning: "
+					"default node log file %s is in /tmp\n",
+					_defaultNodeLog.Value() );
+		check_warning_strictness( _submitDagDeepOpts.always_use_node_log ?
+					DAG_STRICT_1 : DAG_STRICT_2 );
+	}
+
+	debug_printf( DEBUG_NORMAL, "Default node log file is: <%s>\n",
+				_defaultNodeLog.Value() );
+}
+
 void
 print_status() {
 	int total = dagman.dag->NumNodes( true );
@@ -1306,7 +1344,7 @@ print_status() {
 	int post = dagman.dag->PostRunNodeCount();
 	int ready =  dagman.dag->NumNodesReady();
 	int failed = dagman.dag->NumNodesFailed();
-	int unready = total - (done + pre + submitted + post + ready + failed );
+	int unready = dagman.dag->NumNodesUnready( true );
 
 	debug_printf( DEBUG_VERBOSE, "Of %d nodes total:\n", total );
 
@@ -1456,7 +1494,9 @@ void condor_event_timer () {
 		// DAG is run anyhow).
 	if ( dagman.dag->IsHalted() && dagman.dag->NumJobsSubmitted() == 0 &&
 				dagman.dag->PostRunNodeCount() == 0 &&
-				!dagman.dag->RunningFinalNode() ) {
+				!dagman.dag->FinalNodeRun() ) {
+			// Note:  main_shutdown_rescue() will run the final node
+			// if there is one.
 		debug_printf ( DEBUG_QUIET, "Exiting because DAG is halted "
 					"and no jobs or scripts are running\n" );
 		main_shutdown_rescue( EXIT_ERROR, Dag::DAG_STATUS_HALTED );

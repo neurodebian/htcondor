@@ -65,7 +65,13 @@ public:
 
     bool hadAuthFailure() { return m_hadAuthFailure; }
 
+	bool ServerTypeQueried( EC2Job *job = NULL );
+	bool ClientTokenWorks( EC2Job *job = NULL );
+	bool ShuttingDownTrusted( EC2Job *job = NULL );
+
     std::string authFailureMessage;
+
+	std::string m_serverType;
 
     BatchStatusResult StartBatchStatus();
     BatchStatusResult FinishBatchStatus();
@@ -75,8 +81,8 @@ public:
     HashTable< HashKey, EC2Job * > spotJobsByRequestID;
     
 private:
-	void DoPing(time_t & ping_delay, 
-				bool & ping_complete, 
+	void DoPing(unsigned & ping_delay,
+				bool & ping_complete,
 				bool & ping_succeeded  );
 	
 	char* m_public_key_file;

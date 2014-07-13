@@ -311,6 +311,9 @@ void CollectorDaemon::Init()
 
     }
 
+	// add an exponential moving average counter of updates received.
+	daemonCore->dc_stats.New("Collector", "UpdatesReceived", AS_COUNT | IS_CLS_SUM_EMA_RATE | IF_BASICPUB);
+
 	forkQuery.Initialize( );
 }
 
@@ -341,17 +344,6 @@ int CollectorDaemon::receive_query_cedar(Service* /*s*/,
 
 	// Initial query handler
 	AdTypes whichAds = receive_query_public( command );
-
-	// CRUFT: Before 7.3.2, submitter ads had a MyType of
-	//   "Scheduler". The only way to tell the difference
-	//   was that submitter ads didn't have ATTR_NUM_USERS.
-	//   The correosponding query ads had a TargetType of
-	//   "Scheduler", which we now coerce to "Submitter".
-	//   Before 7.7.3, submitter ads for parallel universe
-	//   jobs had a MyType of "Scheduler".
-	if ( whichAds == SUBMITTOR_AD ) {
-		SetTargetTypeName( cad, SUBMITTER_ADTYPE );
-	}
 
 	UtcTime begin(true);
 
@@ -566,8 +558,8 @@ int CollectorDaemon::receive_invalidation(Service* /*s*/,
 				 sock->type() == Stream::reli_sock ? "TCP" : "UDP" );
         return FALSE;
     }
-#if !defined(WANT_OLD_CLASSADS)
-	cad.RemoveExplicitTargetRefs();
+#if defined(ADD_TARGET_SCOPING)
+	RemoveExplicitTargetRefs( cad );
 #endif
 
     // cancel timeout --- collector engine sets up its own timeout for
@@ -698,6 +690,8 @@ int CollectorDaemon::receive_update(Service* /*s*/, int command, Stream* sock)
 {
     int	insert;
 	ClassAd *cad;
+
+	daemonCore->dc_stats.AddToAnyProbe("UpdatesReceived", 1);
 
 	/* assume the ad is malformed... other functions set this value */
 	insert = -3;
@@ -948,8 +942,8 @@ void CollectorDaemon::process_query_public (AdTypes whichAds,
 											ClassAd *query,
 											List<ClassAd>* results)
 {
-#if !defined(WANT_OLD_CLASSADS)
-	query->RemoveExplicitTargetRefs();
+#if defined(ADD_TARGET_SCOPING)
+	RemoveExplicitTargetRefs( *query );
 #endif
 	// set up for hashtable scan
 	__query__ = query;
@@ -1822,18 +1816,6 @@ CollectorUniverseStats::publish( const char *label, ClassAd *ad )
 void
 computeProjection(ClassAd *full_ad, SimpleList<MyString> *projectionList,StringList &expanded_projection) {
     projectionList->Rewind();
-
-	// CRUFT: Before 7.3.2, submitter ads had a MyType of
-	//   "Scheduler". The only way to tell the difference
-	//   was that submitter ads didn't have ATTR_NUM_USERS.
-	//   If we don't include ATTR_NUM_USERS in our projection,
-	//   older clients will morph scheduler ads into
-	//   submitter ads, regardless of MyType.
-	//   Before 7.7.3, submitter ads for parallel universe
-	//   jobs had a MyType of "Scheduler".
-	if (strcmp("Scheduler", GetMyTypeName(*full_ad)) == 0) {
-		expanded_projection.append(ATTR_NUM_USERS);
-	}
 
 		// For each expression in the list...
 	MyString attr;

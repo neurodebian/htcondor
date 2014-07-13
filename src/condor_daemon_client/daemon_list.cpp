@@ -169,17 +169,10 @@ CollectorList::create( const char * pool )
 	CollectorList * result = new CollectorList();
 	DCCollector * collector = NULL;
 
-	if (pool) {
-			// Eventually we might want to query this collector
-			// for all the other collectors in the pool....
-		result->append (new DCCollector (pool));
-		return result;
-	}
-
-		// Read the new names from config file
+		// Read the new names from config file or use the given parameter
 	StringList collector_name_list;
 	char * collector_name_param = NULL;
-	collector_name_param = getCmHostFromConfig( "COLLECTOR" );
+	collector_name_param = pool ? strdup(pool) : getCmHostFromConfig( "COLLECTOR" );
 	if( collector_name_param ) {
 		collector_name_list.initializeFromString(collector_name_param);
 	
@@ -286,7 +279,7 @@ CollectorList::query(CondorQuery & cQuery, ClassAdList & adList, CondorError *er
 
 	std::vector<DCCollector *> vCollectors;
 	DCCollector * daemon;
-	QueryResult result;
+	QueryResult result = Q_COMMUNICATION_ERROR;
 
 	bool problems_resolving = false;
 
@@ -347,7 +340,7 @@ CollectorList::query(CondorQuery & cQuery, ClassAdList & adList, CondorError *er
 	}
 
 		// If we've gotten here, there are no good collectors
-	return Q_COMMUNICATION_ERROR;
+	return result;
 }
 
 

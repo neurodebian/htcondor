@@ -186,6 +186,13 @@ CondorQuery (AdTypes qType)
 		command = QUERY_CKPT_SRVR_ADS;
 		break;
 
+	  case DEFRAG_AD:
+		query.setNumStringCats (0);
+		query.setNumIntegerCats(0);
+		query.setNumFloatCats  (0);
+		command = QUERY_ANY_ADS;
+		break;
+
 	  case COLLECTOR_AD:
 		query.setNumStringCats (0);
 		query.setNumIntegerCats(0);
@@ -484,6 +491,9 @@ getQueryAd (ClassAd &queryAd)
 		break;
 #endif /* HAVE_EXT_POSTGRESQL */
 
+	  case DEFRAG_AD:
+		SetTargetTypeName(queryAd, DEFRAG_ADTYPE);
+		break;
 	  case STARTD_AD:
 	  case STARTD_PVT_AD:
 		SetTargetTypeName (queryAd, STARTD_ADTYPE);
@@ -608,7 +618,7 @@ getStrQueryResult(QueryResult q)
     	case Q_OK:					return "ok";
     	case Q_INVALID_CATEGORY:	return "invalid category";
     	case Q_MEMORY_ERROR:		return "memory error";
-    	case Q_PARSE_ERROR:			return "parse error";
+	    case Q_PARSE_ERROR:			return "invalid constraint";
 	    case Q_COMMUNICATION_ERROR:	return "communication error";
 	    case Q_INVALID_QUERY:		return "invalid query";
 	    case Q_NO_COLLECTOR_HOST:	return "can't find collector";

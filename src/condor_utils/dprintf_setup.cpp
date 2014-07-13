@@ -145,6 +145,12 @@ void dprintf_set_outputs(const struct dprintf_output_settings *p_info, int c_inf
 					it->userData = static_cast<void*>(DprintfSyslogFactory::NewLog(LOG_DAEMON));
 				}
 #endif
+				else if (logPath == ">BUFFER")
+				{
+					it->outputTarget = OUTPUT_DEBUG_STR;
+					it->dprintfFunc = _dprintf_to_buffer;
+					it->userData = dprintf_get_onerror_data();
+				}
 				else
 				{
 					it->outputTarget = FILE_OUT;
@@ -170,7 +176,7 @@ void dprintf_set_outputs(const struct dprintf_output_settings *p_info, int c_inf
 						DebugLastMod = -errno;
 					}
 				}
-				PRAGMA_REMIND("TJ: fix this when choice includes verbose.")
+				//PRAGMA_REMIND("TJ: fix this when choice includes verbose.")
 				AnyDebugBasicListener = p_info[ii].choice;
 				AnyDebugVerboseListener = p_info[ii].VerboseCats;
 				DebugHeaderOptions = p_info[ii].HeaderOpts;

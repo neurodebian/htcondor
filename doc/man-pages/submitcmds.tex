@@ -642,11 +642,15 @@ Characters may be appended to a numerical value to indicate units.
 %%%%%%%%%%%%%%%%%%%
 
 \index{submit commands!request\_<name>}
+\index{submit commands!request\_GPUs}
+\index{GPUs!requesting GPUs for a job}
 \label{man-condor-submit-request-name}
 \item[request\_<name> = $<$quantity$>$] 
 The required amount of the custom machine resource 
 identified by \Expr{<name>} that this job needs.
 The custom machine resource is defined in the machine's configuration.
+Machines that have available GPUs will define \Expr{<name>}
+to be \Expr{GPUs}.
 
 %%%%%%%%%%%%%%%%%%%
 %% requirements
@@ -1247,7 +1251,7 @@ instead of being allowed to leave the queue.
 
 \footnotesize
 \begin{verbatim}
-  on_exit_hold = (CurrentTime - JobStartDate) < (60 * $(MINUTE))
+  on_exit_hold = (time() - JobStartDate) < (60 * $(MINUTE))
 \end{verbatim}
 \normalsize
 
@@ -1742,6 +1746,18 @@ be submitted.
 If not specified, the default queue is used.
 
 %%%%%%%%%%%%%%%%%%%
+%% boinc_authenticator_file
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!boinc\_authenticator\_file}
+\label{condor-submit-boinc-authenticator-file}
+\item[boinc\_authenticator\_file = $<$pathname$>$]
+For grid type \SubmitCmd{boinc} jobs, 
+specifies a path and file name of the authorization file that grants
+permission for HTCondor to use the BOINC service.
+There is no default value when not specified.
+
+%%%%%%%%%%%%%%%%%%%
 %% cream_attributes
 %%%%%%%%%%%%%%%%%%%
 
@@ -2088,6 +2104,64 @@ For grid type \SubmitCmd{ec2} jobs,
 an optional specification of the Virtual Private Cloud (VPC) that
 this instance should be a part of.
 
+%%%%%%%%%%%%%%%%%%%
+%% gce_auth_file
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!gce\_auth\_file}
+\label{condor-submit-gce-auth-file}
+\item[gce\_auth\_file = $<$pathname$>$]
+For grid type \SubmitCmd{gce} jobs, 
+specifies a path and file name of the authorization file that grants
+permission for HTCondor to use the Google account.
+There is no default value when not specified.
+
+%%%%%%%%%%%%%%%%%%%
+%% gce_image
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!gce\_image}
+\label{condor-submit-gce-image}
+\item[gce\_image = $<$URL$>$]
+For grid type \SubmitCmd{gce} jobs,
+the URL of the virtual machine image representing the HTCondor job to
+be run.  This virtual machine image must already be register with GCE
+and reside in Google's Cloud Storage service.
+
+%%%%%%%%%%%%%%%%%%%
+%% gce_machine_type
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!gce\_machine\_type}
+\label{condor-submit-gce-machine-type}
+\item[gce\_machine\_type = $<$machine type$>$]
+For grid type \SubmitCmd{gce} jobs,
+the long form of the URL that describes the machine configuration that the
+virtual machine instance is to run on. 
+
+%%%%%%%%%%%%%%%%%%%
+%% gce_metadata
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!gce\_metadata}
+\label{condor-submit-gce-metadata}
+\item[gce\_metadata = $<$name=value,\Dots,name=value$>$]
+For grid type \SubmitCmd{gce} jobs,
+a comma separated list of name and value pairs that define metadata
+for a virtual machine instance that is an HTCondor job.
+
+%%%%%%%%%%%%%%%%%%%
+%% gce_metadata_file
+%%%%%%%%%%%%%%%%%%%
+
+\index{submit commands!gce\_metadata\_file}
+\label{condor-submit-gce-metadata-file}
+\item[gce\_metadata\_file = $<$pathname$>$]
+For grid type \SubmitCmd{gce} jobs, 
+specifies a path and file name of the file that contains metadata
+for a virtual machine instance that is an HTCondor job.
+Within the file, each name and value pair is on its own line;
+so, the pairs are separated by the newline character.
 
 %%%%%%%%%%%%%%%%%%%
 %% globus_rematch
@@ -3510,13 +3584,15 @@ For this example \Attr{PreArgs} generates a first argument of
 \label{macro-in-submit-description-file}
 \index{macro!in submit description file}
 In addition to commands, the submit description file can contain macros
-and comments:
+and comments.
 
 \begin{description}
 
-\item[Macros] Parameterless macros in the form of \MacroUNI{macro\_name}
-may be inserted anywhere in HTCondor submit description files. Macros can be
-defined by lines in the form of 
+\item[Macros] Parameterless macros in the form of 
+\MacroUNI{macro\_name:default initial value}
+may be used anywhere in HTCondor submit description files
+to provide textual substitution at submit time.
+Macros can be defined by lines in the form of 
 \begin{verbatim} 
         <macro_name> = <string> 
 \end{verbatim} 
@@ -3572,6 +3648,24 @@ C = $(B)
 B = $(C) boo
 \end{verbatim}
 will \emph{not} work, and will fill memory with expansions.
+
+A default value may be specified, for use if the macro has no definition.
+Consider the example
+\begin{verbatim}
+D = $(E:24)
+\end{verbatim}
+Where \MacroNI{E} is not defined within the submit description
+file, the default value 24 is used, resulting in 
+\begin{verbatim}
+D = 24
+\end{verbatim}
+This is of limited value, as the scope of macro substitution is
+the submit description file.
+Thus, either the macro is or is not defined within the submit description
+file.
+If the macro is defined, then the default value is useless.
+If the macro is not defined, then there is no point in using it in a 
+submit command.
 
 \index{\$!as a literal character in a submit description file}
 To use the dollar sign character (\verb@$@) as a literal,

@@ -21,8 +21,10 @@ if(NOT WIN_EXEC_NODE_ONLY)
 
 	if ( LINUX )
 		file( GLOB RmvSrcs *_gahp_wrapper* )
+	elseif( DARWIN OR WINDOWS )
+		file( GLOB RmvSrcs *_gahp_wrapper* *dcloud* )
 	else()
-		file( GLOB RmvSrcs *_gahp_wrapper* *dcloud* *ec2* )
+		file( GLOB RmvSrcs *_gahp_wrapper* *dcloud* *ec2* *gce* )
 	endif()
 	condor_glob( GMHDRS GMSRCS "${RmvSrcs}" )
 

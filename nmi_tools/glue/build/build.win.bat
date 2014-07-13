@@ -31,19 +31,37 @@ set TMP=%BUILD_ROOT%\Temp
 for /D %%I in ("%VS90COMNTOOLS%..") do if exist %%~sdpIVC\bin\cl.exe set VC90_BIN=%%~sdpIVC\bin
 for /D %%I in ("%VS90COMNTOOLS%..") do if exist %%~sdpICommon7\IDE\devenv.exe set VC90_IDE=%%~sdpICommon7\IDE
 for /D %%I in ("%VS90COMNTOOLS%..") do set VS90ROOT=%%~sdpI
-set VS_DIR=%VS90ROOT:~0,-1%
-set VC_DIR=%VS_DIR%\VC
-set VC_BIN=%VC_DIR%\bin
 
 :: pick up vs2010 compiler path from VS100COMNTOOLS environment variable
 ::
 for /D %%I in ("%VS100COMNTOOLS%..") do if exist %%~sdpIVC\bin\cl.exe set VC100_BIN=%%~sdpIVC\bin
 for /D %%I in ("%VS100COMNTOOLS%..") do if exist %%~sdpICommon7\IDE\devenv.exe set VC100_IDE=%%~sdpICommon7\IDE
+for /D %%I in ("%VS100COMNTOOLS%..") do set VS100ROOT=%%~sdpI
 
 :: pick up vs2012 compiler path from VS110COMNTOOLS environment variable
 ::
 for /D %%I in ("%VS110COMNTOOLS%..") do if exist %%~sdpIVC\bin\cl.exe set VC110_BIN=%%~sdpIVC\bin
 for /D %%I in ("%VS110COMNTOOLS%..") do if exist %%~sdpICommon7\IDE\devenv.exe set VC110_IDE=%%~sdpICommon7\IDE
+for /D %%I in ("%VS110COMNTOOLS%..") do set VS110ROOT=%%~sdpI
+
+set VS_DIR=%VS90ROOT:~0,-1%
+set VS_GEN="Visual Studio 9 2008"
+if "%~2"=="VC10" (
+    if DEFINED VS100ROOT (
+        set VS_DIR=%VS100ROOT:~0,-1%
+        set VS_GEN="Visual Studio 10"
+    )
+)
+if "%~2"=="VC11" (
+    if DEFINED VS110ROOT (
+        set VS_DIR=%VS110ROOT:~0,-1%
+        set VS_GEN="Visual Studio 11"
+    )
+)
+echo VS_DIR is now [%VS_DIR%] %VS_GEN%
+set VC_DIR=%VS_DIR%\VC
+set VC_BIN=%VC_DIR%\bin
+
 
 set DOTNET_PATH=%SystemRoot%\Microsoft.NET\Framework\v3.5;%SystemRoot%\Microsoft.NET\Framework\v2.0.50727
 
@@ -126,7 +144,7 @@ set INCLUDE=%BUILD_ROOT%\src\condor_utils
 :: if its a full version number than use it. (we look for the "." after X)
 :: if it's a buildid, get the version number from the cmake files and then append it.
 set BUILDID=%2
-:: if NOT "%2"=="" ( if "%BUILDID:~0,1%"=="-" set BUILDID=%BUILDID:~1% )
+if "%BUILDID:~0,2%"=="VC" set BUILDID=%3
 if "%BUILDID:~1,1%"=="." (
    set BUILD_VERSION=%BUILDID%
    set BUILDID=
@@ -136,8 +154,13 @@ if "%BUILDID:~1,1%"=="." (
 if NOT "%BUILD_VERSION%"=="" (
   if NOT "%BUILDID%"=="" set BUILD_VERSION=%BUILD_VERSION%-%BUILDID%
 )
+:: the BUILD_WIN_TAG is used to indicate the Windows version in the .zip and .msi names
+:: 7 indicates that XP is no longer supported, which is currently the case when we build with VC11
+set BUILD_WIN_TAG=
+if "%2"=="VC9" set BUILD_WIN_TAG=XP
 @echo BUILDID=%BUILDID%
 @echo BUILD_VERSION=%BUILD_VERSION%
+@echo BUILD_WIN_TAG==%BUILD_WIN_TAG%
 
 @echo ----  build.win.bat ENVIRONMENT --------------------------------
 set
@@ -160,8 +183,8 @@ dir CMakeFiles\generate.stamp*
 for /F %%I in ('dir /b/s CMakeLists.*') do touch %%I    
 dir CMakeLists.txt
 dir CMakeFiles\generate.stamp*
-@echo cmake.exe . -G "Visual Studio 9 2008"
-cmake.exe . -G "Visual Studio 9 2008"
+@echo cmake.exe . -G %VS_GEN%
+cmake.exe . -G %VS_GEN%
 if ERRORLEVEL 1 goto finis
 @echo devenv CONDOR.sln /Build RelWithDebInfo /project ALL_BUILD
 devenv CONDOR.sln /Build RelWithDebInfo /project ALL_BUILD
@@ -177,7 +200,7 @@ goto finis
 izip -r build_products.zip * -i *.cmake -i *.txt -i *.htm -i *.map -i *.vcproj -i *.sln -i *.log -i *.stamp* -i param_info* 
 @echo ZIPPING up release directory %BUILD_ROOT%\release_dir
 pushd %BUILD_ROOT%\release_dir
-izip -r ..\condor-%BUILD_VERSION%-Windows-x86.zip *
+izip -r ..\condor-%BUILD_VERSION%-Windows%BUILD_WIN_TAG%-x86.zip *
 dir .
 popd
 goto finis   
@@ -200,14 +223,14 @@ goto finis
 :MSI
 :MAKE_MSI
 :NATIVE
-@echo %BUILD_ROOT%\release_dir\etc\WiX\do_wix %BUILD_ROOT%\release_dir %BUILD_ROOT%\condor-%BUILD_VERSION%-Windows-x86.msi
+@echo %BUILD_ROOT%\release_dir\etc\WiX\do_wix %BUILD_ROOT%\release_dir %BUILD_ROOT%\condor-%BUILD_VERSION%-Windows%BUILD_WIN_TAG%-x86.msi
 ::@echo on
 ::dir %BUILD_ROOT%\release_dir
 ::dir %BUILD_ROOT%
 ::@echo off
 :: verify forces ERRORLEVEL to 0
 verify >NUL
-call %BUILD_ROOT%\release_dir\etc\WiX\do_wix.bat %BUILD_ROOT%\release_dir %BUILD_ROOT%\condor-%BUILD_VERSION%-Windows-x86.msi
+call %BUILD_ROOT%\release_dir\etc\WiX\do_wix.bat %BUILD_ROOT%\release_dir %BUILD_ROOT%\condor-%BUILD_VERSION%-Windows%BUILD_WIN_TAG%-x86.msi
 @echo ERRORLEVEL=%ERRORLEVEL%
 :: verify forces ERORLEVEL to 0
 verify >NUL
@@ -219,8 +242,28 @@ devenv CONDOR.sln /Build RelWithDebInfo /project PACKAGE
 goto finis
 
 :EXTERNALS
-@echo devenv CONDOR_EXTERNALS.sln /Build RelWithDebInfo /project ALL_EXTERN
+::where devenv
+::grep -E "# Visual Studio" CONDOR.sln
+@echo devenv CONDOR.sln /Build RelWithDebInfo /project ALL_EXTERN
 devenv CONDOR.sln /Build RelWithDebInfo /project ALL_EXTERN
+goto finis
+
+:BUILD_TESTS
+:BLD_TESTS
+@echo devenv CONDOR.sln /Build RelWithDebInfo /project BLD_TESTS
+devenv CONDOR.sln /Build RelWithDebInfo /project BLD_TESTS
+move src\condor_tests\RelWithDebInfo\*.exe src\condor_tests
+move src\condor_tests\RelWithDebInfo\*.pdb src\condor_tests
+move src\classad\RelWithDebInfo\*.exe src\condor_tests
+move src\classad\RelWithDebInfo\*.pdb src\condor_tests
+move src\classad\tests\RelWithDebInfo\*.exe src\condor_tests
+move src\classad\tests\RelWithDebInfo\*.pdb src\condor_tests
+move src\condor_utils\tests\RelWithDebInfo\*.exe src\condor_tests
+move src\condor_utils\tests\RelWithDebInfo\*.pdb src\condor_tests
+move src\condor_collector.V6\tests\RelWithDebInfo\*.exe src\condor_tests
+move src\condor_collector.V6\tests\RelWithDebInfo\*.pdb src\condor_tests
+copy bld_external\pcre-8.33\install\lib\pcre.dll src\condor_tests
+copy src\classad\tests\testdata.txt src\condor_tests
 goto finis
 
 REM common exit

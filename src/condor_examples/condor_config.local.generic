@@ -31,3 +31,4 @@ KILL = FALSE
 ##  The list is a comma or space separated list of subsystem names
 
 DAEMON_LIST = COLLECTOR, MASTER, NEGOTIATOR, SCHEDD, STARTD
+

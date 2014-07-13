@@ -42,6 +42,9 @@ public:
 	CondorVersionInfo(const char *versionstring = NULL, 
 		const char *subsystem = NULL, const char *platformstring = NULL);
 
+	CondorVersionInfo(int major, int minor, int subminor, const char *rest = NULL,
+		const char *subsystem = NULL, const char *platformstring = NULL);
+
 	CondorVersionInfo(CondorVersionInfo const &);
 
 	/// Destructor.
@@ -80,12 +83,9 @@ public:
 
 
 	int compare_versions(const char* other_version_string) const;
-	int compare_build_dates(const char* other_version_string) const;
+	int compare_versions(const CondorVersionInfo & other_version) const;
 	
 	bool built_since_version(int MajorVer, int MinorVer, int SubMinorVer) const;
-
-	// Note: for "month", 1=Jan, 2=Feb, etc, as you'd expect
-	bool built_since_date(int month, int day, int year) const;
 
 	bool is_compatible(const char* other_version_string, 
 					   const char* other_subsys = NULL) const;
@@ -102,7 +102,7 @@ public:
 		int MinorVer;
 		int SubMinorVer;
 		int Scalar;
-		time_t BuildDate;
+		char *Rest;
 		char *Arch;
 		char *OpSys;
 	} VersionData_t;
@@ -113,6 +113,8 @@ private:
 	VersionData_t myversion;
 	char *mysubsys;
 
+	bool numbers_to_VersionData( int major, int minor, int subminor,
+								 const char *rest, VersionData_t &ver ) const;
 	bool string_to_VersionData(const char *,VersionData_t &) const;
 	bool string_to_PlatformData(const char *,VersionData_t &) const;
 

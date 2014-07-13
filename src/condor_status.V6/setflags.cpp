@@ -18,14 +18,22 @@
  ***************************************************************/
 
 #include "condor_common.h"
+#include "condor_config.h"
 #include "condor_api.h"
 #include "condor_adtypes.h"
 #include "status_types.h"
 #include "totals.h"
 
+
 extern AdTypes	type;
 extern Mode		mode;
 extern ppOption	ppStyle;
+extern bool explicit_format;
+extern bool using_print_format;
+extern bool disable_user_print_files; // allow command line to defeat use of default user print files.
+extern int set_status_print_mask_from_stream (const char * streamid, bool is_filename);
+
+const char * getTypeStr ();
 
 const char *
 getPPStyleStr ()
@@ -86,6 +94,24 @@ setPPstyle (ppOption pps, int i, const char *argv)
 		}
 	}
 
+	// If setting a 'normal' output, check to see if there is a user-defined normal output
+	if ( ! disable_user_print_files && ! explicit_format
+		&& pps != PP_XML && pps != PP_VERBOSE && pps != PP_CUSTOM && pps != ppStyle) {
+		MyString param_name("STATUS_DEFAULT_"); param_name += getTypeStr(); param_name += "_PRINT_FORMAT_FILE";
+		char * pf_file = param(param_name.c_str());
+		if (pf_file) {
+			struct stat stat_buff;
+			if (0 != stat(pf_file, &stat_buff)) {
+				// do nothing, this is not an error.
+			} else if (set_status_print_mask_from_stream(pf_file, true) < 0) {
+				fprintf(stderr, "Warning: default %s select file '%s' is invalid\n", getTypeStr(), pf_file);
+			} else {
+				using_print_format = true;
+			}
+			free(pf_file);
+		}
+	}
+
     if ( (PP_XML == pps) || PP_VERBOSE == pps || (ppStyle <= pps || setBy == 0) ) {
         ppStyle = pps;
         setBy = i;
@@ -103,6 +129,7 @@ getTypeStr ()
 {
 	switch (type)
 	{
+		case DEFRAG_AD:		return "DEFRAG";
 		case STARTD_AD:		return "STARTD";
 		case SCHEDD_AD:		return "SCHEDD";
 		case SUBMITTOR_AD:	return "SUBMITTOR";
@@ -154,6 +181,9 @@ setType (const char *dtype, int i, const char *argv)
         } else
 #endif /* HAVE_EXT_POSTGRESQL */
 
+        if (strcmp (dtype, "DEFRAG") == 0) {
+            type = DEFRAG_AD;
+        } else
         if (strcmp (dtype, "SCHEDD") == 0) {
             type = SCHEDD_AD;
         } else
@@ -208,6 +238,7 @@ getModeStr()
 	switch (mode)
 	{
 		case MODE_NOTSET:		return "Not set";
+		case MODE_DEFRAG_NORMAL:	return "Normal (Defrag)";
 		case MODE_STARTD_NORMAL:	return "Normal (Startd)";
 		case MODE_STARTD_AVAIL:		return "Available (Startd)";
 		case MODE_STARTD_RUN:		return "Run (Startd)";
@@ -248,6 +279,11 @@ setMode (Mode mod, int i, const char *argv)
     if (setBy == 0) {
         mode = mod;
         switch (mod) {
+          case MODE_DEFRAG_NORMAL:
+            setType ("DEFRAG", i, argv);
+            setPPstyle (PP_GENERIC_NORMAL, i, argv);
+            break;
+
           case MODE_STARTD_NORMAL:
             setType ("STARTD", i, argv);
             setPPstyle (PP_STARTD_NORMAL, i, argv);

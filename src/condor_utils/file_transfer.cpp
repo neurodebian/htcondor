@@ -76,7 +76,8 @@ public:
 	FileTransferItem():
 		is_directory(false),
 		is_symlink(false),
-		file_mode(NULL_FILE_PERMISSIONS) {}
+		file_mode(NULL_FILE_PERMISSIONS),
+		file_size(0) {}
 
 	char const *srcName() { return src_name.c_str(); }
 	char const *destDir() { return dest_dir.c_str(); }
@@ -86,6 +87,7 @@ public:
 	bool is_directory;
 	bool is_symlink;
 	condor_mode_t file_mode;
+	filesize_t file_size;
 };
 
 const int GO_AHEAD_FAILED = -1; // failed to contact transfer queue manager
@@ -131,6 +133,7 @@ FileTransfer::FileTransfer()
 	PeerDoesTransferAck = false;
 	PeerDoesGoAhead = false;
 	PeerUnderstandsMkdir = false;
+	PeerDoesXferInfo = false;
 	TransferUserLog = false;
 	Iwd = NULL;
 	ExceptionFiles = NULL;
@@ -690,7 +693,7 @@ FileTransfer::Init( ClassAd *Ad, bool want_check_perms, priv_state priv,
 		TransKey = strdup(tempbuf);
 		user_supplied_key = FALSE;
 		sprintf(tempbuf,"%s=\"%s\"",ATTR_TRANSFER_KEY,TransKey);
-		Ad->InsertOrUpdate(tempbuf);
+		Ad->Insert(tempbuf);
 
 		// since we generated the key, it is only good on our socket.
 		// so update TRANSFER_SOCK now as well.
@@ -1286,6 +1289,7 @@ FileTransfer::HandleCommands(Service *, int command, Stream *s)
 		!sock->end_of_message() ) {
 		dprintf(D_FULLDEBUG,
 			    	"FileTransfer::HandleCommands failed to read transkey\n");
+		if (transkey) free(transkey);
 		return 0;
 	}
 	dprintf(D_FULLDEBUG,
@@ -1382,7 +1386,7 @@ FileTransfer::Reaper(Service *, int pid, int exit_status)
 		}
 		dprintf( D_ALWAYS, "%s\n", transobject->Info.error_desc.Value() );
 	} else {
-		if( WEXITSTATUS(exit_status) != 0 ) {
+		if( WEXITSTATUS(exit_status) == 1 ) {
 			dprintf( D_ALWAYS, "File transfer completed successfully.\n" );
 			transobject->Info.success = true;
 		} else {
@@ -1403,7 +1407,13 @@ FileTransfer::Reaper(Service *, int pid, int exit_status)
 
 		// if we haven't already read the final status update, do it now
 	if( transobject->registered_xfer_pipe ) {
-		transobject->ReadTransferPipeMsg();
+		// It's possible that the pipe contains a progress update message
+		// followed by the final update message. Keep reading until we
+		// get the final message or encounter an error.
+		do {
+			transobject->ReadTransferPipeMsg();
+		} while ( transobject->Info.success &&
+				  transobject->Info.xfer_status != XFER_STATUS_DONE );
 	}
 
 	if( transobject->registered_xfer_pipe ) {
@@ -1774,6 +1784,17 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 		return_and_resetpriv( -1 );
 	}
 //	dprintf(D_FULLDEBUG,"TODD filetransfer DoDownload final_transfer=%d\n",final_transfer);
+
+	filesize_t sandbox_size = 0;
+	if( PeerDoesXferInfo ) {
+		ClassAd xfer_info;
+		if( !getClassAd(s,xfer_info) ) {
+			dprintf(D_FULLDEBUG,"DoDownload: failed to receive xfer info; exiting at %d\n",__LINE__);
+			return_and_resetpriv( -1 );
+		}
+		xfer_info.LookupInteger(ATTR_SANDBOX_SIZE,sandbox_size);
+	}
+
 	if( !s->end_of_message() ) {
 		dprintf(D_FULLDEBUG,"DoDownload: exiting at %d\n",__LINE__);
 		return_and_resetpriv( -1 );
@@ -1920,7 +1941,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 					// (e.g.  from the local schedd) to receive the
 					// file.  It then sends a message to our peer
 					// telling it to go ahead.
-				if( !ObtainAndSendTransferGoAhead(xfer_queue,true,s,fullname.Value(),I_go_ahead_always) ) {
+				if( !ObtainAndSendTransferGoAhead(xfer_queue,true,s,sandbox_size,fullname.Value(),I_go_ahead_always) ) {
 					dprintf(D_FULLDEBUG,"DoDownload: exiting at %d\n",__LINE__);
 					return_and_resetpriv( -1 );
 				}
@@ -2770,20 +2791,6 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 		saved_priv = set_priv( desired_priv_state );
 	}
 
-	s->encode();
-
-	// tell the server if this is the final transfer our not.
-	// if it is the final transfer, the server places the files
-	// into the user's Iwd.  if not, the files go into SpoolSpace.
-	if( !s->code(m_final_transfer_flag) ) {
-		dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n",__LINE__);
-		return_and_resetpriv( -1 );
-	}
-	if( !s->end_of_message() ) {
-		dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n",__LINE__);
-		return_and_resetpriv( -1 );
-	}
-
 	// record the state it was in when we started... the "default" state
 	bool socket_default_crypto = s->get_encryption();
 
@@ -2794,7 +2801,39 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 	FileTransferList filelist;
 	ExpandFileTransferList( FilesToSend, filelist );
 
+	filesize_t sandbox_size = 0;
 	FileTransferList::iterator filelist_it;
+	for( filelist_it = filelist.begin();
+		 filelist_it != filelist.end();
+		 filelist_it++ )
+	{
+		if( sandbox_size + filelist_it->file_size >= sandbox_size ) {
+			sandbox_size += filelist_it->file_size;
+		}
+	}
+
+	s->encode();
+
+	// tell the server if this is the final transfer or not.
+	// if it is the final transfer, the server places the files
+	// into the user's Iwd.  if not, the files go into SpoolSpace.
+	if( !s->code(m_final_transfer_flag) ) {
+		dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n",__LINE__);
+		return_and_resetpriv( -1 );
+	}
+	if( PeerDoesXferInfo ) {
+		ClassAd xfer_info;
+		xfer_info.Assign(ATTR_SANDBOX_SIZE,sandbox_size);
+		if( !putClassAd(s,xfer_info) ) {
+			dprintf(D_FULLDEBUG,"DoUpload: failed to send xfer_info; exiting at %d\n",__LINE__);
+			return_and_resetpriv( -1 );
+		}
+	}
+	if( !s->end_of_message() ) {
+		dprintf(D_FULLDEBUG,"DoUpload: exiting at %d\n",__LINE__);
+		return_and_resetpriv( -1 );
+	}
+
 	for( filelist_it = filelist.begin();
 		 filelist_it != filelist.end();
 		 filelist_it++ )
@@ -3014,7 +3053,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 			if( !I_go_ahead_always ) {
 					// Now tell our peer when it is ok for us to read data
 					// from disk for sending.
-				if( !ObtainAndSendTransferGoAhead(xfer_queue,false,s,fullname.Value(),I_go_ahead_always) ) {
+				if( !ObtainAndSendTransferGoAhead(xfer_queue,false,s,sandbox_size,fullname.Value(),I_go_ahead_always) ) {
 					dprintf(D_FULLDEBUG, "DoUpload: exiting at %d\n",__LINE__);
 					return_and_resetpriv( -1 );
 				}
@@ -3302,7 +3341,7 @@ FileTransfer::setTransferQueueContactInfo(char const *contact) {
 }
 
 bool
-FileTransfer::ObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool downloading,Stream *s,char const *full_fname,bool &go_ahead_always)
+FileTransfer::ObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool downloading,Stream *s,filesize_t sandbox_size,char const *full_fname,bool &go_ahead_always)
 {
 	bool result;
 	bool try_again = true;
@@ -3310,7 +3349,7 @@ FileTransfer::ObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool down
 	int hold_subcode = 0;
 	MyString error_desc;
 
-	result = DoObtainAndSendTransferGoAhead(xfer_queue,downloading,s,full_fname,go_ahead_always,try_again,hold_code,hold_subcode,error_desc);
+	result = DoObtainAndSendTransferGoAhead(xfer_queue,downloading,s,sandbox_size,full_fname,go_ahead_always,try_again,hold_code,hold_subcode,error_desc);
 
 	if( !result ) {
 		SaveTransferInfo(false,try_again,hold_code,hold_subcode,error_desc.Value());
@@ -3345,7 +3384,7 @@ FileTransfer::GetTransferQueueUser()
 }
 
 bool
-FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool downloading,Stream *s,char const *full_fname,bool &go_ahead_always,bool &try_again,int &hold_code,int &hold_subcode,MyString &error_desc)
+FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool downloading,Stream *s,filesize_t sandbox_size,char const *full_fname,bool &go_ahead_always,bool &try_again,int &hold_code,int &hold_subcode,MyString &error_desc)
 {
 	ClassAd msg;
 	int go_ahead = GO_AHEAD_UNDEFINED;
@@ -3384,7 +3423,7 @@ FileTransfer::DoObtainAndSendTransferGoAhead(DCTransferQueue &xfer_queue,bool do
 	ASSERT( timeout > alive_slop );
 	timeout -= alive_slop;
 
-	if( !xfer_queue.RequestTransferQueueSlot(downloading,full_fname,m_jobid.Value(),queue_user.c_str(),timeout,error_desc) )
+	if( !xfer_queue.RequestTransferQueueSlot(downloading,sandbox_size,full_fname,m_jobid.Value(),queue_user.c_str(),timeout,error_desc) )
 	{
 		go_ahead = GO_AHEAD_FAILED;
 	}
@@ -3899,6 +3938,13 @@ FileTransfer::setPeerVersion( const CondorVersionInfo &peer_version )
 	} else {
 		TransferUserLog = true;
 	}
+
+	if( peer_version.built_since_version(8,1,0) ) {
+		PeerDoesXferInfo = true;
+	}
+	else {
+		PeerDoesXferInfo = false;
+	}
 }
 
 
@@ -4340,6 +4386,7 @@ FileTransfer::ExpandFileTransferList( char const *src_path, char const *dest_dir
 	file_xfer_item.is_directory = st.IsDirectory();
 
 	if( !file_xfer_item.is_directory ) {
+		file_xfer_item.file_size = st.GetFileSize();
 		return true;
 	}
 

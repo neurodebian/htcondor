@@ -337,7 +337,7 @@ SharedPortEndpoint::CreateListener()
 		return false;
 	}
 
-	if( listen(sock_fd,500) && listen(sock_fd,100) && listen(sock_fd,5) ) {
+	if( listen( sock_fd, param_integer( "SOCKET_LISTEN_BACKLOG", 500 ) ) ) {
 		dprintf(D_ALWAYS,
 				"ERROR: SharedPortEndpoint: failed to listen on %s: %s\n",
 				m_full_name.Value(), strerror(errno));
@@ -1014,8 +1014,6 @@ SharedPortEndpoint::ReceiveSocket( ReliSock *named_sock, ReliSock *return_remote
 	named_sock->timeout(5);
 	if( !named_sock->put(status) || !named_sock->end_of_message() ) {
 		dprintf(D_ALWAYS,"SharedPortEndpoint: failed to send final status (success) for SHARED_PORT_PASS_SOCK\n");
-		free(buf);
-		return;
 	}
 
 

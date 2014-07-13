@@ -27,14 +27,12 @@
 extern "C" char *CondorVersion(void);
 extern "C" char *CondorPlatform(void);
 
-static const char *monthNames[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-	                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-
 CondorVersionInfo::CondorVersionInfo(const char *versionstring, 
 									 const char *subsystem,
 									 const char *platformstring)
 {
 	myversion.MajorVer = 0;
+	myversion.Rest = NULL;
 	myversion.Arch = NULL;
 	myversion.OpSys = NULL;
 	mysubsys = NULL;
@@ -56,12 +54,40 @@ CondorVersionInfo::CondorVersionInfo(const char *versionstring,
 	}
 }
 
+CondorVersionInfo::CondorVersionInfo(int major, int minor, int subminor,
+									 const char *rest,
+									 const char *subsystem,
+									 const char *platformstring)
+{
+	myversion.MajorVer = 0;
+	myversion.Rest = NULL;
+	myversion.Arch = NULL;
+	myversion.OpSys = NULL;
+	mysubsys = NULL;
+
+	if ( platformstring == NULL ) {
+		platformstring = CondorPlatform();
+	}
+
+	numbers_to_VersionData( major, minor, subminor, rest, myversion );
+	string_to_PlatformData( platformstring, myversion );
+
+	if ( subsystem ) {
+		mysubsys = strdup( subsystem );
+	} else {
+		mysubsys = strdup( get_mySubSystem()->getName() );
+	}
+}
+
 CondorVersionInfo::CondorVersionInfo(CondorVersionInfo const &other)
 {
 	myversion = other.myversion;
 	mysubsys = NULL;
 	if( other.mysubsys ) {
 		mysubsys = strdup(other.mysubsys);
+	}
+	if( other.myversion.Rest ) {
+		myversion.Rest = strdup(other.myversion.Rest);
 	}
 	if( other.myversion.Arch ) {
 		myversion.Arch = strdup(other.myversion.Arch);
@@ -74,11 +100,24 @@ CondorVersionInfo::CondorVersionInfo(CondorVersionInfo const &other)
 CondorVersionInfo::~CondorVersionInfo()
 {
 	if (mysubsys) free(mysubsys);
+	if(myversion.Rest) free(myversion.Rest);
  	if(myversion.Arch) free(myversion.Arch);
  	if(myversion.OpSys) free(myversion.OpSys);
 }
 
-	
+
+int
+CondorVersionInfo::compare_versions(const CondorVersionInfo & other_version) const
+{
+	if ( other_version.myversion.Scalar < myversion.Scalar ) {
+		return -1;
+	}
+	if ( other_version.myversion.Scalar > myversion.Scalar ) {
+		return 1;
+	}
+	return 0;
+}
+
 int
 CondorVersionInfo::compare_versions(const char* VersionString1) const
 {
@@ -97,22 +136,6 @@ CondorVersionInfo::compare_versions(const char* VersionString1) const
 	return 0;
 }
 
-int
-CondorVersionInfo::compare_build_dates(const char* VersionString1) const
-{
-	VersionData_t ver1;
-
-	ver1.BuildDate = 0;
-	string_to_VersionData(VersionString1,ver1);
-
-
-	if ( ver1.BuildDate < myversion.BuildDate )
-		return -1;
-	if ( ver1.BuildDate > myversion.BuildDate )
-		return 1;
-
-	return 0;
-}
 
 bool
 CondorVersionInfo::is_compatible(const char* other_version_string, 
@@ -171,27 +194,6 @@ CondorVersionInfo::built_since_version(int MajorVer, int MinorVer,
 	return ( myversion.Scalar >= Scalar );
 }
 
-bool
-CondorVersionInfo::built_since_date(int month, int day, int year) const
-{
-
-		// Make a struct tm
-	struct tm build_date;
-	time_t BuildDate;
-	build_date.tm_hour = 0;
-	build_date.tm_isdst = 1;
-	build_date.tm_mday = day;
-	build_date.tm_min = 0;
-	build_date.tm_mon = month - 1;
-	build_date.tm_sec = 0;
-	build_date.tm_year = year - 1900;
-
-	if ( (BuildDate = mktime(&build_date)) == -1 ) {
-		return false;
-	}
-
-	return ( myversion.BuildDate >= BuildDate );
-}
 
 bool
 CondorVersionInfo::is_valid(const char* VersionString) const
@@ -396,31 +398,48 @@ CondorVersionInfo::get_version_string() const
 char *
 CondorVersionInfo::VersionData_to_string(VersionData_t const &ver) const
 {
-	struct tm *tm;
-	tm = localtime( &ver.BuildDate );
-	if( !tm ) {
-		return NULL;
-	}
-	int day = tm->tm_mday;
-	int year = tm->tm_year + 1900;
-	char const *month = monthNames[tm->tm_mon];
-
 	const int buflen = 256;
 	char *buf = (char *)malloc(buflen);
 	if( !buf ) {
 		return NULL;
 	}
 
-	int n = snprintf(buf,buflen,"$%s: %d.%d.%d %s %d %d $", 
+	int n = snprintf(buf,buflen,"$%s: %d.%d.%d %s $", 
 					 "CondorVersion", // avoid having false "$CondorVersion: ..." show up in strings
 					 ver.MajorVer, ver.MinorVer, ver.SubMinorVer,
-					 month, day, year);
+					 ver.Rest);
 	if( n>=buflen || n<0 ) {
 		free(buf);
 		return NULL;
 	}
 	buf[buflen-1] = '\0';
 	return buf;
+}
+
+bool
+CondorVersionInfo::numbers_to_VersionData( int major, int minor, int subminor,
+										   const char *rest, VersionData_t & ver ) const
+{
+	ver.MajorVer = major;
+	ver.MinorVer = minor;
+	ver.SubMinorVer = subminor;
+
+		// Sanity check: the world starts with Condor V6 !
+	if ( ver.MajorVer < 6  || ver.MinorVer > 99 || ver.SubMinorVer > 99 ) {
+		ver.MajorVer = 0;
+		return false;
+	}
+
+	ver.Scalar = ver.MajorVer * 1000000 + ver.MinorVer * 1000 
+					+ ver.SubMinorVer;
+
+	if ( rest ) {
+		ver.Rest = strdup( rest );
+	} else {
+		ver.Rest = strdup( "" );
+	}
+
+	return true;
 }
 
 bool
@@ -462,43 +481,14 @@ CondorVersionInfo::string_to_VersionData(const char *verstring,
 	}
 	ptr++;	// skip space after the version numbers
 
-		// Convert month to a number 
-	int month = -1;
-	for (int i=0; i<12; i++) {
-		if (strncmp(monthNames[i],ptr,3) == 0) {
-			month = i;
-			break;
-		}
-	}
-
-	ptr+= 4;	//skip month and space
-
-		// Grab day of the month and year
-	int date, year;
-	date = year = -1;
-	cfld = sscanf(ptr,"%d %d",&date,&year);
-
-		// Sanity checks
-	if ( cfld != 2 || 
-		(month < 0 || month > 11 || date < 0 || date > 31 || 
-		 year < 1997 || year > 2036 )) {
-		ver.MajorVer = 0;
-		return false;
-	}
-
-		// Make a struct tm
-	struct tm build_date;
-	build_date.tm_hour = 0;
-	build_date.tm_isdst = 1;
-	build_date.tm_mday = date;
-	build_date.tm_min = 0;
-	build_date.tm_mon = month;
-	build_date.tm_sec = 0;
-	build_date.tm_year = year - 1900;
-
-	if ( (ver.BuildDate = mktime(&build_date)) == -1 ) {
-		ver.MajorVer = 0;
-		return false;
+		// There is a date and other things at the end of the string,
+		// but we're not using them anymore, but others may be so we
+		// hold on to them.  See CondorVersion() for complete format.
+	ver.Rest = strdup(ptr);
+		// Strip the trailing " $"
+	char *end = strstr( ver.Rest, " $" );
+	if ( end ) {
+		*end = '\0';
 	}
 
 	return true;

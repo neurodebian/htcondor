@@ -128,6 +128,7 @@ set( C_SERVICES     services)
 set( C_INIT			etc/init.d )
 set( C_ETC			etc/examples )
 set( C_CONFIGD		etc/condor/config.d )
+set( C_GANGLIAD		etc/condor/ganglia.d )
 set( C_SYSCONFIG	etc/sysconfig )
 
 set( C_ETC_EXAMPLES etc/examples )
@@ -156,10 +157,12 @@ if ( ${OS_NAME} STREQUAL "LINUX" )
 		else()
 			set( CONDOR_RPATH "$ORIGIN/../lib:/lib:/usr/lib:$ORIGIN/../lib/condor" )
 			set( EXTERNALS_RPATH "$ORIGIN/../lib:/lib:/usr/lib:$ORIGIN/../lib/condor:/usr/lib/condor" )
+			set( PYTHON_RPATH "$ORIGIN/../:/lib:/usr/lib:$ORIGIN/../condor" )
 		endif()
 	else()
 		set( CONDOR_RPATH "$ORIGIN/../lib:/lib64:/usr/lib64:$ORIGIN/../lib/condor" )
 		set( EXTERNALS_RPATH "$ORIGIN/../lib:/lib64:/usr/lib64:$ORIGIN/../lib/condor:/usr/lib64/condor" )
+		set( PYTHON_RPATH "$ORIGIN/../:/lib64:/usr/lib64:$ORIGIN/../condor" )
 	endif()
 elseif( ${OS_NAME} STREQUAL "DARWIN" )
 	set( EXTERNALS_LIB "${C_LIB}/condor" )
@@ -206,7 +209,7 @@ elseif ( ${OS_NAME} MATCHES "WIN" )
 
 	set (CPACK_WIX_UPGRADE_GUID "ef96d7c4-29df-403c-8fab-662386a089a4")
     
-	set (CPACK_WIX_WXS_FILES ${CONDOR_WIX_LOC}/xml/CondorCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorPoolCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorExecCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorDomainCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorEmailCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorJavaCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorPermCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorVMCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorHDFSCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorUpHostDlg.wxs)
+	set (CPACK_WIX_WXS_FILES ${CONDOR_WIX_LOC}/xml/CondorCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorPoolCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorExecCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorDomainCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorEmailCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorJavaCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorPermCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorVMCfgDlg.wxs;${CONDOR_WIX_LOC}/xml/CondorUpHostDlg.wxs)
 	set (CPACK_WIX_BITMAP_FOLDER ${CONDOR_WIX_LOC}/Bitmaps)
 
 	#setup all the merge module settings.
@@ -316,6 +319,7 @@ elseif( ${OS_NAME} STREQUAL "LINUX" AND CONDOR_PACKAGE_BUILD )
 		set( C_INIT			etc/init.d )
 		set( C_ETC			etc/condor )
 		set( C_CONFIGD		etc/condor/config.d )
+		set( C_GANGLIAD         etc/condor/ganglia.d )
 
 		#Debian specific
 		set( C_ETC_EXAMPLES	usr/share/doc/condor/etc/examples )
@@ -391,6 +395,7 @@ elseif( ${OS_NAME} STREQUAL "LINUX" AND CONDOR_PACKAGE_BUILD )
 		set( C_INIT			etc/init.d )
 		set( C_ETC			etc/condor )
 		set( C_CONFIGD		etc/condor/config.d )
+		set( C_GANGLIAD		etc/condor/ganglia.d )
 		set( C_SYSCONFIG	etc/sysconfig )
 		set( C_ETC_EXAMPLES	usr/share/doc/${CONDOR_VERSION}/etc/examples )
 		set( C_SHARE_EXAMPLES usr/share/doc/${CONDOR_VERSION})
@@ -405,6 +410,7 @@ elseif( ${OS_NAME} STREQUAL "LINUX" AND CONDOR_PACKAGE_BUILD )
 
 	set( EXTERNALS_LIB "${C_LIB}" )
 	set( CONDOR_RPATH "/${C_LIB}" )
+	set( PYTHON_RPATH "/${C_LIB}" )
 
 	# Generate empty folder to ship with package
 	# Local dir

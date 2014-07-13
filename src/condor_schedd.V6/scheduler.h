@@ -153,13 +153,11 @@ class match_rec: public ClaimIdParser
 
     int     		status;
 	shadow_rec*		shadowRec;
-	int				alive_countdown;
 	int				num_exceptions;
 	int				entered_current_status;
 	ClassAd*		my_match_ad;
 	char*			user;
 	char*			pool;		// negotiator hostname if flocking; else NULL
-	bool			sent_alive_interval;
 	bool            is_dedicated; // true if this match belongs to ded. sched.
 	bool			allocated;	// For use by the DedicatedScheduler
 	bool			scheduled;	// For use by the DedicatedScheduler
@@ -170,6 +168,9 @@ class match_rec: public ClaimIdParser
 		// to support flocking, this will be set to the id of the
 		// punched hole
 	MyString*		auth_hole_id;
+
+	match_rec *m_paired_mrec;
+	bool m_can_start_jobs;
 
 	bool m_startd_sends_alives;
 
@@ -267,6 +268,33 @@ private:
 	bool csa_is_dedicated;
 };
 
+class HistoryHelperState
+{
+public:
+	HistoryHelperState(Stream &stream, const std::string &reqs, const std::string &proj, const std::string &match)
+	 : m_stream_ptr(&stream), m_reqs(reqs), m_proj(proj), m_match(match)
+	{}
+
+	HistoryHelperState(classad_shared_ptr<Stream> stream, const std::string &reqs, const std::string &proj, const std::string &match)
+	 : m_stream_ptr(NULL), m_reqs(reqs), m_proj(proj), m_match(match), m_stream(stream)
+	{}
+
+	~HistoryHelperState() { if (m_stream.get() && m_stream.unique()) daemonCore->Cancel_Socket(m_stream.get()); }
+
+	Stream * GetStream() const { return m_stream_ptr ? m_stream_ptr : m_stream.get(); }
+
+	const std::string & Requirements() const { return m_reqs; }
+        const std::string & Projection() const { return m_proj; }
+        const std::string & MatchCount() const { return m_match; }
+
+private:
+	Stream *m_stream_ptr;
+	std::string m_reqs;
+	std::string m_proj;
+	std::string m_match;
+	classad_shared_ptr<Stream> m_stream;
+};
+
 class Scheduler : public Service
 {
   public:
@@ -314,7 +342,7 @@ class Scheduler : public Service
 	friend	void	job_prio(ClassAd *);
 	friend  int		find_idle_local_jobs(ClassAd *);
 	friend	int		updateSchedDInterval( ClassAd* );
-    friend  void    add_shadow_birthdate(int cluster, int proc, bool is_reconnect = false);
+    friend  void    add_shadow_birthdate(int cluster, int proc, bool is_reconnect);
 	void			display_shadow_recs();
 	int				actOnJobs(int, Stream *);
 	void            enqueueActOnJobMyself( PROC_ID job_id, JobAction action, bool notify, bool log );
@@ -503,6 +531,10 @@ class Scheduler : public Service
 	HashTable <PROC_ID, ClassAd *> *resourcesByProcID;
   
 	bool usesLocalStartd() const { return m_use_startd_for_local;}
+
+	void swappedClaims( DCMsgCallback *cb );
+	bool CheckForClaimSwap(match_rec *rec);
+
 	
 private:
 	
@@ -630,11 +662,19 @@ private:
 	struct sockaddr_in	From;
 	int					Len; 
 
+	ExprTree* slotWeight;
+	ClassAd*  slotWeightMapAd;
+	bool			m_use_slot_weights;
+
 	// utility functions
 	int				count_jobs();
 	bool			fill_submitter_ad(ClassAd & pAd, int owner_num, int flock_level=-1); 
     int             make_ad_list(ClassAdList & ads, ClassAd * pQueryAd=NULL);
     int             command_query_ads(int, Stream* stream);
+	int			command_history(int, Stream* stream);
+	int			history_helper_launcher(const HistoryHelperState &state);
+	int			history_helper_reaper(int, int);
+	int			command_query_job_ads(int, Stream* stream);
 	void   			check_claim_request_timeouts( void );
 	int				insert_owner(char const*);
 	void			child_exit(int, int);
@@ -774,6 +814,19 @@ private:
 	int m_local_startd_pid;
 	std::map<std::string, ClassAd *> m_unclaimedLocalStartds;
 	std::map<std::string, ClassAd *> m_claimedLocalStartds;
+
+    int m_userlog_file_cache_max;
+    time_t m_userlog_file_cache_clear_last;
+    int m_userlog_file_cache_clear_interval;
+    WriteUserLog::log_file_cache_map_t m_userlog_file_cache;
+    void userlog_file_cache_clear(bool force = false);
+    void userlog_file_cache_erase(const int& cluster, const int& proc);
+
+	// State for the history helper queue.
+	std::vector<HistoryHelperState> m_history_helper_queue;
+	unsigned m_history_helper_max;
+	unsigned m_history_helper_count;
+	int m_history_helper_rid;
 };
 
 

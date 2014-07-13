@@ -60,6 +60,7 @@
 #define ATTR_BANDWIDTH_TO_LAST_CKPT_SERVER  "BandwidthToLastCkptServer"
 #define ATTR_BANDWIDTH_TO_CKPT_SERVER  "BandwidthToCkptServer"
 #define ATTR_BATCH_QUEUE  "BatchQueue"
+#define ATTR_BOINC_AUTHENTICATOR_FILE "BoincAuthenticatorFile"
 #define ATTR_BUFFER_SIZE  "BufferSize"
 #define ATTR_BUFFER_FILES  "BufferFiles"
 #define ATTR_BUFFER_BLOCK_SIZE  "BufferBlockSize"
@@ -79,6 +80,8 @@
 #define ATTR_CKPT_ARCH  "CkptArch"
 #define ATTR_CKPT_LAST_READ  "CkptLastRead"
 #define ATTR_CKPT_OPSYS  "CkptOpSys"
+#define ATTR_PAIRED_CLAIM_ID  "PairedClaimId"
+#define ATTR_CHILD_CLAIM_IDS "ChildClaimIds"
 #define ATTR_CLAIM_ID  "ClaimId"
 #define ATTR_CLAIM_IDS  "ClaimIds"
 #define ATTR_PUBLIC_CLAIM_ID  "PublicClaimId"
@@ -190,10 +193,21 @@
 #define ATTR_FILE_WRITE_BYTES  "FileWriteBytes"
 #define ATTR_BLOCK_READ_KBYTES  "BlockReadKbytes"
 #define ATTR_BLOCK_WRITE_KBYTES  "BlockWriteKbytes"
+#define ATTR_BLOCK_READ_BYTES  "BlockReadBytes"
+#define ATTR_BLOCK_WRITE_BYTES  "BlockWriteBytes"
+#define ATTR_BLOCK_READS "BlockReads"
+#define ATTR_BLOCK_WRITES "BlockWrites"
 #define ATTR_FILE_SEEK_COUNT  "FileSeekCount"
 #define ATTR_FLOCKED_JOBS  "FlockedJobs"
 #define ATTR_FLAVOR  "Flavor"
 #define ATTR_FORCE  "Force"
+#define ATTR_GCE_AUTH_FILE  "GceAuthFile"
+#define ATTR_GCE_IMAGE  "GceImage"
+#define ATTR_GCE_MACHINE_TYPE  "GceMachineType"
+#define ATTR_GCE_METADATA  "GceMetadata"
+#define ATTR_GCE_METADATA_FILE  "GceMetadataFile"
+#define ATTR_GCE_PROJECT  "GceProject"
+#define ATTR_GCE_ZONE  "GceZone"
 #define ATTR_GID  "Gid"
 #define ATTR_GLOBAL_JOB_ID  "GlobalJobId"
 #define ATTR_GZIP  "GZIP"
@@ -353,6 +367,8 @@
 #define ATTR_JOB_STATUS  "JobStatus"
 #define ATTR_LAST_JOB_STATUS  "LastJobStatus"
 #define ATTR_JOB_STATUS_ON_RELEASE  "JobStatusOnRelease"
+#define ATTR_JOB_TRANSFERRING_OUTPUT  "JobTransferringOutput"
+#define ATTR_JOB_TRANSFERRING_OUTPUT_TIME  "JobTransferringOutputTime"
 #define ATTR_JOB_UNIVERSE  "JobUniverse"
 #define ATTR_JOB_WALL_CLOCK_CKPT  "WallClockCheckpoint"
 #define ATTR_JOB_QUEUE_BIRTHDATE  "JobQueueBirthdate"
@@ -411,6 +427,7 @@
 #define ATTR_MASTER_IP_ADDR  "MasterIpAddr"
 #define ATTR_MAX_HOSTS  "MaxHosts"
 #define ATTR_MAX_JOB_RETIREMENT_TIME  "MaxJobRetirementTime"
+#define ATTR_PARENT_SLOT_ID "ParentSlotId"
 #define ATTR_RETIREMENT_TIME_REMAINING "RetirementTimeRemaining"
 #define ATTR_MAX_JOBS_RUNNING  "MaxJobsRunning"
 #define ATTR_MEMORY  "Memory"
@@ -436,6 +453,7 @@
 #define ATTR_NOTIFY_USER  "NotifyUser"
 #define ATTR_NOTIFY_JOB_SCHEDULER  "NotifyJobScheduler"
 #define ATTR_NT_DOMAIN  "NTDomain"
+#define ATTR_TRANSFER_QUEUE_USER_EXPR "TransferQueueUserExpr"
 //extern const char ATTR_WINDOWS_VERSION [];
 #define ATTR_WINDOWS_MAJOR_VERSION  "WindowsMajorVersion"
 #define ATTR_WINDOWS_MINOR_VERSION  "WindowsMinorVersion"
@@ -446,6 +464,7 @@
 #define ATTR_NUM_COD_CLAIMS  "NumCODClaims"
 #define ATTR_NUM_CKPTS  "NumCkpts"
 #define ATTR_NUM_CKPTS_RAW  "NumCkpts_RAW"
+#define ATTR_NUM_DYNAMIC_SLOTS  "NumDynamicSlots"
 #define ATTR_NUM_GLOBUS_SUBMITS  "NumGlobusSubmits"
 #define ATTR_NUM_MATCHES  "NumJobMatches"
 #define ATTR_NUM_HOPS_TO_SUBMIT_MACHINE  "NumHopsToSubmitMachine"
@@ -516,6 +535,7 @@
 #define ATTR_REMOVE_REASON  "RemoveReason"
 #define ATTR_REQUEUE_REASON  "RequeueReason"
 #define ATTR_REQUIREMENTS  "Requirements"
+#define ATTR_RESOURCE_REQUEST_COUNT "_condor_RESOURCE_COUNT"  // used in resource request ad
 #define ATTR_SLOT_TYPE  "SlotType"
 #define ATTR_SLOT_TYPE_ID  "SlotTypeID"
 #define ATTR_SLOT_WEIGHT  "SlotWeight"
@@ -534,6 +554,7 @@
 #define ATTR_SCHEDULER  "Scheduler"
 #define ATTR_SHADOW_WAIT_FOR_DEBUG  "ShadowWaitForDebug"
 #define ATTR_SLOT_ID  "SlotID"
+#define ATTR_SLOT_PAIR_NAME  "SlotPairName"
 #define ATTR_SLOT_PARTITIONABLE  "PartitionableSlot"
 #define ATTR_SLOT_DYNAMIC  "DynamicSlot"
 #define ATTR_SOURCE  "Source"
@@ -563,7 +584,7 @@
 #define ATTR_SUBMITTER_ID  "SubmitterId"
 #define ATTR_SUBMITTER_TAG  "SubmitterTag"
 #define ATTR_SUBMITTOR_PRIO  "SubmittorPrio"   // old-style for ATTR_SUBMITTER_USER_PRIO
-#define ATTR_SUBMITTER_USER_PRIO  "SubmittorUserPrio"   // old-style for ATTR_SUBMITTER_USER_PRIO
+#define ATTR_SUBMITTER_USER_PRIO  "SubmitterUserPrio"   // new-style for ATTR_SUBMITTOR_PRIO
 #define ATTR_SUBMITTER_USER_RESOURCES_IN_USE  "SubmitterUserResourcesInUse"
 #define ATTR_SUBMITTER_AUTOREGROUP  "SubmitterAutoregroup"
 #define ATTR_SUBMITTER_GROUP  "SubmitterGroup"
@@ -670,6 +691,8 @@
 #define ATTR_WANT_CHECKPOINT  "WantCheckpoint"
 #define ATTR_WANT_CLAIMING  "WantClaiming"
 #define ATTR_WANT_IO_PROXY  "WantIOProxy"
+#define ATTR_WANT_REMOTE_UPDATES "WantRemoteUpdates"
+#define ATTR_WANT_DELAYED_UPDATES "WantDelayedUpdates"
 #define ATTR_WANT_MATCH_DIAGNOSTICS  "WantMatchDiagnostics"
 #define ATTR_WANT_PARALLEL_SCHEDULING_GROUPS  "WantParallelSchedulingGroups"
 #define ATTR_WANT_REMOTE_SYSCALLS  "WantRemoteSyscalls"
@@ -884,6 +907,7 @@ extern const char ATTR_SEC_AUTHENTICATED_USER [];
 #define ATTR_EC2_SPOT_PRICE  "EC2SpotPrice"
 #define ATTR_EC2_SPOT_REQUEST_ID  "EC2SpotRequestID"
 #define ATTR_EC2_STATUS_REASON_CODE  "EC2StatusReasonCode"
+#define ATTR_EC2_SERVER_TYPE  "EC2ServerType"
 
 //************* End of changes for EC2 Jobs *****************//
 
@@ -891,17 +915,18 @@ extern const char ATTR_SEC_AUTHENTICATED_USER [];
 #define ATTR_REQUEST_MEMORY  "RequestMemory"
 #define ATTR_REQUEST_DISK  "RequestDisk"
 
-//------------------------------------------------------------
-#define ATTR_REQUEST_MNTS  "RequestMounts"
-#define ATTR_NAMED_MOUNT_PTS "Mounts"
-//------------------------------------------------------------
-
 // machine resource prefixes
 #define ATTR_REQUEST_PREFIX  "Request"
 #define ATTR_DETECTED_PREFIX  "Detected"
+#define ATTR_OFFLINE_PREFIX  "Offline"
 #define ATTR_TOTAL_PREFIX  "Total"
 #define ATTR_TOTAL_SLOT_PREFIX  "TotalSlot"
 #define ATTR_MACHINE_RESOURCES  "MachineResources"
+
+// multiclaim / negside resource consumption
+#define ATTR_NUM_CLAIMS "NumClaims"
+#define ATTR_CLAIM_ID_LIST "ClaimIdList"
+#define ATTR_CONSUMPTION_PREFIX "Consumption"
 
 // This is a record of the job exit status from a standard universe job exit
 // via waitpid. It is in the job ad to implement the terminate_pending
@@ -985,12 +1010,18 @@ extern const char ATTR_SEC_AUTHENTICATED_USER [];
 #define ATTR_TRANSFER_QUEUE_NUM_WAITING_TO_DOWNLOAD  "TransferQueueNumWaitingToDownload"
 #define ATTR_TRANSFER_QUEUE_UPLOAD_WAIT_TIME  "TransferQueueUploadWaitTime"
 #define ATTR_TRANSFER_QUEUE_DOWNLOAD_WAIT_TIME  "TransferQueueDownloadWaitTime"
+#define ATTR_SANDBOX_SIZE "SandboxSize"
 #define ATTR_FILE_TRANSFER_UPLOAD_BYTES_PER_SECOND "FileTransferUploadBytesPerSecond"
 #define ATTR_FILE_TRANSFER_DOWNLOAD_BYTES_PER_SECOND "FileTransferDownloadBytesPerSecond"
 #define ATTR_FILE_TRANSFER_UPLOAD_DISK_LOAD "FileTransferUploadDiskLoad"
 #define ATTR_FILE_TRANSFER_DOWNLOAD_DISK_LOAD "FileTransferDownloadDiskLoad"
 #define ATTR_FILE_TRANSFER_UPLOAD_NET_LOAD "FileTransferUploadNetLoad"
 #define ATTR_FILE_TRANSFER_DOWNLOAD_NET_LOAD "FileTransferDownloadNetLoad"
+#define ATTR_FILE_TRANSFER_DISK_THROTTLE_LOW "FileTransferDiskThrottleLow"
+#define ATTR_FILE_TRANSFER_DISK_THROTTLE_HIGH "FileTransferDiskThrottleHigh"
+#define ATTR_FILE_TRANSFER_DISK_THROTTLE_LIMIT "FileTransferDiskThrottleLimit"
+#define ATTR_FILE_TRANSFER_DISK_THROTTLE_EXCESS "FileTransferDiskThrottleExcess"
+#define ATTR_FILE_TRANSFER_DISK_THROTTLE_SHORTFALL "FileTransferDiskThrottleShortfall"
 #define ATTR_MACHINE_MAX_VACATE_TIME  "MachineMaxVacateTime"
 #define ATTR_JOB_MAX_VACATE_TIME  "JobMaxVacateTime"
 #define ATTR_WANT_GRACEFUL_REMOVAL  "WantGracefulRemoval"

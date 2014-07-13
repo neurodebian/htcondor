@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 1990-2012, Condor Team, Computer Sciences Department,
+ * Copyright (C) 1990-2014, Condor Team, Computer Sciences Department,
  * University of Wisconsin-Madison, WI.
  * 
  * Licensed under the Apache License, Version 2.0 (the "License"); you
@@ -58,10 +58,13 @@
 #include "condor_url.h"
 #include "classad/classadCache.h"
 
-#if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN) || defined(WIN32)
 #include "ScheddPlugin.h"
 #endif
+
+#if defined(HAVE_GETGRNAM)
+#include <sys/types.h>
+#include <grp.h>
 #endif
 
 #include "file_sql.h"
@@ -92,6 +95,7 @@ void	FindPrioJob(PROC_ID &);
 static bool qmgmt_was_initialized = false;
 static ClassAdCollection *JobQueue = 0;
 static StringList DirtyJobIDs;
+static std::set<int> DirtyPidsSignaled;
 static int next_cluster_num = -1;
 static int next_proc_num = 0;
 int active_cluster_num = -1;	// client is restricted to only insert jobs to the active cluster
@@ -153,6 +157,19 @@ static const char *default_super_user =
 #endif
 
 //static int allow_remote_submit = FALSE;
+ClassAdLog::filter_iterator
+BeginIterator(const classad::ExprTree &requirements, int timeslice_ms)
+{
+	ClassAdLog::filter_iterator it(JobQueue ? &JobQueue->table : NULL, &requirements, timeslice_ms);
+	return it;
+}
+
+ClassAdLog::filter_iterator
+EndIterator()
+{
+	ClassAdLog::filter_iterator it(JobQueue ? &JobQueue->table : NULL, NULL, 0, true);
+	return it;
+}
 
 static inline
 void
@@ -327,7 +344,7 @@ ConvertOldJobAdAttrs( ClassAd *job_ad, bool startup )
 		// ClassAds happened around 7.5.1.
 		// At some future point in time, this code should be removed
 		// (no earlier than the 7.7 series).
-#if !defined(WANT_OLD_CLASSADS)
+#if defined(ADD_TARGET_SCOPING)
 	if ( universe == CONDOR_UNIVERSE_SCHEDULER ||
 		 universe == CONDOR_UNIVERSE_LOCAL ) {
 		job_ad->AddTargetRefs( TargetScheddAttrs );
@@ -1098,6 +1115,15 @@ InitJobQueue(const char *job_queue_name,int max_historical_logs)
 					JobQueueDirty = true;
 				}
 			}
+			// AsyncXfer: Delete in-job output transfer attributes
+			if( ad->LookupInteger(ATTR_JOB_TRANSFERRING_OUTPUT,transferring_output) ) {
+				ad->Delete(ATTR_JOB_TRANSFERRING_OUTPUT);
+				JobQueueDirty = true;
+			}
+			if( ad->LookupInteger(ATTR_JOB_TRANSFERRING_OUTPUT_TIME,transferring_output) ) {
+				ad->Delete(ATTR_JOB_TRANSFERRING_OUTPUT_TIME);
+				JobQueueDirty = true;
+			}
 
 			// count up number of procs in cluster, update ClusterSizeHashTable
 			IncrementClusterSize(cluster_num);
@@ -1263,6 +1289,20 @@ isQueueSuperUser( const char* user )
 		return false;
 	}
 	for( i=0; i<num_super_users; i++ ) {
+#if defined(HAVE_GETGRNAM)
+        if (super_users[i][0] == '%') {
+            // this is a user group, so check user against the group membership
+            struct group* gr = getgrnam(1+super_users[i]);
+            if (gr) {
+                for (char** gmem=gr->gr_mem;  *gmem != NULL;  ++gmem) {
+                    if (strcmp(user, *gmem) == 0) return true;
+                }
+            } else {
+                dprintf(D_SECURITY, "Group name \"%s\" was not found in defined user groups\n", 1+super_users[i]);
+            }
+            continue;
+        }
+#endif
 		if( strcmp( user, super_users[i] ) == 0 ) {
 			return true;
 		}
@@ -1403,14 +1443,6 @@ OwnerCheck2(ClassAd *ad, const char *test_owner, const char *job_owner)
 		return false;
 	}
 
-	// The super users are always allowed to do updates.  They are
-	// specified with the "QUEUE_SUPER_USERS" string list in the
-	// config file.  Defaults to root and condor.
-	if( isQueueSuperUser(test_owner) ) {
-		dprintf( D_FULLDEBUG, "OwnerCheck retval 1 (success), super_user\n" );
-		return true;
-	}
-
 #if !defined(WIN32) 
 		// If we're not root or condor, only allow qmgmt writes from
 		// the UID we're running as.
@@ -1420,7 +1452,10 @@ OwnerCheck2(ClassAd *ad, const char *test_owner, const char *job_owner)
 			dprintf(D_FULLDEBUG, "OwnerCheck success: owner (%s) matches "
 					"my username\n", test_owner );
 			return true;
-		} else {
+		} else if (isQueueSuperUser(test_owner)) {
+            dprintf(D_FULLDEBUG, "OwnerCheck retval 1 (success), super_user\n");
+            return true;
+        } else {
 			errno = EACCES;
 			dprintf( D_FULLDEBUG, "OwnerCheck: reject owner: %s non-super\n",
 					 test_owner );
@@ -1449,18 +1484,21 @@ OwnerCheck2(ClassAd *ad, const char *test_owner, const char *job_owner)
 		// to connect to the queue.
 #if defined(WIN32)
 	// WIN32: user names are case-insensitive
-	if (strcasecmp(job_owner, test_owner) != 0) {
+	if (strcasecmp(job_owner, test_owner) == 0) {
 #else
-	if (strcmp(job_owner, test_owner) != 0) {
+	if (strcmp(job_owner, test_owner) == 0) {
 #endif
-		errno = EACCES;
-		dprintf( D_FULLDEBUG, "ad owner: %s, queue submit owner: %s\n",
-				job_owner, test_owner );
-		return false;
-	} 
-	else {
-		return true;
-	}
+        return true;
+    }
+
+    if (isQueueSuperUser(test_owner)) {
+        dprintf(D_FULLDEBUG, "OwnerCheck retval 1 (success), super_user\n");
+        return true;
+    }
+
+    errno = EACCES;
+    dprintf(D_FULLDEBUG, "ad owner: %s, queue submit owner: %s\n", job_owner, test_owner );
+    return false;
 }
 
 
@@ -1904,10 +1942,8 @@ int DestroyProc(int cluster_id, int proc_id)
 	// Write a per-job history file (if PER_JOB_HISTORY_DIR param is set)
 	WritePerJobHistoryFile(ad, false);
 
-#if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN) || defined(WIN32)
   ScheddPluginManager::Archive(ad);
-#endif
 #endif
 
   if (FILEObj->file_newEvent("History", ad) == QUILL_FAILURE) {
@@ -2047,10 +2083,8 @@ int DestroyCluster(int cluster_id, const char* reason)
 
 				// Apend to history file
 				AppendHistory(ad);
-#if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN) || defined(WIN32)
 				ScheddPluginManager::Archive(ad);
-#endif
 #endif
 
 				if (FILEObj->file_newEvent("History", ad) == QUILL_FAILURE) {
@@ -2357,7 +2391,7 @@ SetAttribute(int cluster_id, int proc_id, const char *attr_name,
 		GetAttributeInt( cluster_id, proc_id, ATTR_JOB_STATUS, &status );
 		SetAttributeInt( cluster_id, proc_id, ATTR_LAST_JOB_STATUS, status, flags );
 	}
-#if !defined(WANT_OLD_CLASSADS)
+#if defined(ADD_TARGET_SCOPING)
 /* Disable AddTargetRefs() for now
 	else if ( strcasecmp( attr_name, ATTR_REQUIREMENTS ) == 0 ||
 			  strcasecmp( attr_name, ATTR_RANK ) ) {
@@ -2544,31 +2578,33 @@ SetAttribute(int cluster_id, int proc_id, const char *attr_name,
 	}
 
 	// Get the job's status and only mark dirty if it is running
-	int universe;
+	// Note: Dirty attribute notification could work for local and
+	// standard universe, but is currently not supported for them.
+	int universe = -1;
 	GetAttributeInt( cluster_id, proc_id, ATTR_JOB_STATUS, &status );
 	GetAttributeInt( cluster_id, proc_id, ATTR_JOB_UNIVERSE, &universe );
-	if( (universe != CONDOR_UNIVERSE_SCHEDULER) &&
-		(universe != CONDOR_UNIVERSE_STANDARD) && 
+	if( ( universe != CONDOR_UNIVERSE_SCHEDULER &&
+		  universe != CONDOR_UNIVERSE_LOCAL &&
+		  universe != CONDOR_UNIVERSE_STANDARD ) &&
 		( flags & SETDIRTY ) && 
 		( status == RUNNING || (( universe == CONDOR_UNIVERSE_GRID ) && jobExternallyManaged( ad ) ) ) ) {
 
 		// Add the key to list of dirty classads
-		DirtyJobIDs.rewind();
-		if( ! DirtyJobIDs.contains( key ) ) {
+		if( ! DirtyJobIDs.contains( key ) &&
+			SendDirtyJobAdNotification( key ) ) {
+
 			DirtyJobIDs.append( key );
-		}
 
-		// Start timer to ensure notice is confirmed
-		if( dirty_notice_timer_id <= 0 ) {
-			dprintf(D_FULLDEBUG, "Starting dirty attribute notification timer\n");
-			dirty_notice_timer_id = daemonCore->Register_Timer(
-				dirty_notice_interval,
-				dirty_notice_interval,
-				PeriodicDirtyAttributeNotification,
-				"PeriodicDirtyAttributeNotification");
+			// Start timer to ensure notice is confirmed
+			if( dirty_notice_timer_id <= 0 ) {
+				dprintf(D_FULLDEBUG, "Starting dirty attribute notification timer\n");
+				dirty_notice_timer_id = daemonCore->Register_Timer(
+									dirty_notice_interval,
+									dirty_notice_interval,
+									PeriodicDirtyAttributeNotification,
+									"PeriodicDirtyAttributeNotification");
+			}
 		}
-
-		SendDirtyJobAdNotification(key);
 	}
 
 	JobQueueDirty = true;
@@ -2576,7 +2612,7 @@ SetAttribute(int cluster_id, int proc_id, const char *attr_name,
 	return 0;
 }
 
-void
+bool
 SendDirtyJobAdNotification(char *job_id_str)
 {
 	PROC_ID job_id;
@@ -2591,15 +2627,17 @@ SendDirtyJobAdNotification(char *job_id_str)
 		pid = scheduler.FindGManagerPid(job_id);
 	}
 
-	if( pid > 0 ) {
+	if ( pid <= 0 ) {
+		dprintf(D_ALWAYS, "Failed to send signal %s, no job manager found\n", getCommandString(UPDATE_JOBAD));
+		return false;
+	} else if ( DirtyPidsSignaled.find(pid) == DirtyPidsSignaled.end() ) {
 		dprintf(D_FULLDEBUG, "Sending signal %s, to pid %d\n", getCommandString(UPDATE_JOBAD), pid);
 		classy_counted_ptr<DCSignalMsg> msg = new DCSignalMsg(pid, UPDATE_JOBAD);
 		daemonCore->Send_Signal_nonblocking(msg.get());
-//		daemonCore->Send_Signal(srec->pid, UPDATE_JOBAD);
+		DirtyPidsSignaled.insert(pid);
 	}
-	else {
-		dprintf(D_ALWAYS, "Failed to send signal %s, no job manager found\n", getCommandString(UPDATE_JOBAD));
-	}
+
+	return true;
 }
 
 void
@@ -2607,10 +2645,28 @@ PeriodicDirtyAttributeNotification()
 {
 	char	*job_id;
 
+	DirtyPidsSignaled.clear();
+
 	DirtyJobIDs.rewind();
 	while( (job_id = DirtyJobIDs.next()) != NULL ) {
-		SendDirtyJobAdNotification(job_id);
+		if ( SendDirtyJobAdNotification(job_id) == false ) {
+			// There's no shadow/gridmanager for this job.
+			// Mark it clean and remove it from the dirty list.
+			// We can't call MarkJobClean() here, as that would
+			// disrupt our traversal of DirtyJobIDs.
+			JobQueue->ClearClassAdDirtyBits(job_id);
+			DirtyJobIDs.deleteCurrent();
+		}
 	}
+
+	if( DirtyJobIDs.isEmpty() && dirty_notice_timer_id > 0 )
+	{
+		dprintf(D_FULLDEBUG, "Cancelling dirty attribute notification timer\n");
+		daemonCore->Cancel_Timer(dirty_notice_timer_id);
+		dirty_notice_timer_id = -1;
+	}
+
+	DirtyPidsSignaled.clear();
 }
 
 void
@@ -2841,13 +2897,15 @@ InTransaction()
 	return JobQueue->InTransaction();
 }
 
-void
+int
 BeginTransaction()
 {
 	JobQueue->BeginTransaction();
 
 	// note what time we started the transaction (used by SetTimerAttribute())
 	xact_start_time = time( NULL );
+
+	return 0;
 }
 
 
@@ -2976,10 +3034,10 @@ CommitTransaction(SetAttributeFlags_t flags /* = 0 */)
 	xact_start_time = 0;
 }
 
-void
+int
 AbortTransaction()
 {
-	JobQueue->AbortTransaction();
+	return JobQueue->AbortTransaction();
 }
 
 void
@@ -3308,15 +3366,11 @@ MarkJobClean(int cluster_id, int proc_id)
 void
 MarkJobClean(const char* job_id_str)
 {
-	int cluster;
-	int proc;
-
 	if(JobQueue->ClearClassAdDirtyBits(job_id_str))
 	{
 		dprintf(D_FULLDEBUG, "Cleared dirty attributes for job %s\n", job_id_str);
 	}
 
-	DirtyJobIDs.rewind();
 	DirtyJobIDs.remove(job_id_str);
 
 	if( DirtyJobIDs.isEmpty() && dirty_notice_timer_id > 0 )
@@ -3325,7 +3379,6 @@ MarkJobClean(const char* job_id_str)
 		daemonCore->Cancel_Timer(dirty_notice_timer_id);
 		dirty_notice_timer_id = -1;
 	}
-	StrToId(job_id_str, cluster, proc);
 }
 
 ClassAd *
@@ -3688,7 +3741,9 @@ dollarDollarExpand(int cluster_id, int proc_id, ClassAd *ad, ClassAd *startd_ad,
 		}
 
 		if( started_transaction ) {
-			CommitTransaction();
+			// To reduce the number of fsyncs, we mark this as a non-durable transaction.
+			// Otherwise we incur two fsync's per matched job (one here, one for the job start).
+			CommitTransaction(NONDURABLE);
 		}
 
 		if ( startd_ad ) {
@@ -4087,6 +4142,11 @@ rewriteSpooledJobAd(ClassAd *job_ad, int cluster, int proc, bool modify_ad)
 	return true;
 }
 
+// Rather than worry about symbol collision with libcondorutils, do the link
+// to the schedd's GetJobAd() statically here and export a different name.
+ClassAd * ScheddGetJobAd(int cluster_id, int proc_id, bool expStartdAd, bool persist_expansions) {
+	return GetJobAd( cluster_id, proc_id, expStartdAd, persist_expansions );
+}
 
 ClassAd *
 GetJobAd(int cluster_id, int proc_id, bool expStartdAd, bool persist_expansions)
@@ -4095,7 +4155,7 @@ GetJobAd(int cluster_id, int proc_id, bool expStartdAd, bool persist_expansions)
 	ClassAd	*ad = NULL;
 
 	IdToStr(cluster_id,proc_id,key);
-	if (JobQueue->LookupClassAd(key, ad)) {
+	if (JobQueue && JobQueue->LookupClassAd(key, ad)) {
 		if ( !expStartdAd ) {
 			// we're done, return the ad.
 			return ad;
@@ -4570,11 +4630,11 @@ jobLeaseIsValid( ClassAd* job, int cluster, int proc )
 			 cluster, proc, (int)now, last_renewal, diff );
 
 	if( remaining <= 0 ) {
-		dprintf( D_ALWAYS, "%d.%d: %s remaining: EXPIRED!\n", 
+		dprintf( D_FULLDEBUG, "%d.%d: %s remaining: EXPIRED!\n", 
 				 cluster, proc, ATTR_JOB_LEASE_DURATION );
 		return false;
 	} 
-	dprintf( D_ALWAYS, "%d.%d: %s remaining: %d\n", cluster, proc,
+	dprintf( D_FULLDEBUG, "%d.%d: %s remaining: %d\n", cluster, proc,
 			 ATTR_JOB_LEASE_DURATION, remaining );
 	return true;
 }
@@ -4677,7 +4737,11 @@ int mark_idle(ClassAd *job)
 		SetAttributeFloat(cluster, proc,
 						  ATTR_CUMULATIVE_SLOT_TIME,slot_time);
 
-		CommitTransaction();
+		// Commit non-durable to speed up recovery; this is ok because a) after
+		// all jobs are marked idle in mark_jobs_idle() we force the log, and 
+		// b) in the worst case, we would just redo this work in the unfortuante evenent 
+		// we crash again before an fsync.
+		CommitTransaction( NONDURABLE );
 	}
 
 	return 1;
@@ -4722,6 +4786,12 @@ WalkJobQueue(scan_func func)
 void mark_jobs_idle()
 {
     WalkJobQueue( mark_idle );
+
+	// mark_idle() may have made a lot of commits in non-durable mode in 
+	// order to speed up recovery after a crash, so recovery does not incur
+	// the overhead of thousands of fsyncs.  Now do one fsync so that if
+	// we crash again, we do not have to redo all recovery work just performed.
+	JobQueue->ForceLog();
 }
 
 void DirtyPrioRecArray() {
@@ -4891,15 +4961,17 @@ void FindRunnableJob(PROC_ID & jobid, ClassAd* my_match_ad,
 				continue;
 			}
 
-			if(!Runnable(&PrioRec[i].id) || scheduler.AlreadyMatched(&PrioRec[i].id)) {
+			int isRunnable = Runnable(&PrioRec[i].id);
+			int isMatched = scheduler.AlreadyMatched(&PrioRec[i].id);
+			if( !isRunnable || isMatched ) {
 					// This job's status must have changed since the
 					// time it was added to the runnable job list.
 					// Prevent this job from being considered in any
 					// future iterations through the list.
 				PrioRec[i].owner[0] = '\0';
 				dprintf(D_FULLDEBUG,
-						"record for job %d.%d skipped until PrioRec rebuild\n",
-						jobid.cluster, jobid.proc);
+						"record for job %d.%d skipped until PrioRec rebuild (%s)\n",
+						jobid.cluster, jobid.proc, isRunnable ? "already matched" : "no longer runnable");
 
 					// Ensure that PrioRecArray is rebuilt
 					// eventually, because changes in the status

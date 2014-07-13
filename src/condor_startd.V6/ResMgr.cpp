@@ -265,7 +265,7 @@ ResMgr::init_config_classad( void )
 	// STARTD_ATTRS for us.
 	daemonCore->publish(config_classad);
 
-#if !defined(WANT_OLD_CLASSADS)
+#if defined(ADD_TARGET_SCOPING)
 	config_classad->AddTargetRefs( TargetJobAttrs, false );
 #endif
 }
@@ -457,6 +457,7 @@ ResMgr::init_resources( void )
 		// string lists for each type definition.  This only happens
 		// once!  If you change the type definitions, you must restart
 		// the startd, or else too much weirdness is possible.
+	SlotType::init_types(max_types);
 	initTypes( max_types, type_strings, 1 );
 
 		// First, see how many slots of each type are specified.
@@ -531,7 +532,9 @@ ResMgr::reconfig_resources( void )
 #endif
 
 #if HAVE_JOB_HOOKS
-	m_hook_mgr->reconfig();
+	if ( m_hook_mgr ) {
+		m_hook_mgr->reconfig();
+	}
 #endif
 
 #if HAVE_HIBERNATION
@@ -910,7 +913,7 @@ ResMgr::findRipForNewCOD( ClassAd* ad )
 
 
 Resource*
-ResMgr::get_by_cur_id( char* id )
+ResMgr::get_by_cur_id(const char* id )
 {
 	if( ! resources ) {
 		return NULL;
@@ -920,13 +923,24 @@ ResMgr::get_by_cur_id( char* id )
 		if( resources[i]->r_cur->idMatches(id) ) {
 			return resources[i];
 		}
+        if (resources[i]->r_has_cp) {
+            for (Resource::claims_t::iterator j(resources[i]->r_claims.begin());  j != resources[i]->r_claims.end();  ++j) {
+                if ((*j)->idMatches(id)) {
+                    delete resources[i]->r_cur;
+                    resources[i]->r_cur = *j;
+                    resources[i]->r_claims.erase(*j);
+                    resources[i]->r_claims.insert(new Claim(resources[i]));
+                    return resources[i];
+                }
+            }
+        }
 	}
 	return NULL;
 }
 
 
 Resource*
-ResMgr::get_by_any_id( char* id )
+ResMgr::get_by_any_id(const char* id )
 {
 	if( ! resources ) {
 		return NULL;
@@ -944,13 +958,24 @@ ResMgr::get_by_any_id( char* id )
 			resources[i]->r_pre_pre->idMatches(id) ) {
 			return resources[i];
 		}
+        if (resources[i]->r_has_cp) {
+            for (Resource::claims_t::iterator j(resources[i]->r_claims.begin());  j != resources[i]->r_claims.end();  ++j) {
+                if ((*j)->idMatches(id)) {
+                    delete resources[i]->r_cur;
+                    resources[i]->r_cur = *j;
+                    resources[i]->r_claims.erase(*j);
+                    resources[i]->r_claims.insert(new Claim(resources[i]));
+                    return resources[i];
+                }
+            }
+        }
 	}
 	return NULL;
 }
 
 
 Resource*
-ResMgr::get_by_name( char* name )
+ResMgr::get_by_name(const char* name )
 {
 	if( ! resources ) {
 		return NULL;
@@ -1218,6 +1243,8 @@ ResMgr::publish( ClassAd* cp, amask_t how_much )
 
 	starter_mgr.publish( cp, how_much );
 	m_vmuniverse_mgr.publish(cp, how_much);
+	startd_stats.pool.Publish(*cp, 0);
+	startd_stats.Tick(time(0));
 
 #if HAVE_HIBERNATION
     m_hibernation_manager->publish( *cp );
@@ -1253,8 +1280,8 @@ ResMgr::assign_load( void )
 	}
 	if( is_smp() ) {
 			// Print out the totals we already know.
-		if( IsDebugLevel( D_LOAD ) ) {
-			dprintf( D_FULLDEBUG,
+		if( IsDebugVerbose( D_LOAD ) ) {
+			dprintf( D_LOAD | D_VERBOSE,
 					 "%s %.3f\t%s %.3f\t%s %.3f\n",
 					 "SystemLoad:", m_attr->load(),
 					 "TotalCondorLoad:", m_attr->condor_load(),
@@ -1456,6 +1483,35 @@ ResMgr::addResource( Resource *rip )
 	resources = new_resources;
 	nresources++;
 
+	// if this newly added slot is part of a pair, fixup the pair pointers
+	dprintf(D_ALWAYS, "Setting up slot pairings\n");
+	if (rip->r_pair_name && rip->r_pair_name[0] == '#') {
+		int slot_type = atoi(rip->r_pair_name+1);
+		dprintf(D_ALWAYS, "\t searching for type %d to pair with %s (%s)\n", slot_type, rip->r_id_str, rip->r_pair_name);
+		for (int ix = 0; ix < nresources-1; ++ix) {
+			Resource * ripT = resources[ix];
+			if (ripT->type() == slot_type) {
+				if ( ! ripT->r_pair_name || ripT->r_pair_name[0] == '#') {
+					// ok pair these two.
+					if (rip->r_pair_name) free(rip->r_pair_name); rip->r_pair_name = NULL;
+					if (ripT->r_pair_name) free(ripT->r_pair_name); ripT->r_pair_name = NULL;
+					rip->r_pair_name = strdup(ripT->r_name);
+					ripT->r_pair_name = strdup(rip->r_name);
+					break;
+				}
+			}
+		}
+	}
+
+	// If this newly added slot is dynamic, add it to
+	// its parent's children
+
+	if( rip->get_feature() == Resource::DYNAMIC_SLOT) {
+		Resource *parent = rip->get_parent();
+		if (parent) {
+			parent->add_dynamic_child(rip);
+		}
+	}
 }
 
 
@@ -1511,6 +1567,13 @@ ResMgr::removeResource( Resource* rip )
 		// Tell the collector this Resource is gone.
 	rip->final_update();
 
+	// If this was a dynamic slot, remove it from parent
+	if( rip->get_feature() == Resource::DYNAMIC_SLOT) {
+		Resource *parent = rip->get_parent();
+		if (parent) {
+			parent->remove_dynamic_child(rip);
+		}
+	}
 		// Log a message that we're going away
 	rip->dprintf( D_ALWAYS, "Resource no longer needed, deleting\n" );
 
@@ -2091,6 +2154,15 @@ ResMgr::startDraining(int how_fast,bool resume_on_completion,ExprTree *check_exp
 	formatstr(new_request_id,"%d",draining_id);
 	this->resume_on_completion_of_draining = resume_on_completion;
 
+	// Insert draining attributes into the resource ads, in case the
+	// retirement expression uses them.
+	for( int i = 0; i < nresources; i++ ) {
+		ClassAd &ad = *(resources[i]->r_classad);
+		ad.InsertAttr( ATTR_DRAINING, true );
+		ad.InsertAttr( ATTR_DRAINING_REQUEST_ID, new_request_id );
+		ad.InsertAttr( ATTR_LAST_DRAIN_START_TIME, last_drain_start_time );
+	}
+
 	if( how_fast <= DRAIN_GRACEFUL ) {
 			// retirement time and vacate time are honored
 		draining_is_graceful = true;
@@ -2278,6 +2350,7 @@ ResMgr::compute_draining_attrs( int /*how_much*/ )
 	long long ll_expected_graceful_draining_badput = 0;
 	long long ll_expected_quick_draining_badput = 0;
 	long long ll_total_draining_unclaimed = 0;
+	bool is_drained = true;
 
 	for( int i = 0; i < nresources; i++ ) {
 		Resource *rip = resources[i];
@@ -2286,6 +2359,8 @@ ResMgr::compute_draining_attrs( int /*how_much*/ )
 			long long retirement_remaining = rip->evalRetirementRemaining();
 			long long max_vacate_time = rip->evalMaxVacateTime();
 			long long cpus = rip->r_attr->num_cpus();
+
+			if (rip->r_cur->isActive()) { is_drained = false; }
 
 			ll_expected_quick_draining_badput += cpus*(runtime + max_vacate_time);
 			ll_expected_graceful_draining_badput += cpus*runtime;
@@ -2312,12 +2387,21 @@ ResMgr::compute_draining_attrs( int /*how_much*/ )
 		}
 	}
 
-		// convert time estimates from relative time to absolute time
-	ll_expected_graceful_draining_completion += cur_time;
-	ll_expected_quick_draining_completion += cur_time;
+	if (is_drained) {
+		// once the slot is drained we only want to change the expected completion time
+		// if we have never set it before, or if we finished draining early.
+		if (0 == expected_graceful_draining_completion || expected_graceful_draining_completion > cur_time)
+			expected_graceful_draining_completion = cur_time;
+		if (0 == expected_quick_draining_completion || expected_quick_draining_completion > cur_time)
+			expected_quick_draining_completion = cur_time;
+	} else {
+			// convert time estimates from relative time to absolute time
+		ll_expected_graceful_draining_completion += cur_time;
+		ll_expected_quick_draining_completion += cur_time;
+		expected_graceful_draining_completion = cap_int(ll_expected_graceful_draining_completion);
+		expected_quick_draining_completion = cap_int(ll_expected_quick_draining_completion);
+	}
 
-	expected_graceful_draining_completion = cap_int(ll_expected_graceful_draining_completion);
-	expected_quick_draining_completion = cap_int(ll_expected_quick_draining_completion);
 	expected_graceful_draining_badput = cap_int(ll_expected_graceful_draining_badput);
 	expected_quick_draining_badput = cap_int(ll_expected_quick_draining_badput);
 	total_draining_unclaimed = cap_int(ll_total_draining_unclaimed);

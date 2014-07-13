@@ -92,7 +92,8 @@ ReliSock::get_file( filesize_t *size, const char *destination,
 
 			// In order to remain in a well-defined state on the wire
 			// protocol, read and throw away the file data.
-		result = get_file( size, GET_FILE_NULL_FD, flush_buffers, append, max_bytes, xfer_q );
+			// We're not going to write the data, so don't try to append.
+		result = get_file( size, GET_FILE_NULL_FD, flush_buffers, /*append*/ false, max_bytes, xfer_q );
 		if( result<0 ) {
 				// Failure to read (and throw away) data indicates that
 				// we are in an undefined state on the wire protocol
@@ -994,6 +995,9 @@ ReliSock::do_shared_port_local_connect( char const *shared_port_id, bool nonbloc
 	set_connect_addr(orig_connect_addr.c_str());
 
 	char const *request_by = "";
+	// ToddT: should we be passing nonblocking arg along to PassSocket() below?
+	// Probably not, because we only get here in rare instances (aka if the shared
+	// port service is not yet registered), but not sure....
 	if( !shared_port_client.PassSocket(&sock_to_pass,shared_port_id,request_by) ) {
 		return 0;
 	}

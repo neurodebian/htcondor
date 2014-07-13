@@ -71,7 +71,6 @@ void ClassAdLibraryVersion(string &version_string)
 ClassAd::
 ClassAd ()
 {
-	nodeKind = CLASSAD_NODE;
 	EnableDirtyTracking();
 	chained_parent_ad = NULL;
 	alternateScope = NULL;
@@ -869,7 +868,6 @@ Copy( ) const
 	ClassAd	*newAd = new ClassAd();
 
 	if( !newAd ) return NULL;
-	newAd->nodeKind = CLASSAD_NODE;
 	newAd->parentScope = parentScope;
 	newAd->chained_parent_ad = chained_parent_ad;
 
@@ -2037,6 +2035,11 @@ void ClassAd::Unchain(void)
 }
 
 ClassAd *ClassAd::GetChainedParentAd(void)
+{
+	return chained_parent_ad;
+}
+
+const ClassAd *ClassAd::GetChainedParentAd(void) const
 {
 	return chained_parent_ad;
 }

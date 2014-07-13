@@ -34,6 +34,7 @@
 
 class ThrottleByCategory;
 class Dag;
+class DagmanMetrics;
 
 //
 // Local DAGMan includes
@@ -45,7 +46,7 @@ class Dag;
 
 typedef int JobID_t;
 
-/**  The job class represents a job in the DAG and it's state in the Condor
+/**  The job class represents a job in the DAG and its state in the Condor
      system.  A job is given a name, a CondorID, and three queues.  The
      parents queue is a list of parent jobs that this one depends on.  That
      queue never changes once set.  The waiting queue is the same as the
@@ -132,14 +133,16 @@ class Job {
 		and the IsActive() method, etc.
     */
 	// WARNING!  status_t and status_t_names must be kept in sync!!
+	// WARNING!  Don't change the values of existing enums -- the
+	// node status file relies on the values staying the same.
     enum status_t {
-		/** Job is not ready (for final) */ STATUS_NOT_READY,
-        /** Job is ready for submission */ STATUS_READY,
-        /** Job waiting for PRE script */  STATUS_PRERUN,
-        /** Job has been submitted */      STATUS_SUBMITTED,
-        /** Job waiting for POST script */ STATUS_POSTRUN,
-        /** Job is done */                 STATUS_DONE,
-        /** Job exited abnormally */       STATUS_ERROR,
+		/** Job is not ready (for final) */ STATUS_NOT_READY = 0,
+        /** Job is ready for submission */ STATUS_READY = 1,
+        /** Job waiting for PRE script */  STATUS_PRERUN = 2,
+        /** Job has been submitted */      STATUS_SUBMITTED = 3,
+        /** Job waiting for POST script */ STATUS_POSTRUN = 4,
+        /** Job is done */                 STATUS_DONE = 5,
+        /** Job exited abnormally */       STATUS_ERROR = 6,
     };
 
     /** The string names for the status_t enumeration.  Use this the same
@@ -426,6 +429,23 @@ class Job {
 	int GetSubProc() const { return _CondorID._subproc; }
 	bool SetCondorID(const CondorID& cid);
 	const CondorID& GetID() const { return _CondorID; }
+
+		/** Update the DAGMan metrics for an execute event.
+			@param proc The proc ID of this event.
+			@param eventTime The time at which this event occurred.
+			@param metrics The DagmanMetrics object to update.
+		*/
+	void ExecMetrics( int proc, const struct tm &eventTime,
+				DagmanMetrics *metrics );
+
+		/** Update the DAGMan metrics for a terminated or aborted event.
+			@param proc The proc ID of this event.
+			@param eventTime The time at which this event occurred.
+			@param metrics The DagmanMetrics object to update.
+		*/
+	void TermAbortMetrics( int proc, const struct tm &eventTime,
+				DagmanMetrics *metrics );
+
 private:
     /** */ CondorID _CondorID;
 public:
@@ -510,13 +530,22 @@ public:
  		    Returns false if the job is not on hold
 		*/
 	bool Release(int proc);
+
 private:
+		/** Clean up memory that's no longer needed once a node has
+			finished.  (Note that this doesn't mean that the Job object
+			is not valid -- it just cleans up some temporary memory.)
+			Also check that we got a consistent set of events for the
+			metrics.
+		*/
+	void Cleanup();
 
 		/** _onHold[proc] is nonzero if the condor job 
  			with ProcId == proc is on hold, and zero
 			otherwise
 		*/
 	std::vector<unsigned char> _onHold;	
+
 		// Mark this node as failed because of an error in monitoring
 		// the log file.
   	void LogMonitorFailed();
@@ -627,6 +656,20 @@ private:
 	// whether this is a final job
 	bool _final;
 	bool append_default_log;
+
+		//
+		// For metrics reporting.
+		//
+	enum {
+		EXEC_MASK = 0x1,
+		ABORT_TERM_MASK = 0x2
+	};
+
+		// _gotEvents[proc] & EXEC_MASK is true iff we've gotten an
+		// execute event for proc; _gotEvents[proc] & ABORT_TERM_MASK
+		// is true iff we've gotten an aborted or terminated event
+		// for proc.
+	std::vector<unsigned char> _gotEvents;	
 };
 
 /** A wrapper function for Job::Print which allows a NULL job pointer.

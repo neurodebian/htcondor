@@ -429,7 +429,7 @@ defined for \Arg{JobName}.
 \item \index{DAGMan!RETRY@\verb^$RETRY^ value}
 \Expr{\$RETRY} evaluates to an 
 integer value set to 0 the first time a node is run,
-and is  incremented each time the node is retried. 
+and is incremented each time the node is retried. 
 See section~\ref{dagman:retry} for the description of how to cause
 nodes to be retried. 
 
@@ -1031,7 +1031,7 @@ on the node.
 
 The variable \Env{\$RETRY} evaluates to an 
 integer value set to 0 first time a node is run,
-and is  incremented each time for each time the node is retried. 
+and is incremented each time for each time the node is retried. 
 The variable \Env{\$MAX\_RETRIES} is the value set for
 \Arg{NumberOfRetries}.
 
@@ -1128,17 +1128,11 @@ To use a double quote inside \Arg{string},
 escape it with the backslash character (\verb@\@).
 To add the backslash character itself, use two backslashes (\verb@\\@).
 
-\Bold{Special variable macros}
-\begin{itemize}
-\item \$(JOB) may be used in \Arg{string} and will expand to
-\Arg{JobName}. 
-If the \Arg{VARS} line appears in a DAG file used as a splice file, 
-then \$(JOB) will be the fully scoped name of the node.
-\end{itemize}
-
 \Bold{Note that the \Arg{macroname} itself cannot begin with the string
 \Expr{queue},
 in any combination of upper or lower case.}
+
+\Bold{Examples}
 
 If the DAG input file contains
 \footnotesize
@@ -1275,15 +1269,15 @@ As an example, here are only the relevant parts of a DAG input file.
 Note that the NodeA value for \Expr{second} contains a tab.
 \footnotesize
 \begin{verbatim}
-    Vars NodeA first="Alberto Contador"
-    Vars NodeA second="\"\"Andy	Schleck\"\""
-    Vars NodeA third="Lance\\ Armstrong"
-    Vars NodeA misc="!@#$%^&*()_-=+=[]{}?/"
+    VARS NodeA first="Alberto Contador"
+    VARS NodeA second="\"\"Andy	Schleck\"\""
+    VARS NodeA third="Lance\\ Armstrong"
+    VARS NodeA misc="!@#$%^&*()_-=+=[]{}?/"
     
-    Vars NodeB first="Lance_Armstrong"
-    Vars NodeB second="\\\"Andreas_Kloden\\\""
-    Vars NodeB third="Ivan\\_Basso"
-    Vars NodeB misc="!@#$%^&*()_-=+=[]{}?/"
+    VARS NodeB first="Lance_Armstrong"
+    VARS NodeB second="\\\"Andreas_Kloden\\\""
+    VARS NodeB third="Ivan\\_Basso"
+    VARS NodeB misc="!@#$%^&*()_-=+=[]{}?/"
 \end{verbatim}
 \normalsize
 
@@ -1326,19 +1320,59 @@ The resulting values passed to the NodeB executable are
 
 % Note: this is an alternative to subsubsubsection, which we don't have.
 \begin{description}
+\item[Special macros]
+\end{description}
+
+\begin{itemize}
+\item \Env{\$(JOB)} may be used in \Arg{string} and will expand to
+\Arg{JobName}. 
+If the \Arg{VARS} line appears in a DAG file used as a splice file, 
+then \Env{\$(JOB)} will be the fully scoped name of the node.
+\item \Env{\$(RETRY)} may be used in \Arg{string} and will expand to
+0 the first time a node is run; the value is incremented each time the node
+is retried.  For example:
+\end{itemize}
+\begin{verbatim}
+      Vars NodeC noderetry="$(RETRY)"
+\end{verbatim}
+
+% Note: this is an alternative to subsubsubsection, which we don't have.
+\begin{description}
 \item[Using VARS to define ClassAd attributes]
 \end{description}
 
 The \Arg{macroname} may also begin with a \Expr{+} character, in which case it
-names a ClassAd attribute. For example, the following VARS specification
+names a ClassAd attribute. For example, the VARS specification
 \begin{verbatim}
-  Vars NodeE +A="\"bob\""
+  VARS NodeD +A="\"bob\""
 \end{verbatim}
-would allow the HTCondor submit description file for NodeE to use
+results in the job ClassAd attribute
+\begin{verbatim}
+  A = "bob"
+\end{verbatim}
+Note that ClassAd string values must be quoted, hence there are escaped
+quotes in the example above.  The outer quotes are consumed in the parsing of
+the DAG input file, so the escaped inner quotes remain in the definition
+of the attribute value.
+
+Continuing this example,
+it allows the HTCondor submit description file for NodeD to use
 the following line:
 \begin{verbatim}
   arguments = "$$([A])"
 \end{verbatim}
+
+The special macros may also be used.
+For example
+\begin{verbatim}
+  VARS NodeE +B="$(RETRY)"
+\end{verbatim}
+places the numerical attribute
+\begin{verbatim}
+  B = 1
+\end{verbatim}
+into the ClassAd when the NodeE job is run for a second time,
+which is the first retry and the value 1. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{Setting Priorities for Nodes}
@@ -2318,13 +2352,15 @@ at a higher level, the splice name must be included.
 \index{DAGMan!DAG FINAL node}
 \index{DAGMan input file!FINAL key word}
 
-A FINAL node is a special node that is always run at the end of the DAG,
-even if previous nodes in the DAG have failed.  Final nodes can be used
+A FINAL node is a single and special node that is always run at 
+the end of the DAG,
+even if previous nodes in the DAG have failed.  
+A FINAL node can be used
 for tasks such as cleaning up intermediate files and checking the output
 of previous nodes.
 
 The \Arg{FINAL} key word specifies a job to be run at the end of
-the DAG.  The syntax used for each \Arg{FINAL} entry is
+the DAG.  The syntax used for the \Arg{FINAL} entry is
 
 \Opt{FINAL} \Arg{JobName} \Arg{SubmitDescriptionFileName}
 \oOptArg{DIR}{directory} \oOpt{NOOP}
@@ -2337,18 +2373,26 @@ The key words \Arg{DIR} and \Arg{NOOP} are not case sensitive.
 Note that \Arg{DIR} and \Arg{NOOP}, if used, must appear
 in the order shown above.
 See section~\ref{dagman:JOB} for the descriptions of these two keywords.
+There may only be one FINAL node in a DAG.
+A parse error will be logged by the \Condor{dagman} job in the
+\File{dagman.out} file,
+if more than one FINAL node is specified.
 
+The FINAL node is virtually always run.
+It is run if the \Condor{dagman} job is removed with \Condor{rm}.
 The only case in which a FINAL node is not run
 is if the configuration variable \Macro{DAGMAN\_STARTUP\_CYCLE\_DETECT} 
 is set to \Expr{True},
 and a cycle is detected at start up time.
 If \Macro{DAGMAN\_STARTUP\_CYCLE\_DETECT} is set to \Expr{False} and
 a cycle is detected during the course of the run, 
-the FINAL node will be run.
+the FINAL node \emph{will} be run.
 
-One of the most important considerations with a FINAL node is that the
+An important consideration in using a FINAL node is that the
 success or failure of the FINAL node overrides all previous status
-in determining the success or failure of the DAG.
+in determining the success or failure of the entire DAG.
+This includes a status specified by any ABORT-DAG-ON specification
+that has taken effect.
 For example, if some nodes of a DAG fail,
 but the FINAL node succeeds, the DAG will be considered successful.
 Therefore, it is important
@@ -2764,19 +2808,21 @@ listed is used.
 \index{DAGMan!node status file}
 \index{status!of a DAGMan node}
 
-DAGMan can capture the status of all DAG nodes,
-such that the user or a script may easily monitor the status of all DAG nodes.
-A node status file is periodically rewritten by DAGMan.
-To enable this feature, the DAG input file contains a line with the
+DAGMan can capture the status of the overall DAG and all DAG nodes
+in a \emph{node status file},
+such that the user or a script can monitor this status.
+This file is periodically rewritten
+while the DAG runs.
+To enable this feature, the DAG input file must contain a line with the
 \Arg{NODE\_STATUS\_FILE} key word.
 
 The syntax for a \Arg{NODE\_STATUS\_FILE} specification is
 
 \Opt{NODE\_STATUS\_FILE} \Arg{statusFileName} \oArg{minimumUpdateTime}
 
-The status file is written on the machine where the DAG is submitted;
-its location is given by \Arg{statusFileName}.  
-This will be the same machine where the \Condor{dagman} job is running.
+The status file is written on the machine on which the DAG is submitted;
+its location is given by \Arg{statusFileName},
+and it may be a full path and file name.
 
 The optional \Arg{minimumUpdateTime} specifies the minimum number of seconds
 that must elapse between updates to the node status file.
@@ -2787,6 +2833,9 @@ The node status file can be updated at most once
 per \Macro{DAGMAN\_USER\_LOG\_SCAN\_INTERVAL},
 as defined at section~\ref{param:DAGManUserLogScanInterval},
 no matter how small the \Arg{minimumUpdateTime} value.
+Also, the node status file will be updated when the DAG finishes,
+whether successful or not, even if \Arg{minimumUpdateTime} seconds
+have not elapsed since the last update.
 
 As an example, if the DAG input file contains the line
 \begin{verbatim}
@@ -2798,44 +2847,76 @@ or more.
 This node status file is overwritten each time it is updated.
 Therefore, it only holds information about the \emph{current} status 
 of each node; it does not provide a history of the node status.
-The file contains one line describing the status of every node in the DAG.
 The file contents do not distinguish between HTCondor jobs and Stork jobs.
-Here is an example of a node status file:
+
+\Note HTCondor version 8.1.6 changes the format of the node status
+file.
+
+The node status file is a collection of ClassAds in New ClassAd format.
+There is one ClassAd for the overall status of the DAG, one ClassAd
+for the status of each node, and one ClassAd with the time at which
+the node status file was completed as well as the time of the next update.
+
+Here is an example portion of a node status file:
 
 \begin{verbatim}
-  BEGIN 1281041745 (Thu Aug  5 15:55:45 2010)
-  Status of nodes of DAG(s): my.dag
-
-  JOB A STATUS_DONE      ()
-  JOB B STATUS_SUBMITTED (not_idle)
-  JOB C STATUS_SUBMITTED (idle)
-  JOB D STATUS_UNREADY   ()
-
-  Nodes total: 4
-  Nodes done: 1
-  Nodes pre: 0
-  Nodes queued: 2
-  Nodes post: 0
-  Nodes ready: 0
-  Nodes un-ready: 1
-  Nodes failed: 0
-
-  DAG status: STATUS_SUBMITTED ()
-  Next scheduled update: 1281041775 (Thu Aug  5 15:56:15 2010)
-  END 1281041745 (Thu Aug  5 15:55:45 2010)
+[
+  Type = "DagStatus";
+  DagFiles = {
+    "job_dagman_node_status.dag"
+  };
+  Timestamp = 1399674138; /* "Fri May  9 17:22:18 2014" */
+  DagStatus = 3; /* "STATUS_SUBMITTED ()" */
+  NodesTotal = 12;
+  NodesDone = 11;
+  NodesPre = 0;
+  NodesQueued = 1;
+  NodesPost = 0;
+  NodesReady = 0;
+  NodesUnready = 0;
+  NodesFailed = 0;
+  JobProcsHeld = 0;
+  JobProcsIdle = 1;
+]
+[
+  Type = "NodeStatus";
+  Node = "A";
+  NodeStatus = 5; /* "STATUS_DONE" */
+  StatusDetails = "";
+  RetryCount = 0;
+  JobProcsQueued = 0;
+  JobProcsHeld = 0;
+]
+...
+[
+  Type = "NodeStatus";
+  Node = "C";
+  NodeStatus = 3; /* "STATUS_SUBMITTED" */
+  StatusDetails = "idle";
+  RetryCount = 0;
+  JobProcsQueued = 1;
+  JobProcsHeld = 0;
+]
+[
+  Type = "StatusEnd";
+  EndTime = 1399674138; /* "Fri May  9 17:22:18 2014" */
+  NextUpdate = 1399674141; /* "Fri May  9 17:22:21 2014" */
+]
 \end{verbatim}
 
-Possible node status values are:
+Possible \Attr{DagStatus} and \Attr{NodeStatus} attribute values are:
 
 \begin{itemize}
-\item \verb@STATUS_UNREADY@ At least one parent has not yet finished.
-\item \verb@STATUS_READY@ All parents have finished, but not yet running.
-\item \verb@STATUS_PRERUN@ The PRE script is running.
-\item \verb@STATUS_SUBMITTED@ The node's HTCondor or Stork job(s) are in 
+\item 0 (\verb@STATUS_NOT_READY@): At least one parent has not yet finished
+or the node is a FINAL node.
+\item 1 (\verb@STATUS_READY@): All parents have finished, but the node is not
+yet running.
+\item 2 (\verb@STATUS_PRERUN@): The node's PRE script is running.
+\item 3 (\verb@STATUS_SUBMITTED@): The node's HTCondor or Stork job(s) are in 
   the queue.
-\item \verb@STATUS_POSTRUN@ The POST script is running.
-\item \verb@STATUS_DONE@ The node has completed successfully.
-\item \verb@STATUS_ERROR@ The node has failed.
+\item 4 (\verb@STATUS_POSTRUN@): The node's POST script is running.
+\item 5 (\verb@STATUS_DONE@): The node has completed successfully.
+\item 6 (\verb@STATUS_ERROR@): The node has failed.
 \end{itemize}
 
 A \Arg{NODE\_STATUS\_FILE} key word inside any splice is ignored.
@@ -3287,5 +3368,145 @@ the submit description file, the DAG input file, and the subdirectories,
 \begin{verbatim}
   condor_submit_dag biggersweep.dag
 \end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\label{sec:DAGMetrics}Workflow Metrics}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\index{DAGMan!workflow metrics}
+
+As of HTCondor version 8.1.0, \Condor{dagman} has the ability to report
+workflow metrics to one or more HTTP servers.  
+This capability is currently only used for workflows run under Pegasus.  
+The reporting can be
+disabled by setting the \Macro{CONDOR\_DEVELOPERS} configuration
+variable to \Expr{NONE},
+or by setting the \Env{PEGASUS\_METRICS} environment
+variable to any value other than \Expr{True} (case-insensitive) or 1.
+The \File{dagman.out} file will indicate whether or not metrics were
+reported.
+
+For every DAG, a metrics file is created whether the metrics
+are actually reported or not.
+This metrics file is named
+\File{\textless{dag\_file\_name}\textgreater.metrics},
+where \Expr{<dag\_file\_name>} is the name of the DAG input file.
+In a workflow
+with nested DAGs, each nested DAG will create its own metrics file.
+
+Here is an example metrics output file:
+\begin{verbatim} 
+{
+    "client":"condor_dagman",
+    "version":"8.1.0",
+    "planner":"/lfs1/devel/Pegasus/pegasus/bin/pegasus-plan",
+    "planner_version":"4.3.0cvs",
+    "type":"metrics",
+    "wf_uuid":"htcondor-test-job_dagman_metrics-A-subdag",
+    "root_wf_uuid":"htcondor-test-job_dagman_metrics-A",
+    "start_time":1375313459.603,
+    "end_time":1375313491.498,
+    "duration":31.895,
+    "exitcode":1,
+    "dagman_id":"26",
+    "parent_dagman_id":"11",
+    "rescue_dag_number":0,
+    "jobs":4,
+    "jobs_failed":1,
+    "jobs_succeeded":3,
+    "dag_jobs":0,
+    "dag_jobs_failed":0,
+    "dag_jobs_succeeded":0,
+    "total_jobs":4,
+    "total_jobs_run":4,
+    "total_job_time":0.000,
+    "dag_status":2
+}
+\end{verbatim} 
+
+Here is an explanation of each of the items in the file:
+\begin{itemize}
+\item \Expr{client}: the name of the workflow software,
+for example \Expr{"condor\_dagman"}.
+\item \Expr{version}: the version of the client software.
+\item \Expr{planner}: the workflow planner, 
+as read from the \File{braindump.txt} file.
+\item \Expr{planner\_version}: the planner software version,
+as read from the \File{braindump.txt} file.
+\item \Expr{type}: the type of data,  \Expr{"metrics"}.
+\item \Expr{wf\_uuid}: the workflow ID, 
+generated by \Prog{pegasus-plan}, as read from the \File{braindump.txt} file.
+\item \Expr{root\_wf\_uuid}: the root workflow ID,
+which is relevant for nested workflows. 
+It is generated by \Prog{pegasus-plan}, 
+as read from the \File{braindump.txt} file.
+\item \Expr{start\_time}: the start time of the client,
+in epoch seconds, with millisecond precision.
+\item \Expr{end\_time}: the end time of the client,
+in epoch seconds, with millisecond precision.
+\item \Expr{duration}: the duration of the client,
+in seconds, with millisecond precision.
+\item \Expr{exitcode}: the \Condor{dagman} exit code.
+\item \Expr{dagman\_id}: the value of the \Attr{ClusterId} attribute 
+of the \Condor{dagman} instance.
+\item \Expr{parent\_dagman\_id}: the value of the \Attr{ClusterId} attribute 
+of the parent \Condor{dagman} instance of this DAG;
+empty if this DAG is not a SUBDAG.
+\item \Expr{rescue\_dag\_number}: the number of the Rescue DAG being run,
+or 0 if not running a Rescue DAG.
+\item \Expr{jobs}: the number of nodes in the DAG input file,
+not including SUBDAG nodes.
+\item \Expr{jobs\_failed}: the number of failed nodes in the workflow,
+not including SUBDAG nodes.
+\item \Expr{jobs\_succeeded}: the number of successful nodes in the
+workflow, not including SUBDAG nodes; 
+this includes jobs that succeeded after retries.
+\item \Expr{dag\_jobs}: the number of SUBDAG nodes in the DAG input file.
+\item \Expr{dag\_jobs\_failed}: the number of SUBDAG nodes that failed.
+\item \Expr{dag\_jobs\_succeeded}: the number of SUBDAG nodes that succeeded.
+\item \Expr{total\_jobs}: the total number of jobs in
+the DAG input file.
+\item \Expr{total\_jobs\_run}: the total number of nodes executed in a DAG.
+It should be equal to \Expr{jobs\_succeeded + jobs\_failed + 
+dag\_jobs\_succeeded + dag\_jobs\_failed}.
+\item \Expr{total\_job\_time}: the sum of the time between the first
+execute event and the terminated event for all jobs that are not SUBDAGs.
+\item \Expr{dag\_status}: the final status of the DAG, as follows:
+  \begin{itemize}
+  \item \Expr{0}: OK
+  \item \Expr{1}: error; an error condition different than those listed here
+  \item \Expr{2}: one or more nodes in the DAG have failed
+  \item \Expr{3}: the DAG has been aborted by an ABORT-DAG-ON specification
+  \item \Expr{4}: removed; the DAG has been removed by \Condor{rm}
+  \item \Expr{5}: a cycle was found in the DAG
+  \item \Expr{6}: the DAG has been halted; see section ~\ref{sec:DagSuspend} 
+for an explanation of halting a DAG
+  \end{itemize}
+Note that any \Expr{dag\_status} other than 0 corresponds to a non-zero
+exit code.
+\end{itemize}
+
+The \File{braindump.txt} file is generated by \Prog{pegasus-plan};
+ the name of the \File{braindump.txt} file
+is specified with the \Env{PEGASUS\_BRAINDUMP\_FILE} environment
+variable.
+If not specified, the file name defaults to 
+\File{braindump.txt}, and it is placed in the current directory.
+
+Note that, as of HTCondor version 8.1.0, 
+the \Expr{total\_job\_time} value is always zero,
+because the calculation of that value has not yet been implemented.
+
+If a DAG succeeds, but the metrics reporting fails, the DAG is
+still considered successful.
+
+The metrics are reported only at the end of a DAG run.
+This includes reporting the metrics if the \Condor{dagman} job is removed, 
+or if the DAG drains from the queue because of being halted by a halt
+file.
+
+The metrics are actually reported by the
+\Condor{dagman\_metrics\_reporter} executable
+as described in the man page at
+~\pageref{man-condor-dagman-metrics-reporter}.
 
 \index{DAGMan|)}

@@ -17,7 +17,6 @@
  *
  ***************************************************************/
 
-
 //
 // Terminology note:
 // We are calling a *node* the combination of pre-script, job, and
@@ -49,6 +48,7 @@
 #include "HashTable.h"
 #include <set>
 #include "dagman_recursive_submit.h"
+#include "dagman_metrics.h"
 
 using namespace std;
 
@@ -126,7 +126,8 @@ Dag::Dag( /* const */ StringList &dagFiles,
 	_reject			  (false),
 	_alwaysRunPost		  (true),
 	_defaultPriority	  (0),
-	_use_default_node_log  (true)
+	_use_default_node_log  (true),
+	_metrics			  (NULL)
 {
 
 	// If this dag is a splice, then it may have been specified with a DIR
@@ -186,7 +187,7 @@ Dag::Dag( /* const */ StringList &dagFiles,
 	_recovery = false;
 	_abortOnScarySubmit = true;
 	_configFile = NULL;
-	_runningFinalNode = false;
+	_finalNodeRun = false;
 		
 		// Don't print any waiting node reports until we're done with
 		// recovery mode.
@@ -195,6 +196,7 @@ Dag::Dag( /* const */ StringList &dagFiles,
 	_lastEventTime = 0;
 
 	_dagIsHalted = false;
+	_dagIsAborted = false;
 	_dagFiles.rewind();
 	_haltFile = HaltFileName( _dagFiles.next() );
 	_dagStatus = DAG_STATUS_OK;
@@ -239,7 +241,23 @@ Dag::~Dag() {
 
 	delete[] _statusFileName;
 
+	delete _metrics;
+
     return;
+}
+
+//-------------------------------------------------------------------------
+void
+Dag::CreateMetrics( const char *primaryDagFile, int rescueDagNum )
+{
+	_metrics = new DagmanMetrics( this, primaryDagFile, rescueDagNum );
+}
+
+//-------------------------------------------------------------------------
+void
+Dag::ReportMetrics( int exitCode )
+{
+	_metrics->Report( exitCode, _dagStatus );
 }
 
 //-------------------------------------------------------------------------
@@ -598,12 +616,20 @@ bool Dag::ProcessOneEvent (int logsource, ULogEventOutcome outcome,
 				break;
 
 			case ULOG_JOB_ABORTED:
+#if !defined(DISABLE_NODE_TIME_METRICS)
+				job->TermAbortMetrics( event->proc, event->eventTime,
+							_metrics );
+#endif
 					// Make sure we don't count finished jobs as idle.
 				ProcessNotIdleEvent(job);
 				ProcessAbortEvent(event, job, recovery);
 				break;
               
 			case ULOG_JOB_TERMINATED:
+#if !defined(DISABLE_NODE_TIME_METRICS)
+				job->TermAbortMetrics( event->proc, event->eventTime,
+							_metrics );
+#endif
 					// Make sure we don't count finished jobs as idle.
 				ProcessNotIdleEvent(job);
 				ProcessTerminatedEvent(event, job, recovery);
@@ -631,7 +657,14 @@ bool Dag::ProcessOneEvent (int logsource, ULogEventOutcome outcome,
 				break;
 
 			case ULOG_JOB_UNSUSPENDED:
+				ProcessNotIdleEvent(job);
+				break;
+
 			case ULOG_EXECUTE:
+#if !defined(DISABLE_NODE_TIME_METRICS)
+				job->ExecMetrics( event->proc, event->eventTime,
+							_metrics );
+#endif
 				ProcessNotIdleEvent(job);
 				break;
 
@@ -807,6 +840,8 @@ Dag::ProcessTerminatedEvent(const ULogEvent *event, Job *job,
 							termEvent->subproc );
 		}
 
+		ProcessJobProcEnd( job, recovery, failed );
+
 		if( job->_scriptPost == NULL ) {
 			bool abort = CheckForDagAbort(job, "job");
 			// if dag abort happened, we never return here!
@@ -814,8 +849,6 @@ Dag::ProcessTerminatedEvent(const ULogEvent *event, Job *job,
 				return;
 			}
 		}
-
-		ProcessJobProcEnd( job, recovery, failed );
 
 		PrintReadyQ( DEBUG_DEBUG_2 );
 
@@ -838,7 +871,7 @@ Dag::RemoveBatchJob(Job *node) {
 			// Adding this DAGMan's cluster ID as a constraint to
 			// be extra-careful to avoid removing someone else's
 			// job.
-		constraint.formatstr( "%s == %d && %s == %d",
+		constraint.formatstr( "%s =?= %d && %s =?= %d",
 					ATTR_DAGMAN_JOB_ID, _DAGManJobId->_cluster,
 					ATTR_CLUSTER_ID, node->GetCluster() );
 		args.AppendArg( constraint.Value() );
@@ -867,6 +900,8 @@ Dag::RemoveBatchJob(Job *node) {
 }
 
 //---------------------------------------------------------------------------
+// Note:  if job is the final node of the DAG, should we set _dagStatus
+// in here according to whether job succeeded or failed?  wenger 2014-03-18
 void
 Dag::ProcessJobProcEnd(Job *job, bool recovery, bool failed) {
 
@@ -902,6 +937,7 @@ Dag::ProcessJobProcEnd(Job *job, bool recovery, bool failed) {
 			}
 			if ( job->_queuedNodeJobProcs == 0 ) {
 				_numNodesFailed++;
+				_metrics->NodeFinished( job->GetDagFile() != NULL, false );
 				if ( _dagStatus == DAG_STATUS_OK ) {
 					_dagStatus = DAG_STATUS_NODE_FAILED;
 				}
@@ -1010,6 +1046,7 @@ Dag::ProcessPostTermEvent(const ULogEvent *event, Job *job,
 			} else {
 					// no more retries -- node failed
 				_numNodesFailed++;
+				_metrics->NodeFinished( job->GetDagFile() != NULL, false );
 				if ( _dagStatus == DAG_STATUS_OK ) {
 					_dagStatus = DAG_STATUS_NODE_FAILED;
 				}
@@ -1432,6 +1469,9 @@ Dag::StartFinalNode()
 			// Clear out the ready queue so "regular" jobs don't run
 			// when we run the final node (this is really just needed
 			// for the DAG abort and DAG halt cases).
+			// Note:  maybe we should change nodes in the prerun state
+			// to not ready here, to be more consistent.  But I'm not
+			// dealing with that for now.  wenger 2014-03-17
 		Job* job;
 		_readyQ->Rewind();
 		while ( _readyQ->Next( job ) ) {
@@ -1440,13 +1480,14 @@ Dag::StartFinalNode()
 							"Removing node %s from ready queue\n",
 							job->GetJobName() );
 				_readyQ->DeleteCurrent();
+				job->SetStatus( Job::STATUS_NOT_READY );
 			}
 		}
 
 			// Now start up the final node.
 		_final_job->SetStatus( Job::STATUS_READY );
 		if ( StartNode( _final_job, false ) ) {
-			_runningFinalNode = true;
+			_finalNodeRun = true;
 			return true;
 		}
 	}
@@ -1482,7 +1523,7 @@ Dag::SubmitReadyJobs(const Dagman &dm)
 		debug_printf( DEBUG_QUIET,
 					"DAG is halted because halt file %s exists\n",
 					_haltFile.Value() );
-		if ( _runningFinalNode ) {
+		if ( _finalNodeRun ) {
 			debug_printf( DEBUG_QUIET,
 						"Continuing to allow final node to run\n" );
 		} else {
@@ -1710,6 +1751,8 @@ Dag::PreScriptReaper( const char* nodeName, int status )
 			// Check for retries.
 		else if( job->GetRetries() < job->GetRetryMax() ) {
 			job->TerminateFailure();
+			// Note: don't update count in metrics here because we're
+			// retrying!
 			RestartNode( job, false );
 		}
 
@@ -1717,6 +1760,7 @@ Dag::PreScriptReaper( const char* nodeName, int status )
 		else {
 			job->TerminateFailure();
 			_numNodesFailed++;
+			_metrics->NodeFinished( job->GetDagFile() != NULL, false );
 			if ( _dagStatus == DAG_STATUS_OK ) {
 				_dagStatus = DAG_STATUS_NODE_FAILED;
 			}
@@ -1925,10 +1969,18 @@ Dag::PrintReadyQ( debug_level_t level ) const {
 bool
 Dag::FinishedRunning( bool includeFinalNode ) const
 {
-	if ( includeFinalNode && _final_job && !_runningFinalNode ) {
+	if ( includeFinalNode && _final_job && !_finalNodeRun ) {
 			// Make sure we don't incorrectly return true if we get called
-			// just before a final node is started...
+			// just before a final node is started...  (There is a race
+			// condition here otherwise, because all of the "regular"
+			// nodes can be done, and the final node not changed to
+			// ready yet.)
 		return false;
+	} else if ( IsHalted() ) {
+			// Note that we're checking for scripts actually running here,
+			// not the number of nodes in the PRERUN or POSTRUN state --
+			// if we're halted, we don't start any new PRE scripts.
+		return NumJobsSubmitted() == 0 && NumScriptsRunning() == 0;
 	}
 
 	return NumJobsSubmitted() == 0 && NumNodesReady() == 0 &&
@@ -1939,11 +1991,19 @@ Dag::FinishedRunning( bool includeFinalNode ) const
 bool
 Dag::DoneSuccess( bool includeFinalNode ) const
 {
-	if ( NumNodesDone( includeFinalNode ) == NumNodes( includeFinalNode ) ) {
+	if ( !FinishedRunning( includeFinalNode ) ) {
+			// Note: if final node is running we should get to here...
+		return false;
+	} else if ( NumNodesDone( includeFinalNode ) ==
+				NumNodes( includeFinalNode ) ) {
+			// This is the normal case.
 		return true;
 	} else if ( includeFinalNode && _final_job &&
 				_final_job->GetStatus() == Job::STATUS_DONE ) {
 			// Final node can override the overall DAG status.
+		return true;
+	} else if ( _dagIsAborted && _dagStatus == DAG_STATUS_OK ) {
+			// Abort-dag-on can override the overall DAG status.
 		return true;
 	}
 
@@ -1961,9 +2021,24 @@ Dag::DoneFailed( bool includeFinalNode ) const
 				_final_job->GetStatus() == Job::STATUS_DONE ) {
 			// Success of final node overrides failure of any other node.
 		return false;
+	} else if ( _dagIsAborted && _dagStatus == DAG_STATUS_OK ) {
+			// Abort-dag-on can override the overall DAG status.
+		return false;
+	} else if ( IsHalted() ) {
+		return true;
 	}
 
 	return NumNodesFailed() > 0;
+}
+
+//---------------------------------------------------------------------------
+bool
+Dag::DoneCycle( bool includeFinalNode) const
+{
+	return FinishedRunning( includeFinalNode ) &&
+				!DoneSuccess( includeFinalNode ) &&
+				NumNodesFailed() == 0 &&
+				!IsHalted() && !_dagIsAborted;
 }
 
 //---------------------------------------------------------------------------
@@ -2024,7 +2099,7 @@ void Dag::RemoveRunningJobs ( const Dagman &dm, bool bForce) const {
 		args.AppendArg( _condorRmExe );
 		args.AppendArg( "-const" );
 
-		constraint.formatstr( "%s == %d", ATTR_DAGMAN_JOB_ID,
+		constraint.formatstr( "%s =?= %d", ATTR_DAGMAN_JOB_ID,
 					dm.DAGManJobId._cluster );
 		args.AppendArg( constraint.Value() );
 		if ( util_popen( args ) != 0 ) {
@@ -2400,10 +2475,6 @@ Dag::TerminateJob( Job* job, bool recovery, bool bootstrap )
 	ASSERT( !(recovery && bootstrap) );
     ASSERT( job != NULL );
 
-	if ( job == _final_job ) {
-		_runningFinalNode = false;
-	}
-
 	job->TerminateSuccess(); // marks job as STATUS_DONE
 	if ( job->GetStatus() != Job::STATUS_DONE ) {
 		EXCEPT( "Node %s is not in DONE state", job->GetJobName() );
@@ -2414,6 +2485,7 @@ Dag::TerminateJob( Job* job, bool recovery, bool bootstrap )
 		// careful not to double-count...
 	if( job->countedAsDone == false ) {
 		_numNodesDone++;
+		_metrics->NodeFinished( job->GetDagFile() != NULL, true );
 		job->countedAsDone = true;
 		ASSERT( _numNodesDone <= _jobs.Number() );
 	}
@@ -2485,6 +2557,7 @@ Dag::RestartNode( Job *node, bool recovery )
                       "(last attempt returned %d)\n",
                       node->GetJobName(), node->retval);
         _numNodesFailed++;
+		_metrics->NodeFinished( node->GetDagFile() != NULL, false );
 		if ( _dagStatus == DAG_STATUS_OK ) {
 			_dagStatus = DAG_STATUS_NODE_FAILED;
 		}
@@ -2614,6 +2687,7 @@ Dag::CheckForDagAbort(Job *job, const char *type)
 				job->retval == job->abort_dag_val ) {
 		debug_printf( DEBUG_QUIET, "Aborting DAG because we got "
 				"the ABORT exit value from a %s\n", type);
+		_dagIsAborted = true;
 		if ( job->have_abort_dag_return_val ) {
 			main_shutdown_rescue( job->abort_dag_return_val,
 						job->abort_dag_return_val != 0 ? DAG_STATUS_ABORT :
@@ -2778,9 +2852,10 @@ Dag::SetNodeStatusFileName( const char *statusFileName,
 			int minUpdateTime )
 {
 	if ( _statusFileName != NULL ) {
-		debug_printf( DEBUG_NORMAL, "Attempt to set NODE_STATUS_FILE "
+		debug_printf( DEBUG_NORMAL, "Warning: Attempt to set NODE_STATUS_FILE "
 					"to %s does not override existing value of %s\n",
 					statusFileName, _statusFileName );
+		check_warning_strictness( DAG_STRICT_3 );
 		return;
 	}
 	_statusFileName = strnewp( statusFileName );
@@ -2792,6 +2867,9 @@ Dag::SetNodeStatusFileName( const char *statusFileName,
 	@param whether the DAG has just been held
 	@param whether the DAG has just been removed
 */
+// Note:  We might eventually want to change this to actually creating
+// classad objects and calling the unparser on them.  (See gittrac
+// #4316.)  wenger 2014-04-16
 void
 Dag::DumpNodeStatus( bool held, bool removed )
 {
@@ -2841,63 +2919,31 @@ Dag::DumpNodeStatus( bool held, bool removed )
 		return;
 	}
 
+	fprintf( outfile, "[\n" );
+	fprintf( outfile, "  Type = \"DagStatus\";\n" );
+
 		//
-		// Print header.
+		// Print DAG file list.
 		//
-	char *timeStr = ctime( &startTime );
-	char *newline = strchr(timeStr, '\n');
-	if (newline != NULL) {
-		*newline = 0;
-	}
-	fprintf( outfile, "BEGIN %lu (%s)\n",
-				(unsigned long)startTime, timeStr );
-	fprintf( outfile, "Status of nodes of DAG(s): " );
+	fprintf( outfile, "  DagFiles = {\n" );
 	char *dagFile;
 	_dagFiles.rewind();
+	const char *separator = "";
 	while ( (dagFile = _dagFiles.next()) ) {
-		fprintf( outfile, "%s ", dagFile );
+		fprintf( outfile, "%s    %s", separator,
+					EscapeClassadString( dagFile ) );
+		separator = ",\n";
 	}
-	fprintf( outfile, "\n\n" );
+	fprintf( outfile, "\n  };\n" );
 
 		//
-		// Print status of all nodes.
+		// Print timestamp.
 		//
-	ListIterator<Job> it ( _jobs );
-	Job *node;
-	while ( it.Next( node ) ) {
-		const char *statusStr = Job::status_t_names[node->GetStatus()];
-		const char *nodeNote = "";
-		if ( node->GetStatus() == Job::STATUS_READY ) {
-			if ( !node->CanSubmit() ) {
-				// See Job::_job_type_names for other strings.
-				statusStr = "STATUS_UNREADY  ";
-			}
-		} else if ( node->GetStatus() == Job::STATUS_SUBMITTED ) {
-			nodeNote = node->GetIsIdle() ? "idle" : "not_idle";
-			// Note: add info here about whether the job(s) are
-			// held, once that code is integrated.
-		} else if ( node->GetStatus() == Job::STATUS_ERROR ) {
-			nodeNote = node->error_text;
-		}
-		fprintf( outfile, "JOB %s %s (%s)\n", node->GetJobName(),
-					statusStr, nodeNote );
-	}
-
-		//
-		// Print node counts.
-		//
-	fprintf( outfile, "\n" );
-	fprintf( outfile, "Nodes total: %d\n", NumNodes( true ) );
-	fprintf( outfile, "Nodes done: %d\n", NumNodesDone( true ) );
-	fprintf( outfile, "Nodes pre: %d\n", PreRunNodeCount() );
-	fprintf( outfile, "Nodes queued: %d\n", NumJobsSubmitted() );
-	fprintf( outfile, "Nodes post: %d\n", PostRunNodeCount() );
-	fprintf( outfile, "Nodes ready: %d\n", NumNodesReady() );
-	int unready = NumNodes( true )  - (NumNodesDone( true ) +
-				PreRunNodeCount() + NumJobsSubmitted() + PostRunNodeCount() +
-				NumNodesReady() + NumNodesFailed()  );
-	fprintf( outfile, "Nodes un-ready: %d\n", unready );
-	fprintf( outfile, "Nodes failed: %d\n", NumNodesFailed() );
+	MyString timeStr = ctime( &startTime );
+	timeStr.chomp();
+	fprintf( outfile, "  Timestamp = %lu; /* %s */\n",
+				(unsigned long)startTime,
+				EscapeClassadString( timeStr.Value() ) );
 
 		//
 		// Print overall DAG status.
@@ -2909,7 +2955,11 @@ Dag::DumpNodeStatus( bool held, bool removed )
 		statusNote = "success";
 	} else if ( DoneFailed( true ) ) {
 		dagStatus = Job::STATUS_ERROR;
-		statusNote = "failed";
+		if ( _dagStatus == DAG_STATUS_ABORT ) {
+			statusNote = "aborted";
+		} else {
+			statusNote = "failed";
+		}
 	} else if ( DoneCycle( true ) ) {
 		dagStatus = Job::STATUS_ERROR;
 		statusNote = "cycle";
@@ -2919,34 +2969,98 @@ Dag::DumpNodeStatus( bool held, bool removed )
 		dagStatus = Job::STATUS_ERROR;
 		statusNote = "removed";
 	}
-	fprintf( outfile, "\nDAG status: %s (%s)\n",
-				Job::status_t_names[dagStatus], statusNote );
+	MyString statusStr = Job::status_t_names[dagStatus];
+	statusStr.trim();
+	statusStr += " (";
+	statusStr += statusNote;
+	statusStr += ")";
+	fprintf( outfile, "  DagStatus = %d; /* %s */\n", dagStatus,
+				EscapeClassadString( statusStr.Value() ) );
+
+	fprintf( outfile, "  NodesTotal = %d;\n", NumNodes( true ) );
+	fprintf( outfile, "  NodesDone = %d;\n", NumNodesDone( true ) );
+	fprintf( outfile, "  NodesPre = %d;\n", PreRunNodeCount() );
+	fprintf( outfile, "  NodesQueued = %d;\n", NumJobsSubmitted() );
+	fprintf( outfile, "  NodesPost = %d;\n", PostRunNodeCount() );
+	fprintf( outfile, "  NodesReady = %d;\n", NumNodesReady() );
+	fprintf( outfile, "  NodesUnready = %d;\n",NumNodesUnready( true ) );
+	fprintf( outfile, "  NodesFailed = %d;\n", NumNodesFailed() );
+	fprintf( outfile, "  JobProcsHeld = %d;\n", NumHeldJobProcs() );
+	fprintf( outfile, "  JobProcsIdle = %d;\n", NumIdleJobProcs() );
+	fprintf( outfile, "]\n" );
 
 		//
-		// Print footer.
+		// Print status of all nodes.
 		//
-	time_t endTime = time( NULL );
-
-	fprintf( outfile, "Next scheduled update: " );
-	if ( FinishedRunning( true ) || removed ) {
-		fprintf( outfile, "none\n" );
-	} else {
-		time_t nextTime = endTime + _minStatusUpdateTime;
-		timeStr = ctime( &nextTime );
-		newline = strchr(timeStr, '\n');
-		if (newline != NULL) {
-			*newline = 0;
+	ListIterator<Job> it ( _jobs );
+	Job *node;
+	while ( it.Next( node ) ) {
+		fprintf( outfile, "[\n" );
+		fprintf( outfile, "  Type = \"NodeStatus\";\n" );
+		Job::status_t status = node->GetStatus();
+		const char *nodeNote = "";
+		if ( status == Job::STATUS_READY ) {
+				// Note:  Job::STATUS_READY only means that the job is
+				// ready to submit if it doesn't have any unfinished
+				// parents.
+			if ( !node->CanSubmit() ) {
+				// See Job::_job_type_names for other strings.
+				status = Job::STATUS_NOT_READY;
+			}
+		} else if ( status == Job::STATUS_SUBMITTED ) {
+			nodeNote = node->GetIsIdle() ? "idle" : "not_idle";
+			// Note: add info here about whether the job(s) are
+			// held, once that code is integrated.
+		} else if ( status == Job::STATUS_ERROR ) {
+			nodeNote = node->error_text;
 		}
-		fprintf( outfile, "%lu (%s)\n", (unsigned long)nextTime, timeStr );
+
+		fprintf( outfile, "  Node = %s;\n",
+					EscapeClassadString( node->GetJobName() ) );
+		statusStr = Job::status_t_names[status];
+		statusStr.trim();
+		fprintf( outfile, "  NodeStatus = %d; /* %s */\n", status,
+					EscapeClassadString( statusStr.Value() ) );
+		// fprintf( outfile, "  /* CondorStatus = xxx; */\n" );
+		fprintf( outfile, "  StatusDetails = %s;\n",
+					EscapeClassadString( nodeNote ) );
+		fprintf( outfile, "  RetryCount = %d;\n", node->GetRetries() );
+		// fprintf( outfile, "  /* JobProcsTotal = xxx; */\n" );
+		fprintf( outfile, "  JobProcsQueued = %d;\n",
+					node->_queuedNodeJobProcs );
+		// fprintf( outfile, "  /* JobProcsRunning = xxx; */\n" );
+		// fprintf( outfile, "  /* JobProcsIdle = xxx; */\n" );
+		fprintf( outfile, "  JobProcsHeld = %d;\n", node->_jobProcsOnHold );
+
+		fprintf( outfile, "]\n" );
 	}
 
+		//
+		// Print end information.
+		//
+	fprintf( outfile, "[\n" );
+	fprintf( outfile, "  Type = \"StatusEnd\";\n" );
+
+	time_t endTime = time( NULL );
 	timeStr = ctime( &endTime );
-	newline = strchr(timeStr, '\n');
-	if (newline != NULL) {
-		*newline = 0;
+	timeStr.chomp();
+	fprintf( outfile, "  EndTime = %lu; /* %s */\n",
+				(unsigned long)endTime,
+				EscapeClassadString( timeStr.Value() ) );
+
+	time_t nextTime;
+	if ( FinishedRunning( true ) || removed ) {
+		nextTime = 0;
+		timeStr = "none";
+	} else {
+		nextTime = endTime + _minStatusUpdateTime;
+		timeStr = ctime( &nextTime );
+		timeStr.chomp();
 	}
-	fprintf( outfile, "END %lu (%s)\n",
-				(unsigned long)endTime, timeStr );
+	fprintf( outfile, "  NextUpdate = %lu; /* %s */\n",
+				(unsigned long)nextTime,
+				EscapeClassadString( timeStr.Value() ) );
+	fprintf( outfile, "]\n" );
 
 	fclose( outfile );
 
@@ -2965,6 +3079,21 @@ Dag::DumpNodeStatus( bool held, bool removed )
 
 	_statusFileOutdated = false;
 	_lastStatusUpdateTimestamp = startTime;
+}
+
+//-------------------------------------------------------------------------
+const char *
+Dag::EscapeClassadString( const char* strIn )
+{
+	static classad::Value tmpValue;
+	static std::string tmpStr; // must be static so we can return c_str()
+	static classad::ClassAdUnParser unparse;
+
+	tmpValue.SetStringValue( strIn );
+	tmpStr = "";
+	unparse.Unparse( tmpStr, tmpValue );
+
+	return tmpStr.c_str();
 }
 
 //-------------------------------------------------------------------------
@@ -2994,9 +3123,10 @@ void
 Dag::SetJobstateLogFileName( const char *logFileName )
 {
 	if ( _jobstateLog.LogFile() != NULL ) {
-		debug_printf( DEBUG_NORMAL, "Attempt to set JOBSTATE_LOG "
+		debug_printf( DEBUG_NORMAL, "Warning: Attempt to set JOBSTATE_LOG "
 					"to %s does not override existing value of %s\n",
 					logFileName, _jobstateLog.LogFile() );
+		check_warning_strictness( DAG_STRICT_3 );
 		return;
 	}
 	_jobstateLog.SetLogFile( logFileName );
@@ -3351,6 +3481,7 @@ bool Dag::Add( Job& job )
 	return _jobs.Append(&job);
 }
 
+#if 0
 //---------------------------------------------------------------------------
 bool
 Dag::RemoveNode( const char *name, MyString &whynot )
@@ -3382,6 +3513,7 @@ Dag::RemoveNode( const char *name, MyString &whynot )
 	if( node->GetStatus() == Job::STATUS_DONE ) {
 		_numNodesDone--;
 		ASSERT( _numNodesDone >= 0 );
+		// Need to update metrics here!!!
 	}
 	else if( node->GetStatus() == Job::STATUS_ERROR ) {
 		_numNodesFailed--;
@@ -3449,7 +3581,7 @@ Dag::RemoveNode( const char *name, MyString &whynot )
 	whynot = "n/a";
 	return true;
 }
-
+#endif
 
 //---------------------------------------------------------------------------
 bool
@@ -3896,6 +4028,7 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
 					"No 'log =' value found in submit file %s",
 					node->GetCmdFile() );
 	  	_numNodesFailed++;
+		_metrics->NodeFinished( node->GetDagFile() != NULL, false );
 		if ( _dagStatus == DAG_STATUS_OK ) {
 			_dagStatus = DAG_STATUS_NODE_FAILED;
 		}
@@ -3926,7 +4059,7 @@ Dag::SubmitNodeJob( const Dagman &dm, Job *node, CondorID &condorID )
 				MyString parents = ParentListString( node );
       			submit_success = condor_submit( dm, cmd_file.Value(), condorID,
 							node->GetJobName(), parents,
-							node->varsFromDag,
+							node->varsFromDag, node->GetRetries(),
 							node->GetDirectory(), DefaultNodeLog(),
 							_use_default_node_log && node->UseDefaultLog(),
 							logFile, ProhibitMultiJobs(),
@@ -4041,6 +4174,7 @@ Dag::ProcessFailedSubmit( Job *node, int max_submit_attempts )
 		} else {
 			node->TerminateFailure();
 			_numNodesFailed++;
+			_metrics->NodeFinished( node->GetDagFile() != NULL, false );
 			if ( _dagStatus == DAG_STATUS_OK ) {
 				_dagStatus = DAG_STATUS_NODE_FAILED;
 			}
