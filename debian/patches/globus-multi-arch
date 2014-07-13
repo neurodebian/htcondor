@@ -3,11 +3,11 @@ Origin: vendor, http://bugs.debian.org/731246
 Bug-Debian: http://bugs.debian.org/731246
 Author: Mattias Ellert <mattias.ellert@fysast.uu.se>
 
---- a/externals/bundles/globus/5.2.1/CMakeLists.txt
-+++ b/externals/bundles/globus/5.2.1/CMakeLists.txt
-@@ -227,7 +227,16 @@
+--- a/externals/bundles/globus/5.2.5/CMakeLists.txt
++++ b/externals/bundles/globus/5.2.5/CMakeLists.txt
+@@ -224,7 +224,16 @@
  		find_multiple( "globus_gass_transfer;globus_gram_client;globus_gram_protocol" GLOBUS_GRID_UNIVERSE_GT2 )
- 		find_multiple( "globus_ftp_control" GLOBUS_GRID_UNIVERSE_NORDUGRID)
+ 		find_multiple( "globus_ftp_client" GLOBUS_GRID_UNIVERSE_NORDUGRID)
  		if (GLOBUS_FOUND)
 -		  append_var (CONDOR_EXTERNAL_INCLUDE_DIRS "/usr/include/globus;/usr/lib64/globus/include;/usr/lib/globus/include;/usr/local/globus/include/globus")
 +		  find_program(DPKG_ARCHITECTURE dpkg-architecture)

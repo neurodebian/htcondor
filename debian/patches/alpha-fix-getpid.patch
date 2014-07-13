@@ -1,8 +1,6 @@
-Index: condor-8.0.5~dfsg.1/src/condor_daemon_core.V6/daemon_core.cpp
-===================================================================
---- condor-8.0.5~dfsg.1.orig/src/condor_daemon_core.V6/daemon_core.cpp	2014-01-26 12:09:02.000000000 +1300
-+++ condor-8.0.5~dfsg.1/src/condor_daemon_core.V6/daemon_core.cpp	2014-01-26 12:17:31.951595080 +1300
-@@ -5427,8 +5427,12 @@
+--- a/src/condor_daemon_core.V6/daemon_core.cpp
++++ b/src/condor_daemon_core.V6/daemon_core.cpp
+@@ -5420,8 +5420,12 @@
  		// caching in libc).  Therefore, use the syscall to get
  		// the answer directly.
  
@@ -17,7 +15,7 @@ Index: condor-8.0.5~dfsg.1/src/condor_daemon_core.V6/daemon_core.cpp
  		// If we were fork'd with CLONE_NEWPID, we think our PID is 1.
  		// In this case, ask the parent!
  	if (retval == 1) {
-@@ -5448,7 +5452,13 @@
+@@ -5441,7 +5445,13 @@
  		// See above comment for clone_safe_getpid() for explanation of
  		// why we need to do this.
  	

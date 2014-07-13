@@ -4,7 +4,7 @@ no_java_for_now
 #enable_pythonbindings
 no_compress
 globus-multi-arch
-gsoap_symbols
+#gsoap_symbols
 campus_factory_syntax.patch
 # should be obsolete in condor 7.7.6+, but cannot confirm
 fix_condor_run
