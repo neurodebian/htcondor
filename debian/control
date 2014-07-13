@@ -169,7 +169,7 @@ Replaces: libclassad0-dev
 Conflicts: libclassad0-dev
 Section: libdevel
 Architecture: any
-Depends: libclassad5 (= ${binary:Version}), ${misc:Depends}
+Depends: libclassad7 (= ${binary:Version}), ${misc:Depends}
 Description: HTCondor classads expression language - development library
  Classified Advertisements (classads) are the lingua franca of HTCondor, used
  for describing jobs, workstations, and other resources. There is a protocol
@@ -180,7 +180,7 @@ Description: HTCondor classads expression language - development library
  This package provides the static library and header files.
 
 
-Package: libclassad5
+Package: libclassad7
 Section: libs
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
