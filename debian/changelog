@@ -1,3 +1,20 @@
+condor (8.2.1~dfsg.1-1) unstable; urgency=medium
+
+  * New upstream release in the 8.2 stable series.
+    - Skipped 8.2.0 due to a security issue.
+    - Includes various new features from the former 8.1 development series,
+      such as improved support for partitionable slots, and interactive
+      sessions.
+  * Enabled CGROUPS support (new build-dependency libcgroups-dev).
+  * Bump SO version of libclassad from 5 to 7.
+  * Bumped Standards-version to 3.9.5; no changes necessary.
+  * Drop build-dependency on obsolete python-support.
+  * Drop alternative build-dependency on obselete java-compiler.
+  * Symlink condor_ssh_to_job_sshd_config_template to /usr/lib/condor
+    where Condor expects it to make interactive sessions work out of the box.
+
+ -- Michael Hanke <mih@debian.org>  Sun, 13 Jul 2014 12:03:32 +0200
+
 condor (8.0.6~dfsg.1-1) unstable; urgency=medium
 
   * New upstream maintenance release for the 8.0 series. Changelog excerpt:
