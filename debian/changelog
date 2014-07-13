@@ -6,6 +6,8 @@ condor (8.2.1~dfsg.1-1) unstable; urgency=medium
       such as improved support for partitionable slots, and interactive
       sessions.
   * Enabled CGROUPS support (new build-dependency libcgroups-dev).
+  * Enabled condor_kbdd for machines where Condor harvests idle time
+    (new build-dependency libx11-dev).
   * Bump SO version of libclassad from 5 to 7.
   * Bumped Standards-version to 3.9.5; no changes necessary.
   * Drop build-dependency on obsolete python-support.
