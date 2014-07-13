@@ -37,7 +37,8 @@ Build-Depends: debhelper (>= 9~),
  gsoap (>= 2.7.17-1~),
  libboost-test-dev,
  libboost-python-dev,
- libkrb5-dev
+ libkrb5-dev,
+ libcgroup-dev
 Standards-Version: 3.9.5
 Homepage: http://research.cs.wisc.edu/htcondor
 Vcs-Browser: http://git.debian.org/?p=pkg-exppsy/condor.git
