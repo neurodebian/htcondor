@@ -1,0 +1,51 @@
+diff --git a/debian/control b/debian/control
+index 19e6019..2675a66 100644
+--- a/debian/control
++++ b/debian/control
+@@ -12,11 +12,6 @@ Build-Depends: debhelper (>= 9~),
+  libpq-dev,
+  libcurl4-openssl-dev,
+  zlib1g-dev,
+- libglobus-gss-assist-dev,
+- libglobus-gram-protocol-dev,
+- libglobus-gram-client-dev,
+- libglobus-gass-server-ez-dev,
+- libglobus-ftp-client-dev,
+  latex2html,
+  transfig,
+  libpcre3-dev,
+@@ -35,7 +30,6 @@ Build-Depends: debhelper (>= 9~),
+  chrpath,
+  libldap2-dev | libldap-dev,
+  help2man,
+- gsoap (>= 2.7.17-1~),
+  libboost-test-dev,
+  libboost-python-dev,
+  libkrb5-dev,
+diff --git a/debian/rules b/debian/rules
+index 0282273..4c15da2 100755
+--- a/debian/rules
++++ b/debian/rules
+@@ -25,11 +25,11 @@ override_dh_auto_configure:
+ 		-DBUILDID:STRING="Debian-$(debver)"\
+ 		-DFORCE_PRE_RELEASE:STRING="Debian-$(debver)"\
+ 		-DCMAKE_INSTALL_RPATH:STRING="/usr/lib/condor" \
+-		-DHAVE_EXT_GSOAP:BOOL=ON \
++		-DHAVE_EXT_GSOAP:BOOL=OFF \
+ 		-DHAVE_EXT_CURL:BOOL=ON \
+ 		-DHAVE_EXT_OPENSSL:BOOL=ON \
+ 		-DHAVE_EXT_BOOST:BOOL=ON \
+-		-DHAVE_EXT_GLOBUS:BOOL=ON \
++		-DHAVE_EXT_GLOBUS:BOOL=OFF \
+ 		-DHAVE_EXT_KRB5:BOOL=ON \
+ 		-DHAVE_EXT_LIBVIRT:BOOL=ON \
+ 		-DHAVE_EXT_LIBXML2:BOOL=ON \
+@@ -94,7 +94,7 @@ override_dh_auto_install:
+ 	rm debian/tmp/usr/sbin/condor_install*
+ 	# remove compat symlinks
+ 	rm debian/tmp/usr/sbin/condor_vm_vmware.pl
+-	rm debian/tmp/usr/sbin/grid_monitor.sh
++	#rm debian/tmp/usr/sbin/grid_monitor.sh
+ 
+ 
+ override_dh_install:
