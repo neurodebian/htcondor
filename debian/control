@@ -54,6 +54,7 @@ Recommends: dmtcp
 Suggests: coop-computing-tools
 Conflicts: condor
 Replaces: condor
+Provides: condor
 Description: distributed workload management system
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -100,6 +101,7 @@ Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Conflicts: condor-dev
 Replaces: condor-dev
+Provides: condor-dev
 Description: distributed workload management system - development files
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -124,6 +126,7 @@ Architecture: all
 Depends: ${misc:Depends}
 Conflicts: condor-doc
 Replaces: condor-doc
+Provides: condor-doc
 Description: distributed workload management system - documentation
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -148,6 +151,7 @@ Architecture: any
 Depends: ${misc:Depends}, htcondor (= ${binary:Version})
 Conflicts: condor-dbg
 Replaces: condor-dbg
+Provides: condor-dbg
 Description: distributed workload management system - debugging symbols
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
