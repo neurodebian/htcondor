@@ -10,3 +10,4 @@ campus_factory_syntax.patch
 fix_condor_run
 alpha-fix-getpid.patch
 noformat_arg
+as-needed-libs-ftbfs.patch
