@@ -11,3 +11,4 @@ fix_condor_run
 alpha-fix-getpid.patch
 noformat_arg
 as-needed-libs-ftbfs.patch
+qsub_sentinel_robustness
