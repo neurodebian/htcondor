@@ -192,6 +192,7 @@ if( NOT WINDOWS)
 	check_function_exists("access" HAVE_ACCESS)
 	check_function_exists("clone" HAVE_CLONE)
 	check_function_exists("dirfd" HAVE_DIRFD)
+	check_function_exists("euidaccess" HAVE_EUIDACCESS)
 	check_function_exists("execl" HAVE_EXECL)
 	check_function_exists("fstat64" HAVE_FSTAT64)
 	check_function_exists("_fstati64" HAVE__FSTATI64)
@@ -639,11 +640,11 @@ if (WINDOWS)
   endif()
   
   # DRMAA currently punted on Windows until we can figure out correct build
-  #add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/drmaa/1.6.1)
+  #add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/drmaa/1.6.2)
   add_subdirectory(${CONDOR_SOURCE_DIR}/src/classad)
 else ()
 
-  add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/drmaa/1.6.1)
+  add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/drmaa/1.6.2)
   add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/qpid/0.8-RC3)
   add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/boost/1.49.0)
 
@@ -672,7 +673,7 @@ else ()
         endif(LINUX)
 
 	# the following logic if for standard universe *only*
-	if (LINUX AND NOT CLIPPED AND GLIBC_VERSION AND NOT PROPER)
+	if (LINUX AND NOT CLIPPED AND GLIBC_VERSION)
 
 		add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/zlib/1.2.3)
 		add_subdirectory(${CONDOR_EXTERNAL_DIR}/bundles/glibc)
@@ -949,7 +950,7 @@ else(MSVC)
 
 	if (LINUX)
 		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--warn-once -Wl,--warn-common")
-		if ( "${CONDOR_PLATFORM}" STREQUAL "x86_64_Ubuntu12")
+		if ( "${LINUX_NAME}" STREQUAL "Ubuntu" )
 			set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--no-as-needed")
 		endif()
 		# Link RedHat 5 binaries with both hash styles (GNU and SYSV)
@@ -978,7 +979,7 @@ else(MSVC)
 
 	check_cxx_compiler_flag(-shared HAVE_CC_SHARED)
 
-	if ( NOT PROPER AND ${SYS_ARCH} MATCHES "86")
+	if ( NOT CLIPPED AND ${SYS_ARCH} MATCHES "86")
 
 		if (NOT ${SYS_ARCH} MATCHES "64" )
 			add_definitions( -DI386=${SYS_ARCH} )

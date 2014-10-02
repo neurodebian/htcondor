@@ -1,9 +1,13 @@
-
-// Note - pyconfig.h must be included before condor_common to avoid
-// re-definition warnings.
-# include <pyconfig.h>
-
+// pyconfig.h is broken on Debian and #defines HAVE_IO_H, when Debian doesn't.
+// This causes the Globus headers to fail.  Instead, include the Globus headers
+// as early as possible and hack around the other brokenness where pyconfig.h
+// redefines _XOPEN_SOURCE and _POSIX_C_SOURCE.  (Since pyconfig's definition
+// won before this change, this has no semantic effect.)
 #include "condor_common.h"
+#include "globus_utils.h"
+#undef _XOPEN_SOURCE
+#undef _POSIX_C_SOURCE
+#include <pyconfig.h>
 
 #include "condor_attributes.h"
 #include "condor_universe.h"
@@ -16,7 +20,6 @@
 #include "classad_helpers.h"
 #include "condor_config.h"
 #include "condor_holdcodes.h"
-#include "globus_utils.h"
 #include "basename.h"
 
 #include <classad/operators.h>
@@ -24,6 +27,7 @@
 #include <boost/python.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/erase.hpp>
+#include <boost/version.hpp>
 
 #include "old_boost.h"
 #include "classad_wrapper.h"
@@ -1005,8 +1009,10 @@ void export_schedd()
         ;
     register_ptr_to_python< boost::shared_ptr<ConnectionSentry> >();
 
+#if BOOST_VERSION >= 103400
     boost::python::docstring_options doc_options;
     doc_options.disable_cpp_signatures();
+#endif
     class_<Schedd>("Schedd", "A client class for the HTCondor schedd")
         .def(init<const ClassAdWrapper &>(":param ad: An ad containing the location of the schedd"))
         .def("query", &Schedd::query, query_overloads("Query the HTCondor schedd for jobs.\n"
@@ -1024,13 +1030,21 @@ void export_schedd()
             ":param count: Number of jobs to submit to cluster.\n"
             ":param spool: Set to true to spool files separately.\n"
             ":param ad_results: If set to a list, the resulting ClassAds will be added to the list post-submit.\n"
+#if BOOST_VERSION < 103400
+            ":return: Newly created cluster ID.", (boost::python::arg("ad"), boost::python::arg("count")=1, boost::python::arg("spool")=false, boost::python::arg("ad_results")=boost::python::list())))
+#else
             ":return: Newly created cluster ID.", (boost::python::arg("self"), "ad", boost::python::arg("count")=1, boost::python::arg("spool")=false, boost::python::arg("ad_results")=boost::python::list())))
+#endif
         .def("spool", &Schedd::spool, "Spool a list of given ads to the remote HTCondor schedd.\n"
             ":param ads: A python list containing one or more ads to spool.\n")
         .def("transaction", &Schedd::transaction, transaction_overloads("Start a transaction with the schedd.\n"
             ":param flags: Transaction flags from the htcondor.TransactionFlags enum.\n"
             ":param continue_txn: Defaults to false; set to true to extend an ongoing transaction if present.  Otherwise, starting a new transaction while one is ongoing is an error.\n"
+#if BOOST_VERSION < 103400
+            ":return: Transaction context manager.\n", (boost::python::arg("flags")=0, boost::python::arg("continue_txn")=false))[boost::python::with_custodian_and_ward_postcall<1, 0>()])
+#else
             ":return: Transaction context manager.\n", (boost::python::arg("self"), boost::python::arg("flags")=0, boost::python::arg("continue_txn")=false))[boost::python::with_custodian_and_ward_postcall<1, 0>()])
+#endif
         .def("retrieve", &Schedd::retrieve, "Retrieve the output sandbox from one or more jobs.\n"
             ":param jobs: A expression string matching the list of job output sandboxes to retrieve.\n")
         .def("edit", &Schedd::edit, "Edit one or more jobs in the queue.\n"

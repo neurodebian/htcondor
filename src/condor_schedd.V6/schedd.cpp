@@ -525,9 +525,10 @@ match_rec::setStatus( int stat )
 }
 
 
-ContactStartdArgs::ContactStartdArgs( char const* the_claim_id, char* sinfulstr, bool is_dedicated ) 
+ContactStartdArgs::ContactStartdArgs( char const* the_claim_id, char const *extra_claims, char* sinfulstr, bool is_dedicated ) 
 {
 	csa_claim_id = strdup( the_claim_id );
+	csa_extra_claims = strdup( extra_claims );
 	csa_sinful = strdup( sinfulstr );
 	csa_is_dedicated = is_dedicated;
 }
@@ -536,6 +537,7 @@ ContactStartdArgs::ContactStartdArgs( char const* the_claim_id, char* sinfulstr,
 ContactStartdArgs::~ContactStartdArgs()
 {
 	free( csa_claim_id );
+	free( csa_extra_claims );
 	free( csa_sinful );
 }
 
@@ -1900,12 +1902,25 @@ QueryJobAdsContinuation::finish(Stream *stream) {
 			has_backlog = true;
 			break;
 		}
-		int proc, cluster;
-                tmp_ad->EvaluateAttrInt(ATTR_CLUSTER_ID, cluster);
-                tmp_ad->EvaluateAttrInt(ATTR_PROC_ID, proc);
-                //dprintf(D_FULLDEBUG, "Writing job %d.%d to wire\n", cluster,proc);
-                int retval = putClassAdNonblocking(sock, *tmp_ad, true, projection.isEmpty() ? NULL : &projection);
-                if (retval == 2) {
+		//if (IsFulldebug(D_FULLDEBUG)) {
+		//	int proc, cluster;
+		//	tmp_ad->EvaluateAttrInt(ATTR_CLUSTER_ID, cluster);
+		//	tmp_ad->EvaluateAttrInt(ATTR_PROC_ID, proc);
+		//	dprintf(D_FULLDEBUG, "Writing job %d.%d to wire\n", cluster,proc);
+		//}
+		StringList expanded_projection;
+		StringList * attr_whitelist = NULL;
+		if ( ! projection.isEmpty()) {
+			StringList externals; // don't need this, but must pass it.
+			const char * attr;
+			projection.rewind();
+			while ((attr = projection.next())) {
+				tmp_ad->GetExprReferences(attr, expanded_projection, externals);
+			}
+			attr_whitelist = &expanded_projection;
+		}
+		int retval = putClassAdNonblocking(sock, *tmp_ad, true, attr_whitelist);
+		if (retval == 2) {
 			//dprintf(D_FULLDEBUG, "Detecting backlog.\n");
                         has_backlog = true;
                 } else if (!retval) {
@@ -1958,12 +1973,23 @@ int Scheduler::command_query_job_ads(int, Stream* stream)
 	classad::Value value;
 	classad::ExprList *list = NULL;
 	if ((queryAd.find(ATTR_PROJECTION) != queryAd.end()) &&
-		(!queryAd.EvaluateAttr(ATTR_PROJECTION, value) || !value.IsListValue(list)))
+		!queryAd.EvaluateAttr(ATTR_PROJECTION, value))
 	{
 		return sendJobErrorAd(stream, 2, "Unable to evaluate projection list");
 	}
 	QueryJobAdsContinuation *continuation = new QueryJobAdsContinuation(requirements_ptr, 1000);
 	StringList &projection = continuation->projection;
+	if (!value.IsListValue(list)) {
+		list = NULL;
+		std::string slist;
+		// a string of comma and/or space separated attributes is the usual form for projection
+		if (value.IsStringValue(slist)) {
+			projection.initializeFromString(slist.c_str());
+		} else {
+			delete continuation;
+			return sendJobErrorAd(stream, 3, "Unable to convert projection list to string list");
+		}
+	}
 	if (list) for (classad::ExprList::const_iterator it = list->begin(); it != list->end(); it++) {
 		std::string attr;
 		if (!(*it)->Evaluate(value) || !value.IsStringValue(attr))
@@ -5357,7 +5383,7 @@ public:
 
 	virtual void scheduler_handleJobRejected(PROC_ID job_id,char const *reason);
 
-	virtual bool scheduler_handleMatch(PROC_ID job_id,char const *claim_id,ClassAd &match_ad, char const *slot_name);
+	virtual bool scheduler_handleMatch(PROC_ID job_id,char const *claim_id, char const *extra_claims, ClassAd &match_ad, char const *slot_name);
 
 	virtual void scheduler_handleNegotiationFinished( Sock *sock );
 
@@ -5422,7 +5448,7 @@ MainScheddNegotiate::skipAllSuchJobs(PROC_ID job_id)
 }
 
 bool
-MainScheddNegotiate::scheduler_handleMatch(PROC_ID job_id,char const *claim_id,ClassAd &match_ad, char const *slot_name)
+MainScheddNegotiate::scheduler_handleMatch(PROC_ID job_id,char const *claim_id, char const *extra_claims, ClassAd &match_ad, char const *slot_name)
 {
 	ASSERT( claim_id );
 	ASSERT( slot_name );
@@ -5502,7 +5528,7 @@ MainScheddNegotiate::scheduler_handleMatch(PROC_ID job_id,char const *claim_id,C
 		return false;
 	}
 
-	ContactStartdArgs *args = new ContactStartdArgs( claim_id, startd.addr(), false );
+	ContactStartdArgs *args = new ContactStartdArgs( claim_id, extra_claims, startd.addr(), false );
 
 	if( !scheduler.enqueueStartdContact(args) ) {
 		delete args;
@@ -6138,7 +6164,7 @@ Scheduler::contactStartd( ContactStartdArgs* args )
 	mrec->claim_requester = cb;
 	mrec->setStatus( M_STARTD_CONTACT_LIMBO );
 
-	classy_counted_ptr<DCStartd> startd = new DCStartd(mrec->description(),NULL,mrec->peer,mrec->claimId());
+	classy_counted_ptr<DCStartd> startd = new DCStartd(mrec->description(),NULL,mrec->peer,mrec->claimId(), args->extraClaims());
 
 	this->num_pending_startd_contacts++;
 
@@ -6260,7 +6286,7 @@ Scheduler::claimedStartd( DCMsgCallback *cb ) {
 
 			// Tell the schedd about the leftover resources it can go claim.
 			// Note this claiming will happen asynchronously.
-		sn->scheduler_handleMatch(jobid,msg->leftover_claim_id(),
+		sn->scheduler_handleMatch(jobid,msg->leftover_claim_id(), "",
 			*(msg->leftover_startd_ad()),slot_name);
 
 		delete sn;
@@ -14203,7 +14229,7 @@ Scheduler::claimLocalStartd()
 				the startdContactSockHandler)
 			*/
 			ContactStartdArgs *args = 
-						new ContactStartdArgs(claim_id, startd_addr, false);
+						new ContactStartdArgs(claim_id, "", startd_addr, false);
 			enqueueStartdContact(args);
 			dprintf(D_ALWAYS, "Claiming local startd slot %d at %s\n",
 					slot_id, startd_addr);
@@ -14914,7 +14940,7 @@ Scheduler::receive_startd_update(int /*cmd*/, Stream *stream) {
 		jobid.cluster = jobid.proc = -1;
 
 		sn = new MainScheddNegotiate(0, NULL, NULL, NULL);
-		sn->scheduler_handleMatch(jobid,claim_id, *machineAd, name);
+		sn->scheduler_handleMatch(jobid,claim_id, "", *machineAd, name);
 		delete sn;
 
 		m_unclaimedLocalStartds[name] = machineAd;
