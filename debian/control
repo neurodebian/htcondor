@@ -52,9 +52,8 @@ Depends: ${misc:Depends}, ${shlibs:Depends}, ${python:Depends}, python,
  ${perl:Depends}, debconf (>= 0.5) | debconf-2.0, adduser, libdate-manip-perl
 Recommends: dmtcp
 Suggests: coop-computing-tools
-Conflicts: condor
-Replaces: condor
-Provides: condor
+Replaces: condor (<< 8.0.5~)
+Breaks: condor (<< 8.0.5~)
 Description: distributed workload management system
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -72,7 +71,6 @@ Description: distributed workload management system
  This package can set up an appropriate initial configuration at install
  time for a machine intended either as a member of an existing HTCondor pool
  or as a "Personal" (single machine) HTCondor pool.
-
 
 #Package: condor-tests
 #Architecture: any
@@ -99,9 +97,8 @@ Package: htcondor-dev
 Section: devel
 Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}
-Conflicts: condor-dev
-Replaces: condor-dev
-Provides: condor-dev
+Replaces: condor-dev (<< 8.0.5~)
+Breaks: condor-dev (<< 8.0.5~)
 Description: distributed workload management system - development files
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -124,9 +121,8 @@ Package: htcondor-doc
 Section: doc
 Architecture: all
 Depends: ${misc:Depends}
-Conflicts: condor-doc
-Replaces: condor-doc
-Provides: condor-doc
+Replaces: condor-doc (<< 8.0.5~)
+Breaks: condor-doc (<< 8.0.5~)
 Description: distributed workload management system - documentation
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -149,9 +145,8 @@ Package: htcondor-dbg
 Section: debug
 Architecture: any
 Depends: ${misc:Depends}, htcondor (= ${binary:Version})
-Conflicts: condor-dbg
-Replaces: condor-dbg
-Provides: condor-dbg
+Replaces: condor-dbg (<< 8.0.5~)
+Breaks: condor-dbg (<< 8.0.5~)
 Description: distributed workload management system - debugging symbols
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -198,3 +193,42 @@ Description: HTCondor classads expression language - runtime library
  .
  This package provides the runtime library.
 
+Package: condor
+Depends: htcondor, ${misc:Depends}
+Architecture: all
+Priority: extra
+Section: oldlibs
+Description: transitional dummy package
+ This package aids upgrades of existing Condor installations to the new project
+ and package name "HTCondor". The package is empty and it can safely be
+ removed.
+
+Package: condor-doc
+Depends: htcondor-doc, ${misc:Depends}
+Architecture: all
+Priority: extra
+Section: oldlibs
+Description: transitional dummy package
+ This package aids upgrades of existing Condor installations to the new project
+ and package name "HTCondor". The package is empty and it can safely be
+ removed.
+
+Package: condor-dev
+Depends: htcondor-dev, ${misc:Depends}
+Architecture: all
+Priority: extra
+Section: oldlibs
+Description: transitional dummy package
+ This package aids upgrades of existing Condor installations to the new project
+ and package name "HTCondor". The package is empty and it can safely be
+ removed.
+
+Package: condor-dbg
+Depends: htcondor-dbg, ${misc:Depends}
+Architecture: all
+Priority: extra
+Section: oldlibs
+Description: transitional dummy package
+ This package aids upgrades of existing Condor installations to the new project
+ and package name "HTCondor". The package is empty and it can safely be
+ removed.

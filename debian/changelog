@@ -1,3 +1,11 @@
+condor (8.2.3~dfsg.1-2) unstable; urgency=medium
+
+  * Add transitional dummy packages to enable seamless upgrades from the
+    "condor*" packages in wheezy. Apparently, the provides/replaces/conflicts
+    triplet doesn't work with apt or aptitude in jessie.
+
+ -- Michael Hanke <mih@debian.org>  Tue, 07 Oct 2014 13:33:55 +0200
+
 condor (8.2.3~dfsg.1-1) unstable; urgency=medium
 
   * Add patch to prevent FTBFS when built with --as-needed (Closes: #758923).
