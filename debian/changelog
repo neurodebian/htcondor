@@ -1,3 +1,12 @@
+condor (8.2.3~dfsg.1-4) UNRELEASED; urgency=medium
+
+  * Adjust mechanism to apply the default Debian configuration to cope with
+    the removal of the monolithic configuration file in the 8.2.x series.
+    The default configuration is now applied as a patch to the table of
+    parameters in the HTCondor sources (Closes: #769100).
+
+ -- Michael Hanke <mih@debian.org>  Sat, 29 Nov 2014 09:57:27 +0100
+
 condor (8.2.3~dfsg.1-3) unstable; urgency=medium
 
   * Modify the DMTCP shim script to work with the 2.x series of DMTCP.

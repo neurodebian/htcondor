@@ -107,21 +107,12 @@ override_dh_install:
 	# kill the default local config -- debconf will handle that
 	rm debian/htcondor/etc/condor/condor_config.local
 	# modify condor config file with default Debian config
-	sed -i \
-		-e 's,^[#]*\(REQUIRE_LOCAL_CONFIG_FILE\s*=\).*,\1 FALSE,'  \
-		-e 's,^\(CONDOR_ADMIN\s*=\).*,\1 root@localhost,' \
-		-e 's,^\(MAIL\s*=\).*,\1 /usr/bin/mail,' \
-		-e 's,^\(COLLECTOR_NAME\s*=\).*,\1 Debian Condor Pool - $$(CONDOR_HOST),' \
-		-e 's,^\(SPOOL\s*=\).*,\1 \$$(LOCAL_DIR)/spool/condor,' \
-		-e '/^EXECUTE\s*=/a\LOCAL_UNIV_EXECUTE\t\t= \$$(LOCAL_DIR)/spool/condor/local_univ_execute' \
-		-e 's/^\(DAEMON_LIST\s*=\).*/\1 MASTER, STARTD, SCHEDD, COLLECTOR, NEGOTIATOR/' \
-		-e 's,^[#]*\(CONDOR_DEVELOPERS\s*=\).*,\1 NONE,'  \
-		-e 's,^[#]*\(CONDOR_DEVELOPERS_COLLECTOR\s*=\).*,\1 NONE,'  \
-		-e 's,^\(CRED_STORE_DIR\s*=\).*,\1 \$$(LOCAL_DIR)/lib/condor/cred_dir,' \
-		-e 's,^[#]*\(SSH_TO_JOB_SSHD_CONFIG_TEMPLATE\s*=\).*,\1 /etc/condor/condor_ssh_to_job_sshd_config_template,'  \
-		-e 's,^\(JAVA_BENCHMARK_TIME\s*=\).*,\1 0,' \
-		debian/htcondor/etc/condor/condor_config
-
+	# no default chatter to upstream
+	echo "CONDOR_DEVELOPERS = NONE" >> debian/htcondor/etc/condor/condor_config
+	echo "CONDOR_DEVELOPERS_COLLECTOR = NONE" >> debian/htcondor/etc/condor/condor_config
+	# SSH template is a config file
+	echo "SSH_TO_JOB_SSHD_CONFIG_TEMPLATE = /etc/condor/condor_ssh_to_job_sshd_config_template" \
+		>> debian/htcondor/etc/condor/condor_config
 
 override_dh_auto_clean:
 	dh_auto_clean

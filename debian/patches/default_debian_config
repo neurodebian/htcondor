@@ -1,0 +1,76 @@
+Description: Specify default config in the table of parameters
+  Previously, this configuration was shipped as a big config file.
+  This changed in the 8.2.x series and now needs to go into the table of
+  parameters -- which is not (yet) comprehensive. Hence, a few variables
+  still need to be present in the default config file too.
+Forwarded: not-needed
+Bug-Debian: http://bugs.debian.org/769100
+Author: Michael Hanke <mih@debian.org>
+
+diff --git a/src/condor_utils/param_info.in b/src/condor_utils/param_info.in
+index 8a751ee..84c2476 100644
+--- a/src/condor_utils/param_info.in
++++ b/src/condor_utils/param_info.in
+@@ -1175,7 +1175,7 @@ review=?
+ tags=accountant,Accountant
+ 
+ [SPOOL]
+-default=$(LOCAL_DIR)/spool
++default=$(LOCAL_DIR)/spool/condor
+ type=path
+ reconfig=true
+ customization=seldom
+@@ -2169,7 +2169,7 @@ review=?
+ tags=daemon_core,daemon_core_main
+ 
+ [COLLECTOR_NAME]
+-default=My Pool - $(CONDOR_HOST)
++default=Debian Condor Pool - $(CONDOR_HOST)
+ type=string
+ reconfig=true
+ customization=seldom
+@@ -2773,7 +2773,7 @@ review=?
+ 
+ [MAIL]
+ # default location for mail on RHEL is /bin/mail, default on debian is /usr/bin/mail
+-default=/bin/mail
++default=/usr/bin/mail
+ win32_default=$(BIN)\condor_mail.exe
+ type=path
+ reconfig=true
+@@ -3572,7 +3572,7 @@ review=?
+ tags=c++_util,condor_config
+ 
+ [REQUIRE_LOCAL_CONFIG_FILE]
+-default=true
++default=false
+ win32_default=false
+ type=bool
+ reconfig=true
+@@ -4102,7 +4102,7 @@ review=?
+ tags=starter,StarterHookMgr
+ 
+ [JAVA_BENCHMARK_TIME]
+-default=2
++default=0
+ type=int
+ reconfig=true
+ customization=seldom
+@@ -6834,7 +6834,7 @@ tags=startd
+ review=?
+ 
+ [CONDOR_ADMIN]
+-default=root@$(FULL_HOSTNAME)
++default=root@localhost
+ customization=normal
+ friendly_name=HTCondor sends email to this address on pool failure
+ review=?
+@@ -7176,7 +7176,7 @@ default=9620
+ review=?
+ 
+ [CRED_STORE_DIR]
+-default=$(LOCAL_DIR)/cred_dir
++default=$(LOCAL_DIR)/lib/condor/cred_dir
+ type=path
+ review=?
+ [CREDD_ARGS]
