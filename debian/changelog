@@ -6,6 +6,9 @@ condor (8.2.3~dfsg.1-4) UNRELEASED; urgency=medium
     parameters in the HTCondor sources (Closes: #769100).
   * Adjust default configuration to make HTCondor work with Debian's
     ganglia (also see Ticket #4709). Thanks to Alex Waite for the fix.
+  * Add Debconf template translation:
+    - Dutch -- courtesy of Frans Spiesschaert <Frans.Spiesschaert@yucom.be>.
+      (Closes: #766067)
 
  -- Michael Hanke <mih@debian.org>  Sat, 29 Nov 2014 09:57:27 +0100
 
