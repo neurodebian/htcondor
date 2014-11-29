@@ -1,9 +1,11 @@
-condor (8.2.3~dfsg.1-4) UNRELEASED; urgency=medium
+condor (8.2.3~dfsg.1-4) unstable; urgency=medium
 
   * Adjust mechanism to apply the default Debian configuration to cope with
     the removal of the monolithic configuration file in the 8.2.x series.
     The default configuration is now applied as a patch to the table of
     parameters in the HTCondor sources (Closes: #769100).
+    The report of leaving behind an unowned directory is merely a symptom of
+    this bug.
   * Adjust default configuration to make HTCondor work with Debian's
     ganglia (also see Ticket #4709). Thanks to Alex Waite for the fix.
   * Add Debconf template translation:
