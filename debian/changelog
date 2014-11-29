@@ -98,7 +98,7 @@ condor (8.0.5~dfsg.1-1) unstable; urgency=low
     script.
   * Bumped Standards-version to 3.9.4; no changes necessary.
   * Add new dependency on libboost-test-dev.
-  * Disable installation of obsolete Pearl modules.
+  * Disable installation of obsolete Perl modules.
   * Fix DEP5 syntax error in debian/copyright.
 
  -- Michael Hanke <mih@debian.org>  Tue, 31 Dec 2013 10:22:08 +0100
