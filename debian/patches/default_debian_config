@@ -7,11 +7,9 @@ Forwarded: not-needed
 Bug-Debian: http://bugs.debian.org/769100
 Author: Michael Hanke <mih@debian.org>
 
-diff --git a/src/condor_utils/param_info.in b/src/condor_utils/param_info.in
-index 8a751ee..84c2476 100644
 --- a/src/condor_utils/param_info.in
 +++ b/src/condor_utils/param_info.in
-@@ -1175,7 +1175,7 @@ review=?
+@@ -1175,7 +1175,7 @@
  tags=accountant,Accountant
  
  [SPOOL]
@@ -20,7 +18,7 @@ index 8a751ee..84c2476 100644
  type=path
  reconfig=true
  customization=seldom
-@@ -2169,7 +2169,7 @@ review=?
+@@ -2169,7 +2169,7 @@
  tags=daemon_core,daemon_core_main
  
  [COLLECTOR_NAME]
@@ -29,7 +27,7 @@ index 8a751ee..84c2476 100644
  type=string
  reconfig=true
  customization=seldom
-@@ -2773,7 +2773,7 @@ review=?
+@@ -2773,7 +2773,7 @@
  
  [MAIL]
  # default location for mail on RHEL is /bin/mail, default on debian is /usr/bin/mail
@@ -38,7 +36,7 @@ index 8a751ee..84c2476 100644
  win32_default=$(BIN)\condor_mail.exe
  type=path
  reconfig=true
-@@ -3572,7 +3572,7 @@ review=?
+@@ -3572,7 +3572,7 @@
  tags=c++_util,condor_config
  
  [REQUIRE_LOCAL_CONFIG_FILE]
@@ -47,7 +45,7 @@ index 8a751ee..84c2476 100644
  win32_default=false
  type=bool
  reconfig=true
-@@ -4102,7 +4102,7 @@ review=?
+@@ -4102,7 +4102,7 @@
  tags=starter,StarterHookMgr
  
  [JAVA_BENCHMARK_TIME]
@@ -56,7 +54,25 @@ index 8a751ee..84c2476 100644
  type=int
  reconfig=true
  customization=seldom
-@@ -6834,7 +6834,7 @@ tags=startd
+@@ -6607,7 +6607,7 @@
+ tags=c++_util,condor_config
+ 
+ [GANGLIA_LIB64_PATH]
+-default=/lib64,/usr/lib64,/usr/local/lib64
++default=/lib,/usr/lib,/usr/local/lib
+ type=string
+ reconfig=true
+ customization=seldom
+@@ -6634,7 +6634,7 @@
+ tags=c++_util,condor_config
+ 
+ [GANGLIAD_METRICS_CONFIG_DIR]
+-default=$(RELEASE_DIR)/etc/condor/ganglia.d
++default=/etc/condor/ganglia.d
+ type=path
+ reconfig=true
+ customization=seldom
+@@ -6834,7 +6834,7 @@
  review=?
  
  [CONDOR_ADMIN]
@@ -65,7 +81,7 @@ index 8a751ee..84c2476 100644
  customization=normal
  friendly_name=HTCondor sends email to this address on pool failure
  review=?
-@@ -7176,7 +7176,7 @@ default=9620
+@@ -7176,7 +7176,7 @@
  review=?
  
  [CRED_STORE_DIR]
