@@ -106,13 +106,6 @@ override_dh_install:
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
 	# kill the default local config -- debconf will handle that
 	rm debian/htcondor/etc/condor/condor_config.local
-	# modify condor config file with default Debian config
-	# no default chatter to upstream
-	echo "CONDOR_DEVELOPERS = NONE" >> debian/htcondor/etc/condor/condor_config
-	echo "CONDOR_DEVELOPERS_COLLECTOR = NONE" >> debian/htcondor/etc/condor/condor_config
-	# SSH template is a config file
-	echo "SSH_TO_JOB_SSHD_CONFIG_TEMPLATE = /etc/condor/condor_ssh_to_job_sshd_config_template" \
-		>> debian/htcondor/etc/condor/condor_config
 
 override_dh_auto_clean:
 	dh_auto_clean
