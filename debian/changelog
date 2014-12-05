@@ -1,3 +1,14 @@
+condor (8.2.3~dfsg.1-5) unstable; urgency=medium
+
+  * Fix wrong default SPOOL location introduced with 8.2.3~dfsg.1-4. Whenever
+    not overwritten by an explicit SPOOL setting, this version relocated
+    SPOOL to /var/lib/condor/lib. Consequently, existing job and usage logs
+    where inaccessible by HTcondor. This update reverts this unintentional
+    change and sets SPOOL explicitly to /var/spool/condor again.
+    (Closes: #772170)
+
+ -- Michael Hanke <mih@debian.org>  Fri, 05 Dec 2014 20:32:17 +0100
+
 condor (8.2.3~dfsg.1-4) unstable; urgency=medium
 
   * Adjust mechanism to apply the default Debian configuration to cope with
