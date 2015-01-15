@@ -1,3 +1,12 @@
+condor (8.2.3~dfsg.1-6) unstable; urgency=medium
+
+  [Alex Waite]
+  * Upstream security fix: Authenticated users could execute arbitrary code as
+    the condor user due to a bug in the way the condor daemon sent email
+    notifications (CVE-2014-8126). (Closes: #775276)
+
+ -- Alex Waite <Alexqw85@gmail.com>  Thu, 15 Jan 2015 10:55:13 +0100
+
 condor (8.2.3~dfsg.1-5) unstable; urgency=medium
 
   * Fix wrong default SPOOL location introduced with 8.2.3~dfsg.1-4. Whenever
