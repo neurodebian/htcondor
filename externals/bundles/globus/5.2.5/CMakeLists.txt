@@ -46,7 +46,7 @@ if (WITH_GLOBUS)
 			set( GLOBUS_FLAVOR gcc32dbg )
 		endif()
 
-		condor_pre_external( GLOBUS globus-5.2.5 "lib;include" "done")
+		condor_pre_external( GLOBUS globus-5.2.5-p1 "lib;include" "done")
 
 		# GNU libtool isn't included in Mac OS 10.8, but Globus
 		# needs libltdl. Build it and install it in the Globus
@@ -61,13 +61,14 @@ if (WITH_GLOBUS)
 					DOWNLOAD_DIR ${LIBTOOL_STAGE}/dl
 					URL ${EXTERNALS_SOURCE_URL}/libtool-2.4.2.tar.gz
 					#--Configure step ----------
-					CONFIGURE_COMMAND ./configure --prefix=${GLOBUS_INSTALL_LOC}
+					CONFIGURE_COMMAND ./configure --prefix=${LIBTOOL_INSTALL_LOC}
 					#--Build Step ----------
 					BUILD_COMMAND make
 					BUILD_IN_SOURCE 1
 					#--install Step ----------
-					INSTALL_DIR ${GLOBUS_INSTALL_LOC}
-					INSTALL_COMMAND make install )
+					INSTALL_DIR ${LIBTOOL_INSTALL_LOC}
+					INSTALL_COMMAND make install &&
+						touch ${LIBTOOL_INSTALL_LOC}/done)
 
 			condor_post_external( libtool OFF OFF )
 			set( GLOBUS_DEPENDS ${LIBTOOL_REF} )
@@ -79,6 +80,7 @@ if (WITH_GLOBUS)
 
 
 		set (GLOBUS_PATCH patch -N -i ${CMAKE_CURRENT_SOURCE_DIR}/xio-plugins.patch -p1 &&
+						patch -N -i ${CMAKE_CURRENT_SOURCE_DIR}/gram_tls.patch -p1 &&
 						patch -N -i ${CMAKE_CURRENT_SOURCE_DIR}/mac_openssl.patch -p1 &&
 						cd source-trees/xio/src/builtins &&
 						mkdir -p gsi popen &&
@@ -100,7 +102,13 @@ if (WITH_GLOBUS)
 		if(DARWIN)
 			set ( GLOBUS_PATCH ${GLOBUS_PATCH} &&
 				cd ../../../../ &&
-				patch -N -i ${CMAKE_CURRENT_SOURCE_DIR}/xio-plugins-2.patch -p1 )
+				patch -N -i ${CMAKE_CURRENT_SOURCE_DIR}/xio-plugins-2.patch -p1 &&
+				ln -s ${LIBTOOL_INSTALL_LOC}/include/ltdl.h ${GLOBUS_INSTALL_LOC}/include &&
+				ln -s ${LIBTOOL_INSTALL_LOC}/include/libltdl ${GLOBUS_INSTALL_LOC}/include &&
+				cp -a ${LIBTOOL_INSTALL_LOC}/lib/libltdl.7.dylib ${GLOBUS_INSTALL_LOC}/lib &&
+				cp -a ${LIBTOOL_INSTALL_LOC}/lib/libltdl.a ${GLOBUS_INSTALL_LOC}/lib &&
+				cp -a ${LIBTOOL_INSTALL_LOC}/lib/libltdl.dylib ${GLOBUS_INSTALL_LOC}/lib &&
+				cp -a ${LIBTOOL_INSTALL_LOC}/lib/libltdl.la ${GLOBUS_INSTALL_LOC}/lib )
 		endif()
 
 		# honestly the build of globus is one of the strangest things I have ever seen and it makes no sense to me.

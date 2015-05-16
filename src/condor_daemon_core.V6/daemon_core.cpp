@@ -2645,7 +2645,7 @@ DaemonCore::thread_switch_callback(void* & incoming_contextVP)
 	if ( !context.is_null() ) {
 		outgoing_context = (DCThreadState *) context->user_pointer_;
 		if (!outgoing_context) {
-				EXCEPT("ERROR: daemonCore - no thread context for tid %d\n",
+				EXCEPT("ERROR: daemonCore - no thread context for tid %d",
 						last_tid);
 		}
 	}
@@ -5706,7 +5706,8 @@ void CreateProcessForkit::exec() {
 
 		// make sure we're not going to try to share the lock file
 		// with our parent (if it's been defined).
-	dprintf_init_fork_child();
+	bool cloned = daemonCore->UseCloneToCreateProcesses();
+	dprintf_init_fork_child( cloned );
 
 		// close the read end of our error pipe and set the
 		// close-on-exec flag on the write end
@@ -6225,7 +6226,7 @@ void CreateProcessForkit::exec() {
 		// once again, make sure that if the dprintf code opened a
 		// lock file and has an fd, that we close it before we
 		// exec() so we don't leak it.
-	dprintf_wrapup_fork_child();
+	dprintf_wrapup_fork_child( cloned );
 
 	bool found;
 	for ( int j=3 ; j < openfds ; j++ ) {
@@ -6446,6 +6447,18 @@ int DaemonCore::Create_Process(
 		goto wrapup;
 	}
 
+	// if this is the first time Create_Process is being called with a
+	// non-NULL family_info argument, create the ProcFamilyInterface object
+	// that we'll use to interact with the procd for controlling process
+	// families.
+	// Note we must do this BEFORE we go further and start setting up sockets
+	// to inherit, else we risk the condor_procd inheriting sockets that we
+	// never intended (and thus keeping these sockets open forever).
+	if ((family_info != NULL) && (m_proc_family == NULL)) {
+		m_proc_family = ProcFamilyInterface::create(get_mySubSystem()->getName());
+		ASSERT(m_proc_family);
+	}
+
 	inheritbuf.formatstr("%lu ",(unsigned long)mypid);
 
 		// true = Give me a real local address, circumventing
@@ -6652,16 +6665,6 @@ int DaemonCore::Create_Process(
 	/* this stuff ends up in the child's environment to help processes
 		identify children/grandchildren/great-grandchildren/etc. */
 	create_id(&time_of_fork, &mii);
-
-	// if this is the first time Create_Process is being called with a
-	// non-NULL family_info argument, create the ProcFamilyInterface object
-	// that we'll use to interact with the procd for controlling process
-	// families
-	//
-	if ((family_info != NULL) && (m_proc_family == NULL)) {
-		m_proc_family = ProcFamilyInterface::create(get_mySubSystem()->getName());
-		ASSERT(m_proc_family);
-	}
 
 		// Before we get into the platform-specific stuff, see if any
 		// of the std fds are requesting a DC-managed pipe.  If so, we
@@ -7407,7 +7410,7 @@ int DaemonCore::Create_Process(
 		//
 		if (sigmask != NULL) {
 			if (sigprocmask(SIG_SETMASK, &saved_mask, NULL) == -1) {
-				EXCEPT("Create_Process: sigprocmask error: %s (%d)\n",
+				EXCEPT("Create_Process: sigprocmask error: %s (%d)",
 				       strerror(errno),
 				       errno);
 			}
@@ -7514,8 +7517,12 @@ int DaemonCore::Create_Process(
 					// still be holding the port open in this lower
 					// stack frame...
 				for(SockPairVec::iterator it = socks.begin(); it != socks.end(); it++) {
-					it->rsock()->close();
-					it->ssock()->close();
+					if ( it->has_relisock()) {
+						it->rsock()->close();
+					}
+					if ( it->has_safesock()) {
+						it->ssock()->close();
+					}
 				}
 				dprintf( D_ALWAYS, "Re-trying Create_Process() to avoid "
 						 "PID re-use\n" );
@@ -10576,7 +10583,7 @@ void DaemonCore::send_invalidate_session ( const char* sinful, const char* sessi
 	msg->setSuccessDebugLevel(D_SECURITY);
 	msg->setRawProtocol(true);
 
-	if( m_invalidate_sessions_via_tcp ) {
+	if( !daemon->hasUDPCommandPort() || m_invalidate_sessions_via_tcp ) {
 		msg->setStreamType(Stream::reli_sock);
 	}
 	else {

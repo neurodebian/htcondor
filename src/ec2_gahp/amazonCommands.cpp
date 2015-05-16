@@ -41,6 +41,7 @@
 #include <curl/curl.h>
 #include "thread_control.h"
 #include <expat.h>
+#include "stl_string_utils.h"
 
 #define NULLSTRING "NULL"
 
@@ -243,7 +244,7 @@ bool AmazonRequest::SendRequest() {
             dprintf( D_ALWAYS, "Unable to read accesskey file '%s', failing.\n", this->accessKeyFile.c_str() );
             return false;
         }
-        if( keyID[ keyID.length() - 1 ] == '\n' ) { keyID.erase( keyID.length() - 1 ); }
+        trim( keyID );
         query_parameters.insert( std::make_pair( "AWSAccessKeyId", keyID ) );
     }
 
@@ -326,7 +327,7 @@ bool AmazonRequest::SendRequest() {
             dprintf( D_ALWAYS, "Unable to read secretkey file '%s', failing.\n", this->secretKeyFile.c_str() );
             return false;
         }
-        if( saKey[ saKey.length() - 1 ] == '\n' ) { saKey.erase( saKey.length() - 1 ); }
+        trim( saKey );
     }
 
     unsigned int mdLength = 0;

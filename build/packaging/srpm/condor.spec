@@ -336,7 +336,7 @@ BuildRequires: systemd-units
 BuildRequires: transfig
 BuildRequires: latex2html
 
-Requires: mailx
+Requires: /usr/sbin/sendmail
 Requires: condor-classads = %{version}-%{release}
 Requires: condor-procd = %{version}-%{release}
 
@@ -630,6 +630,46 @@ Includes the external packages built when UW_BUILD is enabled
 
 %endif
 
+%package all
+Summary: All condor packages in a typical installation
+Group: Applications/System
+Requires: %name = %version-%release
+Requires: %name-procd = %version-%release
+%if %qmf
+Requires: %name-qmf = %version-%release
+%endif
+%if %aviary
+Requires: %name-aviary-common = %version-%release
+Requires: %name-aviary = %version-%release
+Requires: %name-aviary-hadoop-common = %version-%release
+Requires: %name-aviary-hadoop = %version-%release
+%endif
+%if %plumage
+Requires: %name-plumage = %version-%release
+%endif
+Requires: %name-kbdd = %version-%release
+Requires: %name-vm-gahp = %version-%release
+%if %deltacloud
+Requires: %name-deltacloud-gahp = %version-%release
+%endif
+Requires: %name-classads = %version-%release
+#Requires: %name-classads-devel = %version-%release
+%if %cream
+Requires: %name-cream-gahp = %version-%release
+%endif
+Requires: %name-python = %version-%release
+Requires: %name-bosco = %version-%release
+%if %std_univ
+Requires: %name-std-universe = %version-%release
+%endif
+%if %uw_build
+Requires: %name-static-shadow = %version-%release
+Requires: %name-externals = %version-%release
+%endif
+
+%description all
+Include dependencies for all condor packages in a typical installation
+
 %pre
 getent group condor >/dev/null || groupadd -r condor
 getent passwd condor >/dev/null || \
@@ -868,20 +908,10 @@ mkdir -p -m1777 %{buildroot}/%{_var}/lock/condor/local
 mkdir -p -m0755 %{buildroot}/%{_var}/lib/condor/spool
 mkdir -p -m1777 %{buildroot}/%{_var}/lib/condor/execute
 
-cat >> %{buildroot}/%_sysconfdir/condor/condor_config.local << EOF
-CONDOR_DEVELOPERS = NONE
+cat >> %{buildroot}/%_sysconfdir/condor/condor_config << EOF
 CONDOR_HOST = \$(FULL_HOSTNAME)
-COLLECTOR_NAME = Personal Condor
-START = TRUE
-SUSPEND = FALSE
-PREEMPT = FALSE
-KILL = FALSE
 DAEMON_LIST = COLLECTOR, MASTER, NEGOTIATOR, SCHEDD, STARTD
-NEGOTIATOR_INTERVAL = 20
 EOF
-
-# this gets around a bug whose fix is not yet merged
-echo "TRUST_UID_DOMAIN = TRUE" >> %{buildroot}/%_sysconfdir/condor/condor_config.local
 
 # no master shutdown program for now
 rm -f %{buildroot}/%{_sbindir}/condor_set_shutdown
@@ -1262,7 +1292,7 @@ rm -rf %{buildroot}
 %_bindir/condor_tail
 %_bindir/condor_qsub
 %_bindir/condor_pool_job_report
-%_bindir/condor_job_router_tool
+%_bindir/condor_job_router_info
 # reconfig_schedd, restart
 # sbin/condor is a link for master_off, off, on, reconfig,
 %_sbindir/condor_advertise
@@ -1304,7 +1334,6 @@ rm -rf %{buildroot}
 %endif
 %_libexecdir/condor/condor_gpu_discovery
 %_sbindir/condor_vm_vmware
-%config(noreplace) %_sysconfdir/condor/condor_config.local
 %config(noreplace) %_sysconfdir/condor/ganglia.d/00_default_metrics
 %defattr(-,condor,condor,-)
 %dir %_var/lib/condor/
@@ -1718,6 +1747,46 @@ fi
 %post -n condor
 /sbin/chkconfig --add condor
 /sbin/ldconfig
+
+%posttrans -n condor
+# If there is a saved condor_config.local, recover it
+if [ -f /etc/condor/condor_config.local.rpmsave ]; then
+    if [ ! -f /etc/condor/condor_config.local ]; then
+        mv /etc/condor/condor_config.local.rpmsave \
+           /etc/condor/condor_config.local
+
+        # Drop a README file to tell what we have done
+        # Make sure that we don't overwrite a previous README
+        if [ ! -f /etc/condor/README.condor_config.local ]; then
+            file="/etc/condor/README.condor_config.local"
+        else
+            i="1"
+            while [ -f /etc/condor/README.condor_config.local.$i ]; do
+                i=$((i+1))
+            done
+            file="/etc/condor/README.condor_config.local.$i"
+        fi
+
+cat <<EOF > $file
+On `date`, while installing or upgrading to
+HTCondor %version, the /etc/condor directory contained a file named
+"condor_config.local.rpmsave" but did not contain one named
+"condor_config.local".  This situation may be the result of prior
+modifications to "condor_config.local" that were preserved after the
+HTCondor RPM stopped including that file.  In any case, the contents
+of the old "condor_config.local.rpmsave" file may still be useful.
+So after the install it was moved back into place and this README
+file was created.  Here is a directory listing for the restored file
+at that time:
+
+`ls -l /etc/condor/condor_config.local`
+
+See the "Configuration" section (3.3) of the HTCondor manual for more
+information on configuration files.
+EOF
+
+    fi
+fi
 
 %preun -n condor
 if [ $1 = 0 ]; then

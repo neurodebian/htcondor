@@ -94,7 +94,6 @@
 #include "ClassAdLogPlugin.h"
 #endif
 #include <algorithm>
-#include <sstream>
 
 #if defined(WINDOWS) && !defined(MAXINT)
 	#define MAXINT INT_MAX
@@ -1730,7 +1729,7 @@ int Scheduler::command_history(int, Stream* stream)
 		return FALSE;
 	}
 
-	if ((param_integer("HISTORY_HELPER_MAX_HISTORY", 10000) == 0) || param_integer("HISTORY_HELPER_MAX_CONCURRENCY") == 0) {
+	if ((param_integer("HISTORY_HELPER_MAX_HISTORY", 10000) == 0) || param_integer("HISTORY_HELPER_MAX_CONCURRENCY", 2) == 0) {
 		return sendHistoryErrorAd(stream, 10, "Remote history has been disabled on this schedd");
 	}
 
@@ -1801,8 +1800,11 @@ int Scheduler::history_helper_reaper(int, int) {
 int Scheduler::history_helper_launcher(const HistoryHelperState &state) {
 
 	std::string history_helper;
-	param(history_helper, "HISTORY_HELPER", "$(LIBEXEC)/condor_history_helper");
-        history_helper = macro_expand(history_helper.c_str());
+	if ( !param(history_helper, "HISTORY_HELPER") ) {
+		char *tmp = macro_expand("$(LIBEXEC)/condor_history_helper");
+		history_helper = tmp;
+		free(tmp);
+	}
 	ArgList args;
 	args.AppendArg("condor_history_helper");
 	args.AppendArg("-f");
@@ -1979,7 +1981,7 @@ int Scheduler::command_query_job_ads(int, Stream* stream)
 	}
 	QueryJobAdsContinuation *continuation = new QueryJobAdsContinuation(requirements_ptr, 1000);
 	StringList &projection = continuation->projection;
-	if (!value.IsListValue(list)) {
+	if (!value.IsUndefinedValue() && !value.IsListValue(list)) {
 		list = NULL;
 		std::string slist;
 		// a string of comma and/or space separated attributes is the usual form for projection
@@ -2432,7 +2434,7 @@ abort_job_myself( PROC_ID job_id, JobAction action, bool log_hold,
 	//job_ad->LookupInteger(ATTR_JOB_STATUS,mode);
 	GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_STATUS, &mode);
 	if ( mode == -1 ) {
-		EXCEPT("In abort_job_myself: %s attribute not found in job %d.%d\n",
+		EXCEPT("In abort_job_myself: %s attribute not found in job %d.%d",
 				ATTR_JOB_STATUS,job_id.cluster, job_id.proc);
 	}
 
@@ -3994,7 +3996,6 @@ Scheduler::spoolJobFiles(int mode, Stream* s)
 	PROC_ID a_job;
 	int tid;
 	char *peer_version = NULL;
-	std::ostringstream job_ids;
 	std::string job_ids_string;
 
 		// make sure this connection is authenticated, and we know who
@@ -4108,7 +4109,7 @@ Scheduler::spoolJobFiles(int mode, Stream* s)
 					// is allowed to transfer data to/from a job.
 				if (OwnerCheck(a_job.cluster,a_job.proc)) {
 					(*jobs)[i] = a_job;
-					job_ids << a_job.cluster << "." << a_job.proc << ", ";
+					formatstr_cat(job_ids_string, "%d.%d, ", a_job.cluster, a_job.proc);
 
 						// Must not allow stagein to happen more than
 						// once, because this could screw up
@@ -4160,7 +4161,7 @@ Scheduler::spoolJobFiles(int mode, Stream* s)
 				 	OwnerCheck(a_job.cluster, a_job.proc) )
 				{
 					(*jobs)[JobAdsArrayLen++] = a_job;
-					job_ids << a_job.cluster << "." << a_job.proc << ", ";
+					formatstr_cat(job_ids_string, "%d.%d, ", a_job.cluster, a_job.proc);
 				}
 				tmp_ad = GetNextJobByConstraint(constraint_string,0);
 			}
@@ -4186,8 +4187,9 @@ Scheduler::spoolJobFiles(int mode, Stream* s)
 
 	rsock->end_of_message();
 
-	job_ids_string = job_ids.str();
-	job_ids_string.erase(job_ids_string.length()-2,2); //Get rid of the extraneous ", "
+	if (job_ids_string.length() > 2) {
+		job_ids_string.erase(job_ids_string.length()-2,2); //Get rid of the extraneous ", "
+	}
 	dprintf( D_AUDIT, *rsock, "Transferring files for jobs %s\n", 
 			 job_ids_string.c_str());
 
@@ -5458,6 +5460,8 @@ MainScheddNegotiate::scheduler_handleMatch(PROC_ID job_id,char const *claim_id, 
 
 	if( scheduler_skipJob(job_id) ) {
 
+		bool orig_job_id_invalid = job_id.cluster == -1 || job_id.proc == -1;
+
 		if( job_id.cluster != -1 && job_id.proc != -1 ) {
 			if( skipAllSuchJobs(job_id) ) {
 					// No point in trying to find a different job,
@@ -5478,6 +5482,16 @@ MainScheddNegotiate::scheduler_handleMatch(PROC_ID job_id,char const *claim_id, 
 		FindRunnableJob(job_id,&match_ad,getOwner());
 
 		if( job_id.cluster != -1 && job_id.proc != -1 ) {
+				// If we got an initial job_id of -1.-1, then the
+				// previous check of skipAllSuchJobs() was skipped.
+				// Check it now that we do have a valid job_id.
+			if ( orig_job_id_invalid && skipAllSuchJobs(job_id) ) {
+				dprintf(D_FULLDEBUG,
+					"Rejecting match to %s "
+					"because no job may be started to run on it right now.\n",
+					slot_name);
+				return false;
+			}
 			dprintf(D_FULLDEBUG,"Rematched %s to job %d.%d\n",
 					slot_name, job_id.cluster, job_id.proc );
 		}
@@ -5904,7 +5918,7 @@ Scheduler::negotiate(int command, Stream* s)
 		}
 	}
 	else if( FlockCollectors ) {
-		EXCEPT("Unexpected negotiation command %d\n", command);
+		EXCEPT("Unexpected negotiation command %d", command);
 	}
 
 
@@ -7468,7 +7482,7 @@ Scheduler::isStillRunnable( int cluster, int proc, int &status )
 		break;
 
 	default:
-		EXCEPT( "StartJobHandler: Unknown status (%d) for job %d.%d\n",
+		EXCEPT( "StartJobHandler: Unknown status (%d) for job %d.%d",
 				status, cluster, proc ); 
 		break;
 	}
@@ -8180,7 +8194,7 @@ Scheduler::addRunnableJob( shadow_rec* srec )
 			 srec->job_id.cluster, srec->job_id.proc );
 
 	if( RunnableJobQueue.enqueue(srec) ) {
-		EXCEPT( "Cannot put job into run queue\n" );
+		EXCEPT( "Cannot put job into run queue" );
 	}
 
 	if( StartJobTimer<0 ) {
@@ -10372,7 +10386,7 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 			break;
 
 		case JOB_SHADOW_USAGE:
-			EXCEPT( "%s exited with incorrect usage!\n", daemon_name.Value() );
+			EXCEPT( "%s exited with incorrect usage!", daemon_name.Value() );
 			break;
 
 		case JOB_BAD_STATUS:
@@ -10466,11 +10480,14 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 				// no break, fall through and do the action
 
 		case JOB_SHOULD_HOLD: {
-			dprintf( D_ALWAYS, "Putting job %d.%d on hold\n",
-					 job_id.cluster, job_id.proc );
 				// Regardless of the state that the job currently
 				// is in, we'll put it on HOLD
-			set_job_status( job_id.cluster, job_id.proc, HELD );
+				// But let a REMOVED job stay that way.
+			if ( q_status != HELD && q_status != REMOVED ) {
+				dprintf( D_ALWAYS, "Putting job %d.%d on hold\n",
+						 job_id.cluster, job_id.proc );
+				set_job_status( job_id.cluster, job_id.proc, HELD );
+			}
 			is_badput = true;
 			
 				// If the job has a CronTab schedule, we will want
@@ -10970,7 +10987,7 @@ Scheduler::Init()
 
     stats.Reconfig();
 
-	PRAGMA_REMIND("TJ: These should be moved into the default config table")
+	//PRAGMA_REMIND("TJ: These should be moved into the default config table")
 		// set defaults for rounding attributes for autoclustering
 		// only set these values if nothing is specified in condor_config.
 	MyString tmpstr;
@@ -11020,7 +11037,7 @@ Scheduler::Init()
 
 	if( Mail ) free( Mail );
 	if( ! (Mail=param("MAIL")) ) {
-		EXCEPT( "MAIL not specified in config file\n" );
+		EXCEPT( "MAIL not specified in config file" );
 	}	
 
 		// UidDomain will always be defined, since config() will put
@@ -11160,9 +11177,10 @@ Scheduler::Init()
 
 		// Estimate that we can afford to use 80% of memory for shadows
 		// and each running shadow requires 800k of private memory.
+		// This works out to about 1 shadow per MB of total memory.
 		// We don't use SHADOW_SIZE_ESTIMATE here, because until 7.4,
 		// that was explicitly set to 1800k in the default config file.
-	int default_max_jobs_running = sysapi_phys_memory_raw_no_param()*4096/400;
+	int default_max_jobs_running = sysapi_phys_memory_raw_no_param();
 
 		// Under Linux (not sure about other OSes), the default TCP
 		// ephemeral port range is 32768-61000.  Each shadow needs 2
@@ -11171,7 +11189,7 @@ Scheduler::Init()
 		// following is a conservative upper bound on how many shadows
 		// we can run.  Would be nice to check the ephemeral port
 		// range directly.
-	if( default_max_jobs_running > 10000) {
+	if( default_max_jobs_running > 10000 || default_max_jobs_running <= 0 ) {
 		default_max_jobs_running = 10000;
 	}
 #ifdef WIN32

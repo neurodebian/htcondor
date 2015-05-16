@@ -3496,7 +3496,7 @@ static const char * render_job_text(ClassAd *job, std::string & result_text)
 		result_text += buffer_io_display(job);
 	} else if (usingPrintMask) {
 		if (mask.IsEmpty()) return NULL;
-		result_text += mask.display(job);
+		mask.display(result_text, job);
 	} else {
 		result_text += bufferJobShort(job);
 	}
@@ -3651,7 +3651,7 @@ process_job_and_render_to_dag_map(void *,  classad_shared_ptr<ClassAd> job)
 static bool
 show_schedd_queue(const char* scheddAddress, const char* scheddName, const char* scheddMachine, int useFastPath)
 {
-	bool use_v3 = param_boolean("CONDOR_Q_USE_V3_PROTOCOL", true);
+	bool use_v3 = param_boolean("CONDOR_Q_USE_V3_PROTOCOL", false);
 	if ((useFastPath == 2) && !use_v3) {
 		useFastPath = 1;
 	}
@@ -5310,11 +5310,7 @@ static void AddReferencedAttribsToBuffer(
 		pm.registerFormat(label.c_str(), 0, FormatOptionNoTruncate, attr);
 	}
 	if ( ! pm.IsEmpty()) {
-		char * temp = pm.display(request);
-		if (temp) {
-			return_buf += temp;
-			delete[] temp;
-		}
+		pm.display(return_buf, request);
 	}
 }
 
@@ -5339,8 +5335,8 @@ static void AddTargetReferencedAttribsToBuffer(
 	if (pm.IsEmpty())
 		return;
 
-	char * temp = pm.display(request, target);
-	if (temp) {
+	std::string temp;
+	if (pm.display(temp, request, target) > 0) {
 		//return_buf += "\n";
 		//return_buf += pindent;
 		std::string name;
@@ -5356,7 +5352,6 @@ static void AddTargetReferencedAttribsToBuffer(
 		return_buf += name;
 		return_buf += " has the following attributes:\n\n";
 		return_buf += temp;
-		delete[] temp;
 	}
 }
 
