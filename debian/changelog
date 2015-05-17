@@ -1,3 +1,17 @@
+condor (8.2.8~dfsg.1-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+    - Updated for latest gsoap release (Closes: #784778)
+    - Numerous additional bug fixes.
+  * Minimize patch for default configuration to match upstream
+    adjustments.
+  * Add patch to fix a few bashisms (Closes: #772232). Thanks to
+    Raphael Geissert for the report.
+  * Add a patch adding raspbian to OS detection code (Closes: #780517).
+    Thanks to Peter Michael Green for the patch.
+
+ -- Michael Hanke <mih@debian.org>  Sat, 16 May 2015 10:32:41 +0200
+
 condor (8.2.3~dfsg.1-6) unstable; urgency=medium
 
   [Alex Waite]
