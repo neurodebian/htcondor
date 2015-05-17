@@ -95,6 +95,10 @@ override_dh_auto_install:
 	# remove compat symlinks
 	rm debian/tmp/usr/sbin/condor_vm_vmware.pl
 	rm debian/tmp/usr/sbin/grid_monitor.sh
+	# make sure to have the few binaries to carry an RPATH converted to RUNPATH
+	chrpath -c -k ./debian/tmp/usr/lib/condor/*.so || true
+	chrpath -c -k ./debian/tmp/usr/sbin/* || true
+	chrpath -c -k ./debian/tmp/usr/lib/condor/libexec/* || true
 
 
 override_dh_install:
@@ -104,6 +108,7 @@ override_dh_install:
 	chmod -x debian/htcondor/usr/lib/condor/libexec/interactive.sub
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
+
 
 override_dh_auto_clean:
 	dh_auto_clean

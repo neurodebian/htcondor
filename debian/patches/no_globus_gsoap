@@ -46,6 +46,6 @@ index 0282273..4c15da2 100755
  	rm debian/tmp/usr/sbin/condor_vm_vmware.pl
 -	rm debian/tmp/usr/sbin/grid_monitor.sh
 +	#rm debian/tmp/usr/sbin/grid_monitor.sh
- 
- 
- override_dh_install:
+	# make sure to have the few binaries to carry an RPATH converted to RUNPATH
+	chrpath -c -k ./debian/tmp/usr/lib/condor/*.so || true
+	chrpath -c -k ./debian/tmp/usr/sbin/* || true
