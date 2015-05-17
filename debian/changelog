@@ -9,6 +9,7 @@ condor (8.2.8~dfsg.1-1) unstable; urgency=medium
     Raphael Geissert for the report.
   * Add a patch adding raspbian to OS detection code (Closes: #780517).
     Thanks to Peter Michael Green for the patch.
+  * Bumped Standards-version to 3.9.6; no changes necessary.
 
  -- Michael Hanke <mih@debian.org>  Sat, 16 May 2015 10:32:41 +0200
 
