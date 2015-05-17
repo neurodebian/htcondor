@@ -342,7 +342,7 @@ if [ -n "$FD" ] ; then
 	logit "Closing secretly inherited GCB fd $FD"
 	IFD=`/usr/bin/expr "$FD"`
 	eval "exec $IFD>&-"
-	if [ $? == 1 ] ; then
+	if [ $? = 1 ] ; then
 		logit "Oops! The close didn't happen properly! Attempting to continue."
 	else
 		logit "GCB fd $FD closed."

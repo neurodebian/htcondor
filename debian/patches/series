@@ -1,5 +1,4 @@
 # in order of upstream compatibility and invasiveness
-CVE-2014-8126.patch
 default_debian_config
 debian_init
 no_java_for_now
@@ -14,3 +13,4 @@ alpha-fix-getpid.patch
 noformat_arg
 as-needed-libs-ftbfs.patch
 qsub_sentinel_robustness
+fix_bashisms
