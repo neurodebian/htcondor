@@ -29,7 +29,7 @@ Last-Update: <YYYY-MM-DD>
 @@ -27,7 +27,7 @@
  condor_exe( condor_chirp "condor_chirp.cpp" ${C_LIBEXEC}
  "chirp_client;${CONDOR_TOOL_LIBS}" OFF )
-
+ 
 -install ( FILES Chirp.jar DESTINATION ${C_LIB} )
 +#install ( FILES Chirp.jar DESTINATION ${C_LIB} )
  
@@ -37,7 +37,7 @@ Last-Update: <YYYY-MM-DD>
      install ( FILES chirp_client.h DESTINATION ${C_INCLUDE})
 --- a/src/condor_starter.V6.1/CMakeLists.txt
 +++ b/src/condor_starter.V6.1/CMakeLists.txt
-@@ -26,7 +26,7 @@
+@@ -30,7 +30,7 @@
  endif()
  
  # need to add all the other install targets for libexec.

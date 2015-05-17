@@ -1,8 +1,6 @@
-diff --git a/src/condor_contrib/campus_factory/bin/campus_factory b/src/condor_contrib/campus_factory/bin/campus_factory
-index d6a312d..9953080 100755
 --- a/src/condor_contrib/campus_factory/bin/campus_factory
 +++ b/src/condor_contrib/campus_factory/bin/campus_factory
-@@ -19,7 +19,7 @@ prog="Campus Factory"
+@@ -19,7 +19,7 @@
  
  if [ -e $script_location/../etc/campus_factory.conf ]; then
      config=$script_location/../etc/campus_factory.conf

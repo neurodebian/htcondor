@@ -9,7 +9,7 @@ Author: Michael Hanke <mih@debian.org>
 
 --- a/src/condor_utils/param_info.in
 +++ b/src/condor_utils/param_info.in
-@@ -1175,7 +1175,7 @@
+@@ -1396,7 +1396,7 @@
  tags=accountant,Accountant
  
  [SPOOL]
@@ -18,7 +18,7 @@ Author: Michael Hanke <mih@debian.org>
  type=path
  reconfig=true
  customization=seldom
-@@ -2169,7 +2169,7 @@
+@@ -2398,7 +2398,7 @@
  tags=daemon_core,daemon_core_main
  
  [COLLECTOR_NAME]
@@ -27,7 +27,7 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=seldom
-@@ -2773,7 +2773,7 @@
+@@ -3013,7 +3013,7 @@
  
  [MAIL]
  # default location for mail on RHEL is /bin/mail, default on debian is /usr/bin/mail
@@ -36,7 +36,7 @@ Author: Michael Hanke <mih@debian.org>
  win32_default=$(BIN)\condor_mail.exe
  type=path
  reconfig=true
-@@ -3572,7 +3572,7 @@
+@@ -3812,7 +3812,7 @@
  tags=c++_util,condor_config
  
  [REQUIRE_LOCAL_CONFIG_FILE]
@@ -45,7 +45,7 @@ Author: Michael Hanke <mih@debian.org>
  win32_default=false
  type=bool
  reconfig=true
-@@ -4102,7 +4102,7 @@
+@@ -4342,7 +4342,7 @@
  tags=starter,StarterHookMgr
  
  [JAVA_BENCHMARK_TIME]
@@ -54,7 +54,7 @@ Author: Michael Hanke <mih@debian.org>
  type=int
  reconfig=true
  customization=seldom
-@@ -6607,7 +6607,7 @@
+@@ -6856,7 +6856,7 @@
  tags=c++_util,condor_config
  
  [GANGLIA_LIB64_PATH]
@@ -63,16 +63,7 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=seldom
-@@ -6634,7 +6634,7 @@
- tags=c++_util,condor_config
- 
- [GANGLIAD_METRICS_CONFIG_DIR]
--default=$(RELEASE_DIR)/etc/condor/ganglia.d
-+default=/etc/condor/ganglia.d
- type=path
- reconfig=true
- customization=seldom
-@@ -6834,7 +6834,7 @@
+@@ -7084,7 +7084,7 @@
  review=?
  
  [CONDOR_ADMIN]
@@ -81,7 +72,7 @@ Author: Michael Hanke <mih@debian.org>
  customization=normal
  friendly_name=HTCondor sends email to this address on pool failure
  review=?
-@@ -7176,7 +7176,7 @@
+@@ -7426,7 +7426,7 @@
  review=?
  
  [CRED_STORE_DIR]
@@ -92,16 +83,7 @@ Author: Michael Hanke <mih@debian.org>
  [CREDD_ARGS]
 --- a/src/condor_examples/condor_config.generic.debian.patch
 +++ b/src/condor_examples/condor_config.generic.debian.patch
-@@ -29,7 +29,7 @@
-  #LOCAL_CONFIG_DIR_EXCLUDE_REGEXP = ^((\..*)|(.*~)|(#.*)|(.*\.rpmsave)|(.*\.rpmnew))$
-  
-  ##  Use a host-based security policy. By default CONDOR_HOST and the local machine will be allowed
--@@ -50,5 +48,24 @@
-+@@ -50,5 +48,29 @@
-  #FLOCK_TO = condor.cs.wisc.edu, cm.example.edu
-  
-  ##--------------------------------------------------------------------
-@@ -45,7 +45,7 @@
+@@ -47,7 +47,7 @@
  +RUN     = $(LOCAL_DIR)/run/condor
  +LOG     = $(LOCAL_DIR)/log/condor
  +LOCK    = $(LOCAL_DIR)/lock/condor
@@ -110,10 +92,10 @@ Author: Michael Hanke <mih@debian.org>
  +EXECUTE = $(LOCAL_DIR)/lib/condor/execute
  +BIN     = $(RELEASE_DIR)/bin
  +LIB     = $(RELEASE_DIR)/lib/condor
-@@ -55,3 +55,8 @@
- +SHARE   = $(RELEASE_DIR)/share/condor
+@@ -66,3 +66,8 @@
+ +##  The list is a comma or space separated list of subsystem names
  +
- +PROCD_ADDRESS = $(RUN)/procd_pipe
+ +DAEMON_LIST = COLLECTOR, MASTER, NEGOTIATOR, SCHEDD, STARTD
 ++
 ++CONDOR_DEVELOPERS = NONE
 ++CONDOR_DEVELOPERS_COLLECTOR = NONE
