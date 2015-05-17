@@ -104,8 +104,6 @@ override_dh_install:
 	chmod -x debian/htcondor/usr/lib/condor/libexec/interactive.sub
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
-	# kill the default local config -- debconf will handle that
-	rm debian/htcondor/etc/condor/condor_config.local
 
 override_dh_auto_clean:
 	dh_auto_clean
