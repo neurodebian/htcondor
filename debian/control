@@ -94,7 +94,7 @@ Description: distributed workload management system
 
 
 Package: htcondor-dev
-Section: devel
+Section: libdevel
 Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Replaces: condor-dev (<< 8.0.5~)
