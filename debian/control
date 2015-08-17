@@ -3,53 +3,57 @@ Section: science
 Priority: extra
 Maintainer: HTCondor Developers <condor-debian@cs.wisc.edu>
 Uploaders: Michael Hanke <mih@debian.org>, Brian Lin <blin@cs.wisc.edu>
-Build-Depends: debhelper (>= 9~),
- po-debconf,
- cmake,
- autotools-dev,
- dh-autoreconf,
- python-dev,
- libpq-dev,
- libcurl4-openssl-dev,
- zlib1g-dev,
- libglobus-gss-assist-dev,
- libglobus-gram-protocol-dev,
- libglobus-gram-client-dev,
- libglobus-gass-server-ez-dev,
- libglobus-ftp-client-dev,
- latex2html,
- transfig,
- libpcre3-dev,
- libboost-thread-dev,
- libboost-program-options-dev,
- libboost-system-dev,
- libboost-regex-dev,
- libboost-filesystem-dev,
- libexpat1-dev,
- libxml2-dev,
- libvirt-dev,
- zlib1g-dev,
- libx11-dev,
- default-jdk | gcj-jdk,
- uuid-dev,
- chrpath,
- libldap2-dev | libldap-dev,
- help2man,
- gsoap (>= 2.7.17-1~),
- libboost-test-dev,
- libboost-python-dev,
- libkrb5-dev,
- libcgroup-dev
+Build-Depends: autotools-dev,
+               chrpath,
+               cmake,
+               debhelper (>= 9~),
+               default-jdk | gcj-jdk,
+               dh-autoreconf,
+               gsoap (>= 2.7.17-1~),
+               help2man,
+               latex2html,
+               libboost-filesystem-dev,
+               libboost-program-options-dev,
+               libboost-python-dev,
+               libboost-regex-dev,
+               libboost-system-dev,
+               libboost-test-dev,
+               libboost-thread-dev,
+               libcgroup-dev,
+               libcurl4-openssl-dev,
+               libexpat1-dev,
+               libglobus-ftp-client-dev,
+               libglobus-gass-server-ez-dev,
+               libglobus-gram-client-dev,
+               libglobus-gram-protocol-dev,
+               libglobus-gss-assist-dev,
+               libkrb5-dev,
+               libldap2-dev | libldap-dev,
+               libpcre3-dev,
+               libpq-dev,
+               libvirt-dev,
+               libx11-dev,
+               libxml2-dev,
+               po-debconf,
+               python-dev,
+               transfig,
+               uuid-dev,
+               zlib1g-dev
 Standards-Version: 3.9.6
 Homepage: http://research.cs.wisc.edu/htcondor
 Vcs-Browser: http://git.debian.org/?p=pkg-exppsy/condor.git
 Vcs-Git: git://git.debian.org/git/pkg-exppsy/condor.git
 
-
 Package: htcondor
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, ${python:Depends}, python,
- ${perl:Depends}, debconf (>= 0.5) | debconf-2.0, adduser, libdate-manip-perl
+Depends: adduser,
+         debconf (>= 0.5) | debconf-2.0,
+         libdate-manip-perl,
+         python,
+         ${misc:Depends},
+         ${perl:Depends},
+         ${python:Depends},
+         ${shlibs:Depends}
 Recommends: dmtcp
 Suggests: coop-computing-tools
 Replaces: condor (<< 8.0.5~)
@@ -71,27 +75,6 @@ Description: distributed workload management system
  This package can set up an appropriate initial configuration at install
  time for a machine intended either as a member of an existing HTCondor pool
  or as a "Personal" (single machine) HTCondor pool.
-
-#Package: condor-tests
-#Architecture: any
-#Depends: ${misc:Depends}, ${shlibs:Depends}
-#Description: distributed workload management system - test suite
-# Like other full-featured batch systems, HTCondor provides a job queueing
-# mechanism, scheduling policy, priority scheme, resource monitoring, and
-# resource management. Users submit their serial or parallel jobs to HTCondor;
-# HTCondor places them into a queue. It chooses when and where to run the jobs
-# based upon a policy, carefully monitors their progress, and ultimately
-# informs the user upon completion.
-# .
-# Unlike more traditional batch queueing systems, HTCondor can also effectively
-# harness wasted CPU power from otherwise idle desktop workstations. HTCondor
-# does not require a shared file system across machines - if no shared file
-# system is available, HTCondor can transfer the job's data files on behalf of
-# the user.
-# .
-# This package provides HTCondor's test-suite, which can be used to verify
-# proper functioning of a HTCondor installation.
-
 
 Package: htcondor-dev
 Section: libdevel
@@ -116,7 +99,6 @@ Description: distributed workload management system - development files
  This package provides headers and libraries for development of HTCondor
  add-ons.
 
-
 Package: htcondor-doc
 Section: doc
 Architecture: all
@@ -140,11 +122,10 @@ Description: distributed workload management system - documentation
  This package provides HTCondor's documentation in HTML and PDF format, as well
  as configuration and other examples.
 
-
 Package: htcondor-dbg
 Section: debug
 Architecture: any
-Depends: ${misc:Depends}, htcondor (= ${binary:Version})
+Depends: htcondor (= ${binary:Version}), ${misc:Depends}
 Replaces: condor-dbg (<< 8.0.5~)
 Breaks: condor-dbg (<< 8.0.5~)
 Description: distributed workload management system - debugging symbols
@@ -163,7 +144,6 @@ Description: distributed workload management system - debugging symbols
  .
  This package provides the debugging symbols for HTCondor.
 
-
 Package: libclassad-dev
 Replaces: libclassad0-dev
 Conflicts: libclassad0-dev
@@ -179,11 +159,10 @@ Description: HTCondor classads expression language - development library
  .
  This package provides the static library and header files.
 
-
 Package: libclassad7
 Section: libs
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: HTCondor classads expression language - runtime library
  Classified Advertisements (classads) are the lingua franca of HTCondor, used
  for describing jobs, workstations, and other resources. There is a protocol

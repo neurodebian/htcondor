@@ -18,7 +18,7 @@ License: Custom
  are met:
  .
   1. Redistributions of source code must retain the above copyright
-     notice, this list of conditions and the following disclaimer. 
+     notice, this list of conditions and the following disclaimer.
  .
   2. Redistributions in binary form must reproduce the above copyright
      notice, this list of conditions and the following disclaimer in
@@ -271,4 +271,3 @@ License: GPL-2+
  .
  On Debian systems, the complete text of the GNU General Public License
  version 2 can be found in `/usr/share/common-licenses/GPL-2'.
-
