@@ -1,8 +1,9 @@
 Source: condor
+Maintainer: HTCondor Developers <condor-debian@cs.wisc.edu>
+Uploaders: Michael Hanke <mih@debian.org>,
+           Brian Lin <blin@cs.wisc.edu>
 Section: science
 Priority: extra
-Maintainer: HTCondor Developers <condor-debian@cs.wisc.edu>
-Uploaders: Michael Hanke <mih@debian.org>, Brian Lin <blin@cs.wisc.edu>
 Build-Depends: autotools-dev,
                chrpath,
                cmake,
@@ -40,14 +41,14 @@ Build-Depends: autotools-dev,
                uuid-dev,
                zlib1g-dev
 Standards-Version: 3.9.6
+Vcs-Browser: https://anonscm.debian.org/cgit/pkg-exppsy/condor.git
+Vcs-Git: git://anonscm.debian.org/pkg-exppsy/condor.git
 Homepage: http://research.cs.wisc.edu/htcondor
-Vcs-Browser: http://git.debian.org/?p=pkg-exppsy/condor.git
-Vcs-Git: git://git.debian.org/git/pkg-exppsy/condor.git
 
 Package: htcondor
 Architecture: any
 Depends: adduser,
-         debconf (>= 0.5) | debconf-2.0,
+         debconf | debconf-2.0,
          libdate-manip-perl,
          python,
          ${misc:Depends},
@@ -56,8 +57,8 @@ Depends: adduser,
          ${shlibs:Depends}
 Recommends: dmtcp
 Suggests: coop-computing-tools
-Replaces: condor (<< 8.0.5~)
 Breaks: condor (<< 8.0.5~)
+Replaces: condor (<< 8.0.5~)
 Description: distributed workload management system
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -77,11 +78,12 @@ Description: distributed workload management system
  or as a "Personal" (single machine) HTCondor pool.
 
 Package: htcondor-dev
-Section: libdevel
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}
-Replaces: condor-dev (<< 8.0.5~)
+Section: libdevel
+Depends: ${misc:Depends},
+         ${shlibs:Depends}
 Breaks: condor-dev (<< 8.0.5~)
+Replaces: condor-dev (<< 8.0.5~)
 Description: distributed workload management system - development files
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -100,11 +102,11 @@ Description: distributed workload management system - development files
  add-ons.
 
 Package: htcondor-doc
-Section: doc
 Architecture: all
+Section: doc
 Depends: ${misc:Depends}
-Replaces: condor-doc (<< 8.0.5~)
 Breaks: condor-doc (<< 8.0.5~)
+Replaces: condor-doc (<< 8.0.5~)
 Description: distributed workload management system - documentation
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -123,11 +125,12 @@ Description: distributed workload management system - documentation
  as configuration and other examples.
 
 Package: htcondor-dbg
-Section: debug
 Architecture: any
-Depends: htcondor (= ${binary:Version}), ${misc:Depends}
-Replaces: condor-dbg (<< 8.0.5~)
+Section: debug
+Depends: htcondor (= ${binary:Version}),
+         ${misc:Depends}
 Breaks: condor-dbg (<< 8.0.5~)
+Replaces: condor-dbg (<< 8.0.5~)
 Description: distributed workload management system - debugging symbols
  Like other full-featured batch systems, HTCondor provides a job queueing
  mechanism, scheduling policy, priority scheme, resource monitoring, and
@@ -145,11 +148,12 @@ Description: distributed workload management system - debugging symbols
  This package provides the debugging symbols for HTCondor.
 
 Package: libclassad-dev
-Replaces: libclassad0-dev
-Conflicts: libclassad0-dev
-Section: libdevel
 Architecture: any
-Depends: libclassad7 (= ${binary:Version}), ${misc:Depends}
+Section: libdevel
+Depends: libclassad7 (= ${binary:Version}),
+         ${misc:Depends}
+Conflicts: libclassad0-dev
+Replaces: libclassad0-dev
 Description: HTCondor classads expression language - development library
  Classified Advertisements (classads) are the lingua franca of HTCondor, used
  for describing jobs, workstations, and other resources. There is a protocol
@@ -160,9 +164,10 @@ Description: HTCondor classads expression language - development library
  This package provides the static library and header files.
 
 Package: libclassad7
-Section: libs
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}
+Section: libs
+Depends: ${misc:Depends},
+         ${shlibs:Depends}
 Description: HTCondor classads expression language - runtime library
  Classified Advertisements (classads) are the lingua franca of HTCondor, used
  for describing jobs, workstations, and other resources. There is a protocol
@@ -173,40 +178,44 @@ Description: HTCondor classads expression language - runtime library
  This package provides the runtime library.
 
 Package: condor
-Depends: htcondor, ${misc:Depends}
 Architecture: all
-Priority: extra
 Section: oldlibs
+Priority: extra
+Depends: htcondor,
+         ${misc:Depends}
 Description: transitional dummy package
  This package aids upgrades of existing Condor installations to the new project
  and package name "HTCondor". The package is empty and it can safely be
  removed.
 
 Package: condor-doc
-Depends: htcondor-doc, ${misc:Depends}
 Architecture: all
-Priority: extra
 Section: oldlibs
+Priority: extra
+Depends: htcondor-doc,
+         ${misc:Depends}
 Description: transitional dummy package
  This package aids upgrades of existing Condor installations to the new project
  and package name "HTCondor". The package is empty and it can safely be
  removed.
 
 Package: condor-dev
-Depends: htcondor-dev, ${misc:Depends}
 Architecture: all
-Priority: extra
 Section: oldlibs
+Priority: extra
+Depends: htcondor-dev,
+         ${misc:Depends}
 Description: transitional dummy package
  This package aids upgrades of existing Condor installations to the new project
  and package name "HTCondor". The package is empty and it can safely be
  removed.
 
 Package: condor-dbg
-Depends: htcondor-dbg, ${misc:Depends}
 Architecture: all
-Priority: extra
 Section: oldlibs
+Priority: extra
+Depends: htcondor-dbg,
+         ${misc:Depends}
 Description: transitional dummy package
  This package aids upgrades of existing Condor installations to the new project
  and package name "HTCondor". The package is empty and it can safely be
