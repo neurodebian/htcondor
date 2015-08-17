@@ -1,3 +1,16 @@
+condor (8.2.9~dfsg.1-1) UNRELEASED; urgency=medium
+
+  * New upstream bugfix release closing >25 tickets.
+    - "Smaller" partitionable slots are now merged to allow for a "bigger"
+      job to match (needs ALLOW_PSLOT_PREEMPTION=True; default behavior
+      unchanged).
+    - Fix LaTeX documentation sources to work with the most recent TeTeX
+      (Closes: #790865). Thanks to Martin Michlmayr for the report and a
+      patch.
+  * Remove package section disparity (devel -> libdevel).
+
+ -- Michael Hanke <mih@debian.org>  Mon, 17 Aug 2015 08:35:31 +0200
+
 condor (8.2.8~dfsg.1-1) unstable; urgency=medium
 
   * New upstream bugfix release.
