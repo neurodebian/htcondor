@@ -7632,6 +7632,8 @@ Scheduler::spawnShadow( shadow_rec* srec )
 						delete_shadow_rec( srec );
 						srec = NULL;
 					}
+					free( shadow_path );
+					return;
 				}
 				args.AppendArg("--transferd");
 				args.AppendArg(td->get_sinful());
@@ -8415,6 +8417,9 @@ Scheduler::start_sched_universe_job(PROC_ID* job_id)
 	int i;
 	size_t *core_size_ptr = NULL;
 	char *ckpt_name = NULL;
+	FamilyInfo fi;
+
+	fi.max_snapshot_interval = 15;
 
 	is_executable = false;
 
@@ -8693,7 +8698,7 @@ Scheduler::start_sched_universe_job(PROC_ID* job_id)
 	
 	pid = daemonCore->Create_Process( a_out_name.Value(), args, PRIV_USER_FINAL, 
 	                                  shadowReaperId, FALSE,
-	                                  &envobject, iwd.Value(), NULL, NULL, inouterr,
+	                                  &envobject, iwd.Value(), &fi, NULL, inouterr,
 	                                  NULL, niceness, NULL,
 	                                  DCJOBOPT_NO_ENV_INHERIT,
 	                                  core_size_ptr );
@@ -10105,6 +10110,7 @@ Scheduler::child_exit(int pid, int status)
 		//
 	if (IsSchedulerUniverse(srec)) {
  		// scheduler universe process 
+		daemonCore->Kill_Family( pid );
 		scheduler_univ_job_exit(pid,status,srec);
 		delete_shadow_rec( pid );
 			// even though this will get set correctly in
@@ -10145,7 +10151,7 @@ Scheduler::child_exit(int pid, int status)
 			dprintf( D_ALWAYS,
 					 "%s pid %d successfully killed because it was hung.\n",
 					 name, pid );
-			status = JOB_EXCEPTION;
+			status = JOB_EXCEPTION << 8;
 		}
 
 			//

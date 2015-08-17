@@ -163,8 +163,8 @@ Macro definitions are of the form:
 \end{verbatim}
 
 The macro name given on the left hand side of the definition is
-a case sensitive identifier.
-There must be white space between the macro name, the
+a case insensitive identifier.
+There may be white space between the macro name, the
 equals sign (\verb@=@), and the macro definition.
 The macro definition is a string literal that may utilize macro substitution.
 
@@ -1524,11 +1524,13 @@ File System Configuration File Entries''.
   and \File{/usr/bin/mail} on all other platforms.
   The \Condor{schedd} will not
   function unless \MacroNI{MAIL} is defined.
+  For security reasons, non-Windows platforms should not use this setting
+  and should use \MacroNI{SENDMAIL} instead.
 
 \label{param:Sendmail}
 \item[\Macro{SENDMAIL}]
   The full path to the \Prog{sendmail} executable.  
-  If defined, 
+  If defined, which it is by default on non-Windows platforms,
   \Prog{sendmail} is used instead of the mail program defined by \MacroNI{MAIL}.
 
 \label{param:MailFrom}
@@ -2776,8 +2778,9 @@ which use DaemonCore).
   usually the best location for this directory.
 
 \label{param:SettableAttrs}
-\item[\Macro{SETTABLE\_ATTRS\Dots}]
-  All macros that begin with \Macro{SETTABLE\_ATTRS} or
+\MacroIndex{SETTABLE\_ATTRS\_CONFIG}
+\item[\Macro{SETTABLE\_ATTRS\_<PERMISSION-LEVEL>}]
+  All macros that begin with \MacroNI{SETTABLE\_ATTRS} or
   \MacroNI{<SUBSYS>.SETTABLE\_ATTRS} are settings used to restrict the 
   configuration values that can be changed using the \Condor{config\_val} 
   command.
@@ -6872,7 +6875,6 @@ SYSTEM_PERIODIC_REMOVE = \
   in attribute \Attr{foo\_RAW} in the job ClassAd.
   The following are set by default:
 \begin{verbatim}
-        SCHEDD_ROUND_ATTR_ImageSize = 25%
         SCHEDD_ROUND_ATTR_ResidentSetSize = 25%
         SCHEDD_ROUND_ATTR_ProportionalSetSizeKb = 25%
         SCHEDD_ROUND_ATTR_ImageSize = 25%
@@ -8769,6 +8771,16 @@ These macros affect the \Condor{negotiator}.
   prevents the \Condor{negotiator} from matching jobs
   to claimed slots that cannot immediately be preempted
   due to \Macro{MAXJOBRETIREMENTTIME}.
+
+\label{param:AllowPslotPreemption}
+\item[\Macro{ALLOW\_PSLOT\_PREEMPTION}]
+  A boolean value that defaults to \Expr{False}.
+  When set to \Expr{True} for the \Condor{negotiator} as well as all
+  \Condor{startd} and \Condor{schedd} daemons, 
+  it enables a new matchmaking mode in which one or more dynamic slots 
+  can be preempted in order to
+  make enough resources available in their parent partitionable slot
+  for a job to successfully match to the partitionable slot.
 
 \label{param:StartdAdReevalExpr}
 \item[\Macro{STARTD\_AD\_REEVAL\_EXPR}]
@@ -11001,7 +11013,8 @@ COLLECTOR.SEC_DEFAULT_SESSION_DURATION = 50000
 \item[\Macro{SEC\_DEFAULT\_AUTHENTICATION\_TIMEOUT}]
   The length of time in seconds that HTCondor should attempt
   authenticating network connections before giving up.
-  The default is 20 seconds.
+  The default imposes no time limit, so the attempt never gives up.
+  %The default is 20 seconds.
   Like other security settings, the portion of the configuration variable
   name, \MacroNI{DEFAULT}, 
   may be replaced by a different access level to specify the timeout to use for
