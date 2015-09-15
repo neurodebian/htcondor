@@ -7,6 +7,8 @@ condor (8.4.0~dfsg.1-1) UNRELEASED; urgency=medium
     INTERACTIVE_SUBMIT_FILE accordingly.
   * Tighten versioned dependency on libclassad package -- observed missing
     symbols, despite unchanged SO version.
+  * Install documentation under /usr/share/doc/htcondor (no longer just
+    'condor').
 
  -- Michael Hanke <mih@debian.org>  Tue, 15 Sep 2015 07:32:31 +0200
 
