@@ -26,6 +26,8 @@ condor (8.4.0~dfsg.1-1) UNRELEASED; urgency=medium
     instructed to encrypt job EXECUTE directories on a system-wide, or
     per-job basis.
   * Install linux-kernel-tuning script as a config file into /etc/condor.
+  * Update patch to avoid non-literal string processing without format
+    strings [-Werror=format-security].
 
  -- Michael Hanke <mih@debian.org>  Tue, 15 Sep 2015 07:32:31 +0200
 
