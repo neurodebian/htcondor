@@ -4,6 +4,7 @@ debian/tmp/usr/bin/* usr/bin/
 debian/tmp/usr/lib/condor/*.so usr/lib/condor/
 debian/tmp/usr/lib/condor/condor_ssh* etc/condor/
 debian/tmp/usr/lib/condor/libexec usr/lib/condor/
+debian/tmp/usr/lib/condor/libexec/linux_kernel_tuning etc/condor/
 debian/tmp/usr/sbin/* usr/sbin/
 debian/tmp/usr/src/* usr/src/condor/
 src/condor_examples/condor.service /lib/systemd/system/

@@ -108,6 +108,8 @@ override_dh_install:
 	chmod -x debian/htcondor/usr/lib/condor/libexec/interactive.sub
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
+	# remove duplicate that is also installed as a config file
+	rm -f debian/htcondor/usr/lib/condor/libexec/linux-kernel-tuning
 
 
 override_dh_auto_clean:
