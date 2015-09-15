@@ -1,6 +1,17 @@
 condor (8.4.0~dfsg.1-1) UNRELEASED; urgency=medium
 
-  * First upstream in new stable series.
+  * First upstream in new 8.4 stable series. Updates:
+    - leaner resource footprint for up to 200k simultaneous jobs in a
+      single pool
+    - run Docker containers as jobs
+    - configurable encryption of execution directories
+    - support for simultaneous IPv4 and IPv6 connections
+    - adminstrator can establish requirements that must be satisfied in order
+      for a job to be queued
+    - new default shared port (if used) is 9618, instead of the previous
+      random default
+    - automatic tuning of certain kernel parameters for improved scalability
+      enabled by default (see LINUX_KERNEL_TUNING_SCRIPT).
   * Install systemd service file.
   * Install default submit configuration for interactive jobs in
     /etc/condor/interactive.sub and set default configuration for
