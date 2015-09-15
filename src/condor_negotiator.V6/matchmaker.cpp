@@ -240,9 +240,9 @@ bool dslotLookup( const classad::ClassAd *ad, const char *name, int idx, classad
 	if ( ad == NULL || name == NULL || idx < 0 ) {
 		return false;
 	}
-	string attr_name = "child";
+	string attr_name = "Child";
 	attr_name += name;
-	// lookup or evaluate child<name>
+	// lookup or evaluate Child<name>
 	// set value to idx-th entry of resulting ExprList
 	const classad::ExprTree *expr_tree = ad->Lookup( attr_name );
 	if ( expr_tree == NULL || expr_tree->GetKind() != classad::ExprTree::EXPR_LIST_NODE ) {
@@ -368,6 +368,7 @@ Matchmaker ()
 	NegotiatorTimeout = 30;
  	NegotiatorInterval = 60;
  	MaxTimePerSubmitter = 31536000;
+	MaxTimePerSchedd = 31536000;
  	MaxTimePerSpin = 31536000;
 	MaxTimePerCycle = 31536000;
 
@@ -520,6 +521,9 @@ reinitialize ()
 	// up to 1 year per submitter by default
  	MaxTimePerSubmitter = param_integer("NEGOTIATOR_MAX_TIME_PER_SUBMITTER",31536000);
 
+	// up to 1 year per schedd by default
+	MaxTimePerSchedd = param_integer("NEGOTIATOR_MAX_TIME_PER_SCHEDD",31536000);
+
 	// up to 1 year per spin by default
  	MaxTimePerSpin = param_integer("NEGOTIATOR_MAX_TIME_PER_PIESPIN",31536000);
 
@@ -585,6 +589,9 @@ reinitialize ()
 		dprintf (D_ALWAYS,"PREEMPTION_REQUIREMENTS_PSLOT = %s\n", tmp);
 		free( tmp );
 		tmp = NULL;
+	} else if ( PreemptionReq ) {
+		PreemptionReqPslot = PreemptionReq->Copy();
+		dprintf( D_ALWAYS, "PREEMPTION_REQUIREMENTS_PSLOT = <PREEMPTION_REQUIREMENTS>\n" );
 	} else {
 		dprintf (D_ALWAYS,"PREEMPTION_REQUIREMENTS_PSLOT = None\n");
 	}
@@ -631,9 +638,8 @@ reinitialize ()
 	dprintf (D_ALWAYS,"NEGOTIATOR_TIMEOUT = %d sec\n",NegotiatorTimeout);
 	dprintf (D_ALWAYS,"MAX_TIME_PER_CYCLE = %d sec\n",MaxTimePerCycle);
 	dprintf (D_ALWAYS,"MAX_TIME_PER_SUBMITTER = %d sec\n",MaxTimePerSubmitter);
+	dprintf (D_ALWAYS,"MAX_TIME_PER_SCHEDD = %d sec\n",MaxTimePerSchedd);
 	dprintf (D_ALWAYS,"MAX_TIME_PER_PIESPIN = %d sec\n",MaxTimePerSpin);
-
-	if( tmp ) free( tmp );
 
 	if (PreemptionRank) {
 		delete PreemptionRank;
@@ -718,7 +724,7 @@ reinitialize ()
 	if( ConsiderEarlyPreemption && !ConsiderPreemption ) {
 		dprintf(D_ALWAYS,"WARNING: NEGOTIATOR_CONSIDER_EARLY_PREEMPTION=true will be ignored, because NEGOTIATOR_CONSIDER_PREEMPTION=false\n");
 	}
-	want_inform_startd = param_boolean("NEGOTIATOR_INFORM_STARTD", true);
+	want_inform_startd = param_boolean("NEGOTIATOR_INFORM_STARTD", false);
 	want_nonblocking_startd_contact = param_boolean("NEGOTIATOR_USE_NONBLOCKING_STARTD_CONTACT",true);
 
 	// we should figure these out automatically someday ....
@@ -983,7 +989,7 @@ GET_PRIORITY_commandHandler (int, Stream *strm)
 	dprintf (D_ALWAYS,"Getting state information from the accountant\n");
 	AttrList* ad=accountant.ReportState();
 	
-	if (!putClassAdNoTypes(strm, *ad) ||
+	if (!putClassAd(strm, *ad, PUT_CLASSAD_NO_TYPES) ||
 	    !strm->end_of_message())
 	{
 		dprintf (D_ALWAYS, "Could not send priority information\n");
@@ -1009,7 +1015,7 @@ GET_PRIORITY_ROLLUP_commandHandler(int, Stream *strm) {
     dprintf(D_ALWAYS, "Getting state information from the accountant\n");
     AttrList* ad = accountant.ReportState(true);
 
-    if (!putClassAdNoTypes(strm, *ad) ||
+    if (!putClassAd(strm, *ad, PUT_CLASSAD_NO_TYPES) ||
         !strm->end_of_message()) {
         dprintf (D_ALWAYS, "Could not send priority information\n");
         delete ad;
@@ -1041,7 +1047,7 @@ GET_RESLIST_commandHandler (int, Stream *strm)
 	AttrList* ad=accountant.ReportState(submitter);
 	dprintf (D_ALWAYS,"Getting state information from the accountant\n");
 	
-	if (!putClassAdNoTypes(strm, *ad) ||
+	if (!putClassAd(strm, *ad, PUT_CLASSAD_NO_TYPES) ||
 	    !strm->end_of_message())
 	{
 		dprintf (D_ALWAYS, "Could not send resource list\n");
@@ -1066,7 +1072,6 @@ compute_significant_attrs(ClassAdListDoesNotDeleteAds & startdAds)
 	ClassAd *startd_ad = NULL;
 	ClassAd *sample_startd_ad = NULL;
 	startdAds.Open ();
-	StringList internal_references;	// not used...
 	StringList external_references;	// this is what we want to compute. 
 	while ((startd_ad = startdAds.Next ())) { // iterate through all startd ads
 		if ( !sample_startd_ad ) {
@@ -1085,8 +1090,8 @@ compute_significant_attrs(ClassAdListDoesNotDeleteAds & startdAds)
 			// and rank.  Don't understand why? Ask Todd <tannenba@cs.wisc.edu>
 		AttrsToExpand.rewind();
 		while ( (attr_name = AttrsToExpand.next()) ) {
-			startd_ad->GetReferences(attr_name,internal_references,
-					external_references);
+			startd_ad->GetReferences(attr_name,NULL,
+					&external_references);
 		}	// while attr_name
 	}	// while startd_ad
 
@@ -1113,8 +1118,8 @@ compute_significant_attrs(ClassAdListDoesNotDeleteAds & startdAds)
 	if ( tmp && PreemptionReq ) {	// add references from preemption_requirements
 		const char* preempt_req_name = "preempt_req__";	// any name will do
 		sample_startd_ad->AssignExpr(preempt_req_name,tmp);
-		sample_startd_ad->GetReferences(preempt_req_name,internal_references,
-					external_references);
+		sample_startd_ad->GetReferences(preempt_req_name,NULL,
+					&external_references);
 	}
 	free(tmp);
 	if (sample_startd_ad) {
@@ -1289,6 +1294,8 @@ negotiationTime ()
 	// since a different set of machines may now be available.
 	if (MatchList) delete MatchList;
 	MatchList = NULL;
+
+	ScheddsTimeInCycle.clear();
 
 	// ----- Get all required ads from the collector
     time_t start_time_phase1 = time(NULL);
@@ -2392,6 +2399,7 @@ GroupEntry::GroupEntry():
     autoregroup(false),
     usage(0),
     submitterAds(NULL),
+    priority(0),
     quota(0),
     requested(0),
     currently_requested(0),
@@ -2405,7 +2413,8 @@ GroupEntry::GroupEntry():
     parent(NULL),
     children(),
     chmap(),
-    sort_ad(new ClassAd())
+    sort_ad(new ClassAd()),
+    sort_key(0)
 {
 }
 
@@ -2553,6 +2562,7 @@ negotiateWithGroup ( int untrimmed_num_startds,
 	double 		pieLeftOrig;
 	int         scheddAdsCountOrig;
 	int			totalTime;
+	int			totalTimeSchedd;
 	int			num_idle_jobs;
 
     int duration_phase3 = 0;
@@ -2610,7 +2620,12 @@ negotiateWithGroup ( int untrimmed_num_startds,
 				/* result parameters: */
 			pieLeft);
 
-        if (!ConsiderPreemption && (pieLeft <= 0)) break;
+		if (!ConsiderPreemption && (pieLeft <= 0)) {
+			dprintf(D_ALWAYS,
+				"Halting negotiation: no slots available to match (preemption disabled,%d trimmed slots,pieLeft=%.3f)\n",
+				startdAds.MyLength(),pieLeft);
+			break;
+		}
 
         if (1 == spin_pie) {
             // Sort the schedd list in decreasing priority order
@@ -2639,8 +2654,9 @@ negotiateWithGroup ( int untrimmed_num_startds,
 		// ----- Negotiate with the schedds in the sorted list
 		dprintf( D_ALWAYS, "Phase 4.%d:  Negotiating with schedds ...\n",
 			spin_pie );
-		dprintf (D_FULLDEBUG, "    numSlots = %d\n", numStartdAds);
+		dprintf (D_FULLDEBUG, "    numSlots = %d (after trimming=%d)\n", numStartdAds,startdAds.MyLength());
 		dprintf (D_FULLDEBUG, "    slotWeightTotal = %f\n", slotWeightTotal);
+		dprintf (D_FULLDEBUG, "    minSlotWeight = %f\n", minSlotWeight);
 		dprintf (D_FULLDEBUG, "    pieLeft = %.3f\n", pieLeft);
 		dprintf (D_FULLDEBUG, "    NormalFactor = %f\n", normalFactor);
 		dprintf (D_FULLDEBUG, "    MaxPrioValue = %f\n", maxPrioValue);
@@ -2678,21 +2694,15 @@ negotiateWithGroup ( int untrimmed_num_startds,
 				totalTime = 0;
 			}
 
-			if (( num_idle_jobs > 0 ) && (totalTime < MaxTimePerSubmitter) ) {
+			totalTimeSchedd = ScheddsTimeInCycle[scheddAddr.Value()];
+
+			if (( num_idle_jobs > 0 ) && (totalTime < MaxTimePerSubmitter) &&
+				(totalTimeSchedd < MaxTimePerSchedd)) {
 				dprintf(D_ALWAYS,"  Negotiating with %s at %s\n",
 					scheddName.Value(), scheddAddr.Value());
-				dprintf(D_ALWAYS, "%d seconds so far\n", totalTime);
+				dprintf(D_ALWAYS, "%d seconds so far for this submitter\n", totalTime);
+				dprintf(D_ALWAYS, "%d seconds so far for this schedd\n", totalTimeSchedd);
 			}
-
-			// store the verison of the schedd, so we can take advantage of
-			// protocol improvements in newer versions while still being
-			// backwards compatible.
-			char *schedd_ver_string = NULL;
-			schedd->LookupString(ATTR_VERSION, &schedd_ver_string);
-			ASSERT(schedd_ver_string);
-			CondorVersionInfo	scheddVersion(schedd_ver_string);
-			free(schedd_ver_string);
-			schedd_ver_string = NULL;
 
 			double submitterLimit = 0.0;
             double submitterLimitUnclaimed = 0.0;
@@ -2759,7 +2769,7 @@ negotiateWithGroup ( int untrimmed_num_startds,
 			rejPreemptForPolicy = 0;
 			rejPreemptForRank = 0;
 			rejForSubmitterLimit = 0;
-            rejectedConcurrencyLimit = "";
+			rejectedConcurrencyLimits.clear();
 
 			// Optimizations: 
 			// If number of idle jobs = 0, don't waste time with negotiate.
@@ -2773,6 +2783,7 @@ negotiateWithGroup ( int untrimmed_num_startds,
 			int remainingTimeForThisCycle = MaxTimePerCycle - 
 						(startTime - negotiation_cycle_stats[0]->start_time);
 			int remainingTimeForThisSubmitter = MaxTimePerSubmitter - totalTime;
+			int remainingTimeForThisSchedd = MaxTimePerSchedd - totalTimeSchedd;
 			if ( num_idle_jobs == 0 ) {
 				dprintf(D_FULLDEBUG,
 					"  Negotiating with %s skipped because no idle jobs\n",
@@ -2787,30 +2798,39 @@ negotiateWithGroup ( int untrimmed_num_startds,
 					totalTime, MaxTimePerSubmitter);
 				negotiation_cycle_stats[0]->submitters_out_of_time.insert(scheddName.Value());
 				result = MM_DONE;
+			} else if (remainingTimeForThisSchedd <= 0) {
+				dprintf(D_ALWAYS,
+					"  Negotiation with %s skipped because of time limits:\n",
+					scheddName.Value());
+				dprintf(D_ALWAYS,
+					"  %d seconds spent on this schedd, MAX_TIME_PER_SCHEDD is %d secs\n ",
+					totalTimeSchedd, MaxTimePerSchedd);
+				result = MM_DONE;
 			} else if (remainingTimeForThisCycle <= 0) {
 				dprintf(D_ALWAYS,
 					"  Negotiation with %s skipped because MAX_TIME_PER_CYCLE of %d secs exceeded\n",
 					scheddName.Value(),MaxTimePerCycle);
 				result = MM_DONE;
+			} else if ((submitterLimit < minSlotWeight || pieLeft < minSlotWeight) && (spin_pie > 1)) {
+				dprintf(D_ALWAYS,
+					"  Negotiation with %s skipped as pieLeft < minSlotWeight\n",
+					scheddName.Value());
+				result = MM_RESUME;
 			} else {
-				if ((submitterLimit < minSlotWeight || pieLeft < minSlotWeight) && (spin_pie > 1)) {
-					result = MM_RESUME;
-				} else {
-					int numMatched = 0;
-					time_t deadline = startTime + 
-						MIN(MaxTimePerSpin, MIN(remainingTimeForThisCycle,remainingTimeForThisSubmitter));
-                    if (negotiation_cycle_stats[0]->active_submitters.count(scheddName.Value()) <= 0) {
-                        negotiation_cycle_stats[0]->num_idle_jobs += num_idle_jobs;
-                    }
-					negotiation_cycle_stats[0]->active_submitters.insert(scheddName.Value());
-					negotiation_cycle_stats[0]->active_schedds.insert(scheddAddr.Value());
-					result=negotiate(groupName, scheddName.Value(), schedd, submitterPrio,
-                                  submitterLimit, submitterLimitUnclaimed,
-								  startdAds, claimIds, 
-								  ignore_submitter_limit,
-								  deadline, numMatched, pieLeft);
-					updateNegCycleEndTime(startTime, schedd);
-				}
+				int numMatched = 0;
+				time_t deadline = startTime + 
+					MIN(MaxTimePerSpin, MIN(remainingTimeForThisCycle, MIN(remainingTimeForThisSubmitter, remainingTimeForThisSchedd)));
+                if (negotiation_cycle_stats[0]->active_submitters.count(scheddName.Value()) <= 0) {
+                    negotiation_cycle_stats[0]->num_idle_jobs += num_idle_jobs;
+                }
+				negotiation_cycle_stats[0]->active_submitters.insert(scheddName.Value());
+				negotiation_cycle_stats[0]->active_schedds.insert(scheddAddr.Value());
+				result=negotiate(groupName, scheddName.Value(), schedd, submitterPrio,
+                              submitterLimit, submitterLimitUnclaimed,
+							  startdAds, claimIds, 
+							  ignore_submitter_limit,
+							  deadline, numMatched, pieLeft);
+				updateNegCycleEndTime(startTime, schedd);
 			}
 
 			switch (result)
@@ -2978,6 +2998,7 @@ trimStartdAds_ShutdownLogic(ClassAdListDoesNotDeleteAds &startdAds)
 			// startd and the negotiator.
 			myCurrentTime = now;
 			ad->LookupInteger(ATTR_MY_CURRENT_TIME,myCurrentTime);
+			ExprTree *old_currtime = ad->Remove(ATTR_CURRENT_TIME);
 			ad->Assign(ATTR_CURRENT_TIME,myCurrentTime + threshold); // change time
 
 			// Now that CurrentTime is set into the future, evaluate
@@ -2990,7 +3011,9 @@ trimStartdAds_ShutdownLogic(ClassAdListDoesNotDeleteAds &startdAds)
 			}
 
 			// Put CurrentTime back to how we found it, ie = time()
-			ad->AssignExpr(ATTR_CURRENT_TIME,"time()"); 
+			if ( old_currtime ) {
+				ad->Insert(ATTR_CURRENT_TIME, old_currtime, false);
+			}
 		}
 		// If the startd is shutting down threshold seconds in the future, remove it
 		if ( shutdown ) {
@@ -3334,8 +3357,11 @@ obtainAdsFromCollector (
 		} else if( !strcmp(GetMyTypeName(*ad),SUBMITTER_ADTYPE) ) {
 
             MyString subname;
-            if (!ad->LookupString(ATTR_NAME, subname)) {
-                dprintf(D_ALWAYS, "WARNING: ignoring submitter ad with no name\n");
+            string schedd_addr;
+            if (!ad->LookupString(ATTR_NAME, subname) ||
+                !ad->LookupString(ATTR_SCHEDD_IP_ADDR, schedd_addr)) {
+
+                dprintf(D_ALWAYS, "WARNING: ignoring submitter ad with no name and/or address\n");
                 continue;
             }
 
@@ -3352,6 +3378,8 @@ obtainAdsFromCollector (
             }
 
     		ad->Assign(ATTR_TOTAL_TIME_IN_CYCLE, 0);
+
+			ScheddsTimeInCycle[schedd_addr] = 0;
 
 			// Now all that is left is to insert the submitter ad
 			// into our list. However, if want_globaljobprio is true,
@@ -3546,15 +3574,11 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 		   int& numMatched, double &pieLeft)
 {
 	ReliSock	*sock;
-	int			reply;
-	int			cluster, proc;
+	int			cluster, proc, autocluster;
 	int			result;
 	time_t		currentTime;
 	time_t		beginTime = time(NULL);
 	ClassAd		request;
-	ClassAd     cached_resource_request;
-	int			resource_request_count = 0;  // how many resources desired in resource request
-	int			resource_request_offers = 0; // how many resources offered on behalf of this request
 	ClassAd*    offer = NULL;
 	bool		only_consider_startd_rank = false;
 	bool		display_overlimit = true;
@@ -3570,6 +3594,22 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 	if( !scheddAd->LookupString(ATTR_SUBMITTER_TAG,submitter_tag) ) {
 			// schedd must be older than 7.5.4
 		negotiate_cmd = NEGOTIATE_WITH_SIGATTRS;
+	}
+
+	// fetch the verison of the schedd, so we can take advantage of
+	// protocol improvements in newer versions while still being
+	// backwards compatible.  
+	MyString schedd_version_string;
+	scheddAd->LookupString(ATTR_VERSION,schedd_version_string);	
+	// from the version of the schedd, figure out the version of the negotiate 
+	// protocol supported.
+	int schedd_negotiate_protocol_version = 0; 
+	if ( !schedd_version_string.empty() ) {
+		CondorVersionInfo	scheddVersion(schedd_version_string.Value());
+		if ( scheddVersion.built_since_version(8,3,0) ) {
+			// resource request lists supported...
+			schedd_negotiate_protocol_version = 1;
+		}
 	}
 
 	// Because of CCB, we may end up contacting a different
@@ -3595,6 +3635,12 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 			// not in the cache already, create a new connection and
 			// add it to the cache.  We want to use a Daemon object to
 			// send the first command so we setup a security session. 
+
+		if (IsDebugLevel(D_COMMAND)) {
+			int cmd = negotiate_cmd;
+			dprintf (D_COMMAND, "Matchmaker::negotiate(%s,...) making connection to %s\n", getCommandStringSafe(cmd), scheddAddr.Value());
+		}
+
 		Daemon schedd( scheddAd, DT_SCHEDD, 0 );
 		sock = schedd.reliSock( NegotiatorTimeout );
 		if( ! sock ) {
@@ -3684,9 +3730,9 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 		sockCache->invalidateSock(scheddAddr.Value());
 		return MM_ERROR;
 	}
-
 	
 	// 2.  negotiation loop with schedd
+	ResourceRequestList request_list(schedd_negotiate_protocol_version);  
 	for (numMatched=0;true;numMatched++)
 	{
 		// Service any interactive commands on our command socket.
@@ -3703,9 +3749,10 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 		if (currentTime >= deadline) {
 			dprintf (D_ALWAYS, 	
 			"    Reached deadline for %s after %d sec... stopping\n"
-			"       MAX_TIME_PER_SUBMITTER = %d sec, MAX_TIME_PER_CYCLE = %d sec, MAX_TIME_PER_PIESPIN = %d sec\n",
+			"       MAX_TIME_PER_SUBMITTER = %d sec, MAX_TIME_PER_SCHEDD = %d sec, MAX_TIME_PER_CYCLE = %d sec, MAX_TIME_PER_PIESPIN = %d sec\n",
 				schedd_id.Value(), (int)(currentTime - beginTime),
-				MaxTimePerSubmitter, MaxTimePerCycle, MaxTimePerSpin);
+				MaxTimePerSubmitter, MaxTimePerSchedd, MaxTimePerCycle,
+				MaxTimePerSpin);
 			break;	// get out of the infinite for loop & stop negotiating
 		}
 
@@ -3731,102 +3778,32 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 
 
 		// 2a.  ask for job information
-		if ( resource_request_count > ++resource_request_offers ) {
-			// no need to go to the schedd to ask for another resource request,
-			// since we have not yet handed out the number of requested matches
-			// for the request we already have cached.
-			request = cached_resource_request;
-		} else {
-			// need to go over the wire and ask the schedd for the request
-			int sleepy = param_integer("NEG_SLEEP", 0);
-				//  This sleep is useful for any testing that calls for a
-				//  long negotiation cycle, please do not remove
-				//  it. Examples of such testing are the async negotiation
-				//  protocol w/ schedds and reconfig delaying until after
-				//  a negotiation cycle. -matt 21 mar 2012
-			if ( sleepy ) {
-				dprintf(D_ALWAYS, "begin sleep: %d seconds\n", sleepy);
-				sleep(sleepy); // TODD DEBUG - allow schedd to do other things
-				dprintf(D_ALWAYS, "end sleep: %d seconds\n", sleepy);
-			}
-			dprintf (D_FULLDEBUG, "    Sending SEND_JOB_INFO/eom\n");
-			sock->encode();
-			if (!sock->put(SEND_JOB_INFO) || !sock->end_of_message())
-			{
-				dprintf (D_ALWAYS, "    Failed to send SEND_JOB_INFO/eom\n");
+		if ( !request_list.getRequest(request,cluster,proc,autocluster,sock) ) {
+			// Failed to get a request.  Check to see if it is because
+			// of an error talking to the schedd.
+			if ( request_list.hadError() ) {
+				// note: error message already dprintf-ed 
 				sockCache->invalidateSock(scheddAddr.Value());
 				return MM_ERROR;
+			} 
+			// Failed to get a request, and no error occured.  
+			// If we have negotiated above our submitterLimit, we have only
+			// considered matching if the offer strictly prefers the request.
+			// So in this case, return MM_RESUME since there still may be
+			// jobs which the schedd wants scheduled but have not been considered
+			// as candidates for no preemption or user priority preemption.
+			// Also, if we were limited by submitterLimit, resume
+			// in the next spin of the pie, because our limit might
+			// increase.
+			if( limitUsed >= submitterLimit || limited_by_submitterLimit ) {
+				return MM_RESUME;
+			} else {
+				return MM_DONE;
 			}
+		}
+		// end of asking for job information - we now have a request
+	
 
-			// 2b.  the schedd may either reply with JOB_INFO or NO_MORE_JOBS
-			dprintf (D_FULLDEBUG, "    Getting reply from schedd ...\n");
-			sock->decode();
-			if (!sock->get (reply))
-			{
-				dprintf (D_ALWAYS, "    Failed to get reply from schedd\n");
-				sock->end_of_message ();
-				sockCache->invalidateSock(scheddAddr.Value());
-				return MM_ERROR;
-			}
-
-			// 2c.  if the schedd replied with NO_MORE_JOBS, cleanup and quit
-			if (reply == NO_MORE_JOBS)
-			{
-				dprintf (D_ALWAYS, "    Got NO_MORE_JOBS;  done negotiating\n");
-				sock->end_of_message ();
-					// If we have negotiated above our submitterLimit, we have only
-					// considered matching if the offer strictly prefers the request.
-					// So in this case, return MM_RESUME since there still may be
-					// jobs which the schedd wants scheduled but have not been considered
-					// as candidates for no preemption or user priority preemption.
-					// Also, if we were limited by submitterLimit, resume
-					// in the next spin of the pie, because our limit might
-					// increase.
-				if( limitUsed >= submitterLimit || limited_by_submitterLimit ) {
-					return MM_RESUME;
-				} else {
-					return MM_DONE;
-				}
-			}
-			else
-			if (reply != JOB_INFO)
-			{
-				// something goofy
-				dprintf(D_ALWAYS,"    Got illegal command %d from schedd\n",reply);
-				sock->end_of_message ();
-				sockCache->invalidateSock(scheddAddr.Value());
-				return MM_ERROR;
-			}
-
-			// 2d.  get the request
-			dprintf (D_FULLDEBUG,"    Got JOB_INFO command; getting classad/eom\n");
-			if (!getClassAd(sock, request) || !sock->end_of_message())
-			{
-				dprintf(D_ALWAYS, "    JOB_INFO command not followed by ad/eom\n");
-				sock->end_of_message();
-				sockCache->invalidateSock(scheddAddr.Value());
-				return MM_ERROR;
-			}
-			if (!request.LookupInteger (ATTR_CLUSTER_ID, cluster) ||
-				!request.LookupInteger (ATTR_PROC_ID, proc))
-			{
-				dprintf (D_ALWAYS, "    Could not get %s and %s from request\n",
-						ATTR_CLUSTER_ID, ATTR_PROC_ID);
-				sockCache->invalidateSock( scheddAddr.Value() );
-				return MM_ERROR;
-			}
-			resource_request_offers = 0;
-			resource_request_count = 0;
-			if ( param_boolean("USE_RESOURCE_REQUEST_COUNTS",true) ) {
-				request.LookupInteger(ATTR_RESOURCE_REQUEST_COUNT,resource_request_count);
-				if (resource_request_count > 0) {
-					cached_resource_request = request;
-				}
-			}
-		}	// end of going over wire to ask schedd for request
-
-		dprintf(D_ALWAYS, "    Request %05d.%05d:  (request count %d of %d)\n", cluster, proc,
-			resource_request_offers+1,resource_request_count);
         negotiation_cycle_stats[0]->num_jobs_considered += 1;
 
 #if defined(ADD_TARGET_SCOPING)
@@ -3886,9 +3863,12 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 
 			if( !offer )
 			{
+				// lookup want_match_diagnostics in request
+				// 0 = no match diagnostics
+				// 1 = match diagnostics string
+				// 2 = match diagnostics string w/ autocluster + jobid
 				int want_match_diagnostics = 0;
-				request.LookupBool (ATTR_WANT_MATCH_DIAGNOSTICS,
-									want_match_diagnostics);
+				request.LookupInteger(ATTR_WANT_MATCH_DIAGNOSTICS,want_match_diagnostics);
 				string diagnostic_message;
 				// no match found
 				dprintf(D_ALWAYS|D_MATCH, "      Rejected %d.%d %s %s: ",
@@ -3908,7 +3888,15 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 					if (rejForNetworkShare) {
 						diagnostic_message = "network share exceeded";
 					} else if (rejForConcurrencyLimit) {
-						diagnostic_message = "concurrency limit " + rejectedConcurrencyLimit + " reached";
+						std::stringstream ss;
+						std::set<std::string>::const_iterator it = rejectedConcurrencyLimits.begin();
+						while (true) {
+							ss << *it;
+							it++;
+							if (it == rejectedConcurrencyLimits.end()) {break;}
+							else {ss << ", ";}
+						}
+						diagnostic_message = "concurrency limit " + ss.str() + " reached";
 					} else if (rejPreemptForPolicy) {
 						diagnostic_message =
 							"PREEMPTION_REQUIREMENTS == False";
@@ -3921,6 +3909,12 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 					}
 					dprintf(D_ALWAYS|D_MATCH|D_NOHEADER, "%s\n",
 							diagnostic_message.c_str());
+				}
+				// add in autocluster and job id info if requested
+				if ( want_match_diagnostics == 2 ) {
+					string diagnostic_jobinfo;
+					formatstr(diagnostic_jobinfo," |%d|%d.%d|",autocluster,cluster,proc);
+					diagnostic_message += diagnostic_jobinfo;
 				}
 				sock->encode();
 				if ((want_match_diagnostics) ? 
@@ -3990,7 +3984,7 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 		{
 			numMatched--;		// haven't used any resources this cycle
 
-			resource_request_count = 0;	// do not reuse any cached request
+			request_list.noMatchFound(); // do not reuse any cached requests
 
             if (rejForSubmitterLimit && !ConsiderPreemption && !accountant.UsingWeightedSlots()) {
                 // If we aren't considering preemption and slots are unweighted, then we can
@@ -4061,6 +4055,7 @@ negotiate(char const* groupName, char const *scheddName, const ClassAd *scheddAd
 void Matchmaker::
 updateNegCycleEndTime(time_t startTime, ClassAd *submitter) {
 	MyString buffer;
+	string schedd_addr;
 	time_t endTime;
 	int oldTotalTime;
 
@@ -4069,6 +4064,10 @@ updateNegCycleEndTime(time_t startTime, ClassAd *submitter) {
 	buffer.formatstr("%s = %ld", ATTR_TOTAL_TIME_IN_CYCLE, (oldTotalTime + 
 					(endTime - startTime)) );
 	submitter->Insert(buffer.Value());
+
+	if ( submitter->LookupString( ATTR_SCHEDD_IP_ADDR, schedd_addr ) ) {
+		ScheddsTimeInCycle[schedd_addr] += endTime - startTime;
+	}
 }
 
 float Matchmaker::
@@ -4124,6 +4123,58 @@ SubmitterLimitPermits(ClassAd* request, ClassAd* candidate, double used, double 
 	return false;
 }
 
+bool
+Matchmaker::
+rejectForConcurrencyLimits(std::string &limits)
+{
+	std::transform(limits.begin(), limits.end(), limits.begin(), ::tolower);
+	if (lastRejectedConcurrencyString == limits) {
+		//dprintf(D_FULLDEBUG, "Rejecting job due to concurrency limits %s (see original rejection message).\n", limits.c_str());
+		return true;
+	}
+
+	StringList list(limits.c_str());
+	char *limit;
+	MyString str;
+	list.rewind();
+	while ((limit = list.next())) {
+		double increment;
+		if ( !ParseConcurrencyLimit(limit, increment) ) {
+			dprintf( D_FULLDEBUG, "Ignoring invalid concurrency limit '%s'\n",
+					 limit );
+			continue;
+		}
+
+		str = limit;
+		double count = accountant.GetLimit(str);
+
+		double max = accountant.GetLimitMax(str);
+
+		dprintf(D_FULLDEBUG,
+			"Concurrency Limit: %s is %f of max %f\n",
+			limit, count, max);
+
+		if (count < 0) {
+			dprintf(D_ALWAYS, "ERROR: Concurrency Limit %s is %f (below 0)\n",
+				limit, count);
+			return true;
+		}
+
+		if (count + increment > max) {
+			dprintf(D_FULLDEBUG,
+				"Concurrency Limit %s is %f, requesting %f, "
+				"but cannot exceed %f\n",
+				limit, count, increment, max);
+
+			rejForConcurrencyLimit++;
+			rejectedConcurrencyLimits.insert(limit);
+			lastRejectedConcurrencyString = limits;
+			return true;
+		}
+	}
+	return false;
+}
+
 
 /*
 Warning: scheddAddr may not be the actual address we'll use to contact the
@@ -4159,7 +4210,6 @@ matchmakingAlgorithm(const char *scheddName, const char *scheddAddr, ClassAd &re
 	string remoteUser;
 	classad::Value	result;
 	bool			val;
-	float			tmp;
 		// request attributes
 	int				requestAutoCluster = -1;
 
@@ -4167,49 +4217,18 @@ matchmakingAlgorithm(const char *scheddName, const char *scheddAddr, ClassAd &re
 
 		// Check resource constraints requested by request
 	rejForConcurrencyLimit = 0;
-    rejectedConcurrencyLimit = "";
-	MyString limits;
+	lastRejectedConcurrencyString = "";
+	std::string limits;
+	bool evaluate_limits_with_match = true;
 	if (request.LookupString(ATTR_CONCURRENCY_LIMITS, limits)) {
-		limits.lower_case();
-		StringList list(limits.Value());
-		char *limit;
-		MyString str;
-		list.rewind();
-		while ((limit = list.next())) {
-			double increment;
-
-			if ( !ParseConcurrencyLimit(limit, increment) ) {
-				dprintf( D_FULLDEBUG, "Ignoring invalid concurrency limit '%s'\n",
-						 limit );
-				continue;
-			}
-
-			str = limit;
-			double count = accountant.GetLimit(str);
-
-			double max = accountant.GetLimitMax(str);
-
-			dprintf(D_FULLDEBUG,
-					"Concurrency Limit: %s is %f\n",
-					limit, count);
-
-			if (count < 0) {
- 				EXCEPT("ERROR: Concurrency Limit %s is %f (below 0)",
-					   limit, count);
-			}
-
-			if (count + increment > max) {
-				dprintf(D_FULLDEBUG,
-						"Concurrency Limit %s is %f, requesting %f, "
-						"but cannot exceed %f\n",
-						limit, count, increment, max);
-
-				rejForConcurrencyLimit++;
-                rejectedConcurrencyLimit = limit;
-				return NULL;
-			}
+		evaluate_limits_with_match = false;
+		if (rejectForConcurrencyLimits(limits)) {
+			return NULL;
 		}
+	} else if (!request.Lookup(ATTR_CONCURRENCY_LIMITS)) {
+		evaluate_limits_with_match = false;
 	}
+	rejectedConcurrencyLimits.clear();
 
 	request.LookupInteger(ATTR_AUTO_CLUSTER_ID, requestAutoCluster);
 
@@ -4232,14 +4251,22 @@ matchmakingAlgorithm(const char *scheddName, const char *scheddAddr, ClassAd &re
 		// we can use cached information.  pop off the best
 		// candidate from our sorted list.
 		while( (cached_bestSoFar = MatchList->pop_candidate()) ) {
-            int t = 0;
-            cached_bestSoFar->LookupInteger(ATTR_PREEMPT_STATE_, t);
-            PreemptState pstate = PreemptState(t);
+			if (evaluate_limits_with_match) {
+				std::string limits;
+				if (request.EvalString(ATTR_CONCURRENCY_LIMITS, cached_bestSoFar, limits)) {
+					if (rejectForConcurrencyLimits(limits)) {
+						continue;
+					}
+				}
+			}
+			int t = 0;
+			cached_bestSoFar->LookupInteger(ATTR_PREEMPT_STATE_, t);
+			PreemptState pstate = PreemptState(t);
 			if ((pstate != NO_PREEMPTION) && SubmitterLimitPermits(&request, cached_bestSoFar, limitUsed, submitterLimit, pieLeft)) {
 				break;
 			} else if (SubmitterLimitPermits(&request, cached_bestSoFar, limitUsedUnclaimed, submitterLimitUnclaimed, pieLeft)) {
 				break;
-            }
+			}
 			MatchList->increment_rejForSubmitterLimit();
 		}
 		dprintf(D_FULLDEBUG,"Attempting to use cached MatchList: %s (MatchList length: %d, Autocluster: %d, Schedd Name: %s, Schedd Address: %s)\n",
@@ -4308,7 +4335,11 @@ matchmakingAlgorithm(const char *scheddName, const char *scheddAddr, ClassAd &re
 			bool is_dslot = false;
 			candidate->LookupBool( ATTR_SLOT_DYNAMIC, is_dslot );
 			if ( is_dslot ) {
-				continue;
+				bool rollup = false;
+				candidate->LookupBool( ATTR_PSLOT_ROLLUP_INFORMATION, rollup );
+				if ( rollup ) {
+					continue;
+				}
 			}
 		}
 
@@ -4475,26 +4506,14 @@ matchmakingAlgorithm(const char *scheddName, const char *scheddAddr, ClassAd &re
             continue;
         }
 
-		candidatePreJobRankValue = EvalNegotiatorMatchRank(
-		  "NEGOTIATOR_PRE_JOB_RANK",NegotiatorPreJobRank,
-		  request,candidate);
-
-		// calculate the request's rank of the offer
-		if(!request.EvalFloat(ATTR_RANK,candidate,tmp)) {
-			tmp = 0.0;
+		if (evaluate_limits_with_match) {
+			std::string limits;
+			if (request.EvalString(ATTR_CONCURRENCY_LIMITS, candidate, limits) && rejectForConcurrencyLimits(limits)) {
+				continue;
+			}
 		}
-		candidateRankValue = tmp;
 
-		candidatePostJobRankValue = EvalNegotiatorMatchRank(
-		  "NEGOTIATOR_POST_JOB_RANK",NegotiatorPostJobRank,
-		  request,candidate);
-
-		candidatePreemptRankValue = -(FLT_MAX);
-		if(candidatePreemptState != NO_PREEMPTION) {
-			candidatePreemptRankValue = EvalNegotiatorMatchRank(
-			  "PREEMPTION_RANK",PreemptionRank,
-			  request,candidate);
-		}
+		calculateRanks(request, candidate, candidatePreemptState, candidateRankValue, candidatePreJobRankValue, candidatePostJobRankValue, candidatePreemptRankValue);
 
 		if ( MatchList ) {
 			MatchList->add_candidate(
@@ -4694,6 +4713,58 @@ insertNegotiatorMatchExprs( ClassAdListDoesNotDeleteAds &cal )
 }
 
 void Matchmaker::
+calculateRanks(ClassAd &request,
+               ClassAd *candidate,
+               PreemptState candidatePreemptState,
+               double &candidateRankValue,
+               double &candidatePreJobRankValue,
+               double &candidatePostJobRankValue,
+               double &candidatePreemptRankValue
+              )
+{
+	candidatePreJobRankValue = EvalNegotiatorMatchRank(
+		"NEGOTIATOR_PRE_JOB_RANK",NegotiatorPreJobRank,
+		request, candidate);
+
+	// calculate the request's rank of the candidate
+	double tmp;
+	if(!request.EvalFloat(ATTR_RANK, candidate, tmp)) {
+		tmp = 0.0;
+	}
+	candidateRankValue = tmp;
+
+	candidatePostJobRankValue = EvalNegotiatorMatchRank(
+		"NEGOTIATOR_POST_JOB_RANK",NegotiatorPostJobRank,
+		request, candidate);
+
+	candidatePreemptRankValue = -(FLT_MAX);
+	if(candidatePreemptState != NO_PREEMPTION) {
+		candidatePreemptRankValue = EvalNegotiatorMatchRank(
+			"PREEMPTION_RANK",PreemptionRank,
+			request, candidate);
+	}
+}
+
+	// NOTE NOTE: this assumes that p-slots are not being preempted.
+bool Matchmaker::
+returnPslotToMatchList(ClassAd &request, ClassAd *offer)
+{
+	if (!MatchList) {return false;}
+
+	double candidateRankValue, candidatePreJobRankValue, candidatePostJobRankValue, candidatePreemptRankValue;
+	calculateRanks(request, offer, NO_PREEMPTION, candidateRankValue, candidatePreJobRankValue, candidatePostJobRankValue, candidatePreemptRankValue);
+
+	return MatchList->insert_candidate(
+		offer,
+		candidateRankValue,
+		candidatePreJobRankValue,
+		candidatePostJobRankValue,
+		candidatePreemptRankValue,
+		NO_PREEMPTION
+	);
+}
+
+void Matchmaker::
 insertNegotiatorMatchExprs(ClassAd *ad)
 {
 	ASSERT(ad);
@@ -4720,7 +4791,8 @@ matchmakingProtocol (ClassAd &request, ClassAd *offer,
 						ClaimIdHash &claimIds, Sock *sock,
 					    const char* scheddName, const char* scheddAddr)
 {
-	int  cluster, proc;
+	int  cluster = 0;
+	int proc = 0;
 	MyString startdAddr;
 	string remoteUser;
 	char accountingGroup[256];
@@ -4827,7 +4899,7 @@ matchmakingProtocol (ClassAd &request, ClassAd *offer,
 		// the Schedd, they must be stashed before PERMISSION_AND_AD
 		// is sent.
 	MyString limits;
-	if (request.LookupString(ATTR_CONCURRENCY_LIMITS, limits)) {
+	if (request.EvalString(ATTR_CONCURRENCY_LIMITS, offer, limits)) {
 		limits.lower_case();
 		offer->Assign(ATTR_MATCHED_CONCURRENCY_LIMITS, limits);
 	} else {
@@ -4839,6 +4911,11 @@ matchmakingProtocol (ClassAd &request, ClassAd *offer,
     offer->CopyAttribute(ATTR_REMOTE_GROUP, ATTR_SUBMITTER_GROUP, &request);
     offer->CopyAttribute(ATTR_REMOTE_NEGOTIATING_GROUP, ATTR_SUBMITTER_NEGOTIATING_GROUP, &request);
     offer->CopyAttribute(ATTR_REMOTE_AUTOREGROUP, ATTR_SUBMITTER_AUTOREGROUP, &request);
+
+	// insert cluster and proc from the request into the offer; this is
+	// used by schedd_negotiate.cpp when resource request lists are being used
+	offer->Assign(ATTR_RESOURCE_REQUEST_CLUSTER,cluster);
+	offer->Assign(ATTR_RESOURCE_REQUEST_PROC,proc);
 
 	// ---- real matchmaking protocol begins ----
 	// 1.  contact the startd 
@@ -4914,6 +4991,19 @@ matchmakingProtocol (ClassAd &request, ClassAd *offer,
         // At this point the match is fully vetted so we can also deduct
         // the resource assets.
         offer->Assign(CP_MATCH_COST, cp_deduct_assets(request, *offer));
+
+		if (MatchList)
+		{
+			consumption_map_t consumption;
+			cp_override_requested(request, *offer, consumption);
+			bool is_a_match = cp_sufficient_assets(*offer, consumption) && IsAMatch(&request, offer);
+			cp_restore_requested(request, consumption);
+				// NOTE: returnPslotToMatchList only works for p-slots; assumes they are not preempted.
+			if (is_a_match && !returnPslotToMatchList(request, offer))
+			{
+				dprintf(D_FULLDEBUG, "Unable to return still-valid offer to the match list.\n");
+			}
+		}
     }
 
     // 4. notifiy the accountant
@@ -5281,6 +5371,44 @@ pop_candidate()
 	return candidate;
 }
 
+// This method assumes the ad being inserted was just popped from the
+// top of the list. Specicifically, we assume there is room at the top
+// of the list for insertion, the list is sorted, and the ad being
+// inserted is likely to sort toward the top of the list.
+bool Matchmaker::MatchListType::
+insert_candidate(ClassAd * candidate,
+	double candidateRankValue,
+	double candidatePreJobRankValue,
+	double candidatePostJobRankValue,
+	double candidatePreemptRankValue,
+	PreemptState candidatePreemptState)
+{
+	if (adListHead == 0) {return false;}
+	adListHead--;
+	AdListEntry new_entry;
+	new_entry.ad = candidate;
+	new_entry.RankValue = candidateRankValue;
+	new_entry.PreJobRankValue = candidatePreJobRankValue;
+	new_entry.PostJobRankValue = candidatePostJobRankValue;
+	new_entry.PreemptRankValue = candidatePreemptRankValue;
+	new_entry.PreemptStateValue = candidatePreemptState;
+
+		// Hand-rolled insertion sort; as the list was previously sorted,
+		// we know this will be O(n).
+	int insert_idx = adListHead;
+	while ( insert_idx < adListLen - 1 )
+	{
+		if ( sort_compare( &new_entry, &AdListArray[insert_idx + 1] ) > 0 ) {
+			AdListArray[insert_idx] = AdListArray[insert_idx + 1];
+			insert_idx++;
+		} else {
+			break;
+		}
+	}
+	AdListArray[insert_idx] = new_entry;
+	return true;
+}
+
 bool Matchmaker::MatchListType::
 cache_still_valid(ClassAd &request, ExprTree *preemption_req, ExprTree *preemption_rank,
 				  bool preemption_req_unstable, bool preemption_rank_unstable)
@@ -5564,8 +5692,10 @@ Matchmaker::updateCollector() {
         daemonCore->dc_stats.Publish(*publicAd);
 		daemonCore->monitor_data.ExportData(publicAd);
 
-		// log classad into sql log so that it can be updated to DB
-		FILESQL::daemonAdInsert(publicAd, "NegotiatorAd", FILEObj, prevLHF);	
+		if ( FILEObj ) {
+			// log classad into sql log so that it can be updated to DB
+			FILESQL::daemonAdInsert(publicAd, "NegotiatorAd", FILEObj, prevLHF);
+		}
 
 #if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN)
@@ -5608,6 +5738,9 @@ Matchmaker::invalidateNegotiatorAd( void )
 /* CONDORDB functions */
 void Matchmaker::insert_into_rejects(char const *userName, ClassAd& job)
 {
+	if ( !FILEObj ) {
+		return;
+	}
 	int cluster, proc;
 //	char startdname[80];
 	char globaljobid[200];
@@ -5647,6 +5780,9 @@ void Matchmaker::insert_into_rejects(char const *userName, ClassAd& job)
 }
 void Matchmaker::insert_into_matches(char const * userName,ClassAd& request, ClassAd& offer)
 {
+	if ( !FILEObj ) {
+		return;
+	}
 	char startdname[80],remote_user[80];
 	char globaljobid[200];
 	float remote_prio;
@@ -6036,7 +6172,7 @@ Matchmaker::pslotMultiMatch(ClassAd *job, ClassAd *machine, double preemptPrio) 
 		// need to add custom resources here
 
 		// In rank order, see if by preempting one more dslot would cause pslot to match
-	for (unsigned int slot = 0; slot < ranks.size() && ranks[slot].second < newRank; slot++) {
+	for (unsigned int slot = 0; slot < ranks.size() && ranks[slot].second <= newRank; slot++) {
 		int dSlot = ranks[slot].first; // dslot index in childXXX list
 
 			// if ranks are the same, consider preemption just based on user prio iff

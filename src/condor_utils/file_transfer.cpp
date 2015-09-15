@@ -242,6 +242,7 @@ FileTransfer::~FileTransfer()
 	if (perm_obj) delete perm_obj;
 #endif
 	free(m_sec_session_id);
+	delete plugin_table;
 }
 
 int
@@ -857,6 +858,11 @@ FileTransfer::DownloadFiles(bool blocking)
 
 		sock.timeout(clientSockTimeout);
 
+		if (IsDebugLevel(D_COMMAND)) {
+			dprintf (D_COMMAND, "FileTransfer::DownloadFiles(%s,...) making connection to %s\n",
+				getCommandStringSafe(FILETRANS_UPLOAD), TransSock ? TransSock : "NULL");
+		}
+
 		Daemon d( DT_ANY, TransSock );
 
 		if ( !d.connectSock(&sock,0) ) {
@@ -1218,6 +1224,11 @@ FileTransfer::UploadFiles(bool blocking, bool final_transfer)
 		}
 
 		sock.timeout(clientSockTimeout);
+
+		if (IsDebugLevel(D_COMMAND)) {
+			dprintf (D_COMMAND, "FileTransfer::UploadFiles(%s,...) making connection to %s\n",
+				getCommandStringSafe(FILETRANS_DOWNLOAD), TransSock ? TransSock : "NULL");
+		}
 
 		Daemon d( DT_ANY, TransSock );
 
@@ -1818,12 +1829,21 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 			break;
 		}
 		if (reply == 2) {
-			s->set_crypto_mode(true);
+			bool cryp_ret = s->set_crypto_mode(true);
+			if(!cryp_ret) {
+				dprintf(D_ALWAYS,"DoDownload: failed to enable crypto on incoming file, exiting at %d\n",__LINE__);
+				return_and_resetpriv( -1 );
+			}
 		} else if (reply == 3) {
 			s->set_crypto_mode(false);
 		}
 		else {
-			s->set_crypto_mode(socket_default_crypto);
+			bool cryp_ret = s->set_crypto_mode(socket_default_crypto);
+			if(!cryp_ret) {
+				dprintf(D_ALWAYS,"DoDownload: failed to change crypto to %i on incoming file, "
+					"exiting at %d\n", socket_default_crypto, __LINE__);
+				return_and_resetpriv( -1 );
+			}
 		}
 
 		// code() allocates memory for the string if the pointer is NULL.

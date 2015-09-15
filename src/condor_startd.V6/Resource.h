@@ -47,7 +47,7 @@ public:
 	static long long type_param_long(CpuAttributes* p_attr, const char * name, long long def_value);
 	static char * param(CpuAttributes* p_attr, const char * name);
 	static const char * param(std::string& out, CpuAttributes* p_attr, const char * name);
-	static void init_types(int max_type_id);
+	static void init_types(int max_type_id, bool first_init);
 
 private:
 	std::string shares; // share info from SLOT_TYPE_n attribute
@@ -397,7 +397,7 @@ Return
 
 Returns the Resource the job will actually be running on.  It does not need to
 be deleted.  The returned Resource might be different than the Resource passed
-in!  In particular, if the passed in Resource is a partitionable slow, we will
+in!  In particular, if the passed in Resource is a partitionable slot, we will
 carve out a new dynamic slot for his job.
 
 The job may be rejected, in which case the returned Resource will be null.

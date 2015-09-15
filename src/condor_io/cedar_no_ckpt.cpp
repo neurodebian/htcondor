@@ -40,7 +40,6 @@
 #include "ccb_client.h"
 #include "condor_sinful.h"
 #include "shared_port_client.h"
-#include "daemon_core_sock_adapter.h"
 #include "condor_netdb.h"
 #include "internet.h"
 #include "ipv6_hostname.h"
@@ -273,7 +272,7 @@ ReliSock::get_file( filesize_t *size, int fd,
 	}
 
 	if (flush_buffers && fd != GET_FILE_NULL_FD ) {
-		if (condor_fsync(fd) < 0) {
+		if (condor_fdatasync(fd) < 0) {
 			dprintf(D_ALWAYS, "get_file(): ERROR on fsync: %d\n", errno);
 			return -1;
 		}
@@ -714,7 +713,7 @@ ReliSock::get_x509_delegation( filesize_t *size, const char *destination,
 		if ( fd < 0 ) {
 			rc = fd;
 		} else {
-			rc = condor_fsync( fd, destination );
+			rc = condor_fdatasync( fd, destination );
 			::close( fd );
 		}
 		if ( rc < 0 ) {
@@ -782,6 +781,9 @@ int relisock_gsi_get(void *arg, void **bufp, size_t *sizep)
     
     //read size of data to read
     stat = sock->code( *((int *)sizep) );
+	if ( stat == FALSE ) {
+		*sizep = 0;
+	}
 
 	if( *((int *)sizep) == 0 ) {
 			// We avoid calling malloc(0) here, because the zero-length
@@ -886,8 +888,8 @@ int Sock::special_connect(char const *host,int /*port*/,bool nonblocking)
 		}
 
 		bool i_am_shared_port_server = false;
-		if( daemonCoreSockAdapter.isEnabled() ) {
-			char const *daemon_addr = daemonCoreSockAdapter.publicNetworkIpAddr();
+		if( daemonCore ) {
+			char const *daemon_addr = daemonCore->publicNetworkIpAddr();
 			if( daemon_addr ) {
 				Sinful my_sinful(daemon_addr);
 				if( my_sinful.getHost() && sinful.getHost() &&
@@ -908,7 +910,16 @@ int Sock::special_connect(char const *host,int /*port*/,bool nonblocking)
 				dprintf(D_FULLDEBUG,"Bypassing connection to shared port server, because its address is not yet established; passing socket directly to %s.\n",host);
 			}
 
-			return do_shared_port_local_connect( shared_port_id,nonblocking );
+			// do_shared_port_local_connect() calls create_socketpair(), which
+			// normally uses loopback addresses.  However, the loopback address
+			// may not be in the ALLOW list.  Instead, we need to use the
+			// address we would use to contact the shared port daemon.
+			const char * sharedPortIP = sinful.getHost();
+			// Presently, for either same_host or i_am_shared_port_server to
+			// be true, this must be as well.
+			ASSERT( sharedPortIP );
+
+			return do_shared_port_local_connect( shared_port_id, nonblocking, sharedPortIP );
 		}
 	}
 
@@ -940,6 +951,13 @@ int
 ReliSock::do_reverse_connect(char const *ccb_contact,bool nonblocking)
 {
 	ASSERT( !m_ccb_client.get() ); // only one reverse connect at a time!
+
+	//
+	// Since we can't change the CCB server without also changing the CCB
+	// client (that is, without breaking backwards compatibility), we have
+	// to determine if the server sent us ... a string we can't use.  Joy.
+	//
+
 	m_ccb_client =
 		new CCBClient( ccb_contact, (ReliSock *)this );
 
@@ -957,7 +975,7 @@ ReliSock::do_reverse_connect(char const *ccb_contact,bool nonblocking)
 }
 
 int
-SafeSock::do_shared_port_local_connect( char const *, bool )
+SafeSock::do_shared_port_local_connect( char const *, bool, char const * )
 {
 	dprintf(D_ALWAYS,
 			"SharedPortClient: WARNING: UDP not supported."
@@ -968,7 +986,7 @@ SafeSock::do_shared_port_local_connect( char const *, bool )
 }
 
 int
-ReliSock::do_shared_port_local_connect( char const *shared_port_id, bool nonblocking )
+ReliSock::do_shared_port_local_connect( char const *shared_port_id, bool nonblocking, char const *sharedPortIP )
 {
 		// Without going through SharedPortServer, we want to connect
 		// to a daemon that is local to this machine and which is set up
@@ -979,12 +997,8 @@ ReliSock::do_shared_port_local_connect( char const *shared_port_id, bool nonbloc
 
 	SharedPortClient shared_port_client;
 	ReliSock sock_to_pass;
-		// do not use loopback interface for socketpair unless this happens
-		// to be the standard network interface, because localhost
-		// typically does not happen to be allowed in the authorization policy
-	const bool use_standard_interface = true;
 	std::string orig_connect_addr = get_connect_addr() ? get_connect_addr() : "";
-	if( !connect_socketpair(sock_to_pass,use_standard_interface) ) {
+	if( !connect_socketpair(sock_to_pass, sharedPortIP) ) {
 		dprintf(D_ALWAYS,
 				"Failed to connect to loopback socket, so failing to connect via local shared port access to %s.\n",
 				peer_description());

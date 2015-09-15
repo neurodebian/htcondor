@@ -28,6 +28,7 @@
 #include "condor_ipverify.h"
 #include "condor_md.h"
 
+#include <memory>
 
 /*
 **	R E L I A B L E    S O C K
@@ -102,7 +103,7 @@ public:
 
 	virtual void cancel_reverse_connect();
 
-	virtual int do_shared_port_local_connect( char const *shared_port_id, bool nonblocking );
+	virtual int do_shared_port_local_connect( char const *shared_port_id, bool nonblocking,char const *sharedPortIP );
 
 		/** Connect this socket to another socket (s).
 			An implementation of socketpair() that works on windows as well
@@ -112,7 +113,8 @@ public:
 			                                use normal interface
 			@returns true on success, false on failure.
 		 */
-	bool connect_socketpair(ReliSock &dest,bool use_standard_interface=false);
+	bool connect_socketpair( ReliSock & dest );
+	bool connect_socketpair( ReliSock & dest, char const * asIfConnectingTo );
 
     ///
 	ReliSock();
@@ -126,15 +128,11 @@ public:
 
     ///
 	~ReliSock();
-    ///
-	void init();				/* shared initialization method */
 
     ///
 	int listen();
     /// FALSE means this is an incoming connection
 	int listen(condor_protocol proto, int port);
-    /// FALSE means this is an incoming connection
-	int listen(char *s);
 	bool isListenSock() { return _state == sock_special && _special_state == relisock_listen; }
 
     ///
@@ -242,9 +240,11 @@ public:
 	virtual int peek(char &);
 
     ///
-	int authenticate( const char* methods, CondorError* errstack, int auth_timeout );
+	int authenticate( const char* methods, CondorError* errstack, int auth_timeout, bool non_blocking );
     ///
-	int authenticate( KeyInfo *& key, const char* methods, CondorError* errstack, int auth_timeout, char **method_used=NULL );
+	int authenticate( KeyInfo *& key, const char* methods, CondorError* errstack, int auth_timeout, bool non_blocking, char **method_used );
+    ///
+	int authenticate_continue( CondorError* errstack, bool non_blocking, char **method_used );
     ///
 	int isClient() { return is_client; };
 
@@ -258,6 +258,7 @@ public:
 	int clear_backlog_flag() {bool state = m_has_backlog; m_has_backlog = false; return state;}
 	int clear_read_block_flag() {bool state = m_read_would_block; m_read_would_block = false; return state;}
 
+	bool is_closed() {return rcv_msg.m_closed;}
 //	PROTECTED INTERFACE TO RELIABLE SOCKS
 //
 protected:
@@ -283,7 +284,7 @@ protected:
 	int prepare_for_nobuffering( stream_coding = stream_unknown);
 	int perform_authenticate( bool with_key, KeyInfo *& key, 
 							  const char* methods, CondorError* errstack,
-							  int auth_timeout, char **method_used );
+							  int auth_timeout, bool non_blocking, char **method_used );
 
 
 	/*
@@ -309,7 +310,8 @@ protected:
 
 		ChainBuf	buf;
 		int			ready;
-                bool init_MD(CONDOR_MD_MODE mode, KeyInfo * key);
+		bool m_closed;
+		bool init_MD(CONDOR_MD_MODE mode, KeyInfo * key);
 	} rcv_msg;
 
 	class SndMsg {
@@ -354,6 +356,9 @@ protected:
 		// after connecting, request to be routed to this daemon
 	char *m_target_shared_port_id;
 
+	Authentication *m_authob;
+	bool m_auth_in_progress;
+
 	bool m_has_backlog;
 	bool m_read_would_block;
 	bool m_non_blocking;
@@ -361,6 +366,12 @@ protected:
 	virtual void setTargetSharedPortID( char const *id );
 	virtual bool sendTargetSharedPortID();
 	char const *getTargetSharedPortID() { return m_target_shared_port_id; }
+
+private:
+    ///
+	void init();				/* shared initialization method */
+
+	bool connect_socketpair_impl( ReliSock & dest, condor_protocol proto, bool isLoopback );
 };
 
 class BlockingModeGuard {

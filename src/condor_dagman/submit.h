@@ -46,8 +46,6 @@
 	@param whether to use the default log
 	@param log file to force this job to use (should be null if submit
 		file specifies log file)
-	@param prohibitMultiJobs flag that prohibits multiple jobs in a
-		cluster from being submitted.
 	@param hold_claim is true if DAGMAN_HOLD_CLAIM_IDLE is positive
 	@return true on success, false on failure
 */
@@ -55,22 +53,17 @@
 bool condor_submit( const Dagman &dm, const char* cmdFile, CondorID& condorID,
 					const char* DAGNodeName, MyString &DAGParentNodeNames,
 					List<Job::NodeVar> *vars, int retry,
-					const char* directory, const char *defLog, bool useDefLog,
-					const char *logFile, bool prohibitMultiJobs,
+					const char* directory, const char *worflowLogFile,
 					bool hold_claim );
-
-bool stork_submit( const Dagman &dm, const char* cmdFile, CondorID& condorID,
-				   const char* DAGNodeName, const char* directory );
 
 void set_fake_condorID( int subprocID );
 
 bool fake_condor_submit( CondorID& condorID, Job* job, const char* DAGNodeName,
-					const char* directory, const char *logFile,
-					bool logIsXml );
+					const char* directory, const char *logFile );
 
 int get_fake_condorID();
 
 bool writePreSkipEvent( CondorID& condorID, Job* job, const char* DAGNodeName, 
-			   const char* directory, const char *logFile, bool logIsXml );
+			   const char* directory, const char *logFile );
 
 #endif /* #ifndef CONDOR_SUBMIT_H */

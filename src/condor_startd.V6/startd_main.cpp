@@ -150,6 +150,9 @@ main_init( int, char* argv[] )
 			if( !(ptr && *ptr) ) {
                 EXCEPT( "-n requires another arugment" );
             }
+			if (Name) {
+				free(Name);
+			}
             Name = build_valid_daemon_name( *ptr );
             dprintf( D_ALWAYS, "Using name: %s\n", Name );
             break;
@@ -278,7 +281,7 @@ main_init( int, char* argv[] )
 								  (CommandHandler)command_query_ads,
 								  "command_query_ads", 0, READ );
 
-		// WRITE permission commands
+		// DAEMON permission commands
 	daemonCore->Register_Command( ACTIVATE_CLAIM, "ACTIVATE_CLAIM",
 								  (CommandHandler)command_activate_claim,
 								  "command_activate_claim", 0, DAEMON );
@@ -532,16 +535,24 @@ init_params( int /* first_time */)
 		free( tmp );
 	}
 
-	console_slots = param_integer( "SLOTS_CONNECTED_TO_CONSOLE",
-                    param_integer( "VIRTUAL_MACHINES_CONNECTED_TO_CONSOLE",
-                    param_integer( "CONSOLE_VMS",
-                    param_integer( "CONSOLE_CPUS",
-                    resmgr->m_attr->num_cpus()))));
+	console_slots = param_integer( "SLOTS_CONNECTED_TO_CONSOLE", -12345);
+	if (console_slots == -12345) {
+		// if no value set, try the old names...
+		console_slots = resmgr->m_attr->num_cpus();
+		console_slots = param_integer( "VIRTUAL_MACHINES_CONNECTED_TO_CONSOLE",
+		                param_integer( "CONSOLE_VMS",
+		                param_integer( "CONSOLE_CPUS",
+		                console_slots)));
+	}
 
-	keyboard_slots = param_integer( "SLOTS_CONNECTED_TO_KEYBOARD",
-                     param_integer( "VIRTUAL_MACHINES_CONNECTED_TO_KEYBOARD",
-                     param_integer( "KEYBOARD_VMS",
-                     param_integer( "KEYBOARD_CPUS", 1))));
+	keyboard_slots = param_integer( "SLOTS_CONNECTED_TO_KEYBOARD", -12345);
+	if (keyboard_slots == -12345) {
+		// if no value set, try the old names...
+		keyboard_slots = resmgr->m_attr->num_cpus();
+		keyboard_slots = param_integer( "VIRTUAL_MACHINES_CONNECTED_TO_KEYBOARD",
+		                 param_integer( "KEYBOARD_VMS",
+		                 param_integer( "KEYBOARD_CPUS", 1)));
+	}
 
 	disconnected_keyboard_boost = param_integer( "DISCONNECTED_KEYBOARD_IDLE_BOOST", 1200 );
 

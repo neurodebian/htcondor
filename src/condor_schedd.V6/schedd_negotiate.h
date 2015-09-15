@@ -135,6 +135,12 @@ class ScheddNegotiate: public DCMsg {
 
 	virtual void scheduler_handleNegotiationFinished( Sock *sock ) = 0;
 
+		// Return the number of resource requests we should offer in this negotiation round.
+		// -1 indicates there is no limit.
+		// This is useful in helping to enforce MAX_JOBS_RUNNING as a single resource request
+		// can bring back thousands of matches from the negotiator.
+	virtual int scheduler_maxJobsToOffer() {return -1;};
+
 		///////// end of virtual functions for scheduler to define  //////////
 
  protected:
@@ -143,6 +149,9 @@ class ScheddNegotiate: public DCMsg {
 	int m_current_resources_requested;
 		// how many resources have been delivered so far with this request?
 	int m_current_resources_delivered;
+		// how many more resources can we offer to the matchmaker?
+		// If -1, then we don't limit the offered resources.
+	int m_jobs_can_offer;
 
  private:
 	std::set<int> m_rejected_auto_clusters;
@@ -157,11 +166,14 @@ class ScheddNegotiate: public DCMsg {
 	int m_jobs_rejected;
 	int m_jobs_matched;
 
+	int m_num_resource_reqs_sent; // used when sending a resource request list
+	int m_num_resource_reqs_to_send; // used when sending a resource request list
+
 	bool m_negotiation_finished;
 
 		// data in message received from negotiator
 	int m_operation;             // the negotiation operation
-	std::string m_reject_reason; // why the job was rejected
+	MyString m_reject_reason; // why the job was rejected
 	std::string m_claim_id;      // the string "null" if none
 	std::string m_extra_claims;
 
@@ -177,7 +189,9 @@ class ScheddNegotiate: public DCMsg {
 		// marks the specified cluster as rejected
 	void setAutoClusterRejected(int auto_cluster_id);
 
-	bool sendJobInfo(Sock *sock);
+	bool sendJobInfo(Sock *sock, bool just_sig_attrs=false);
+
+	bool sendResourceRequestList(Sock *sock);
 
 		/////////////// DCMsg hooks ///////////////
 

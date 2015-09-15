@@ -44,6 +44,9 @@ class CCBServer: Service {
 
 	void InitAndReconfig();
 
+	static void CCBIDToContactString( char const * my_address, CCBID ccbid, MyString & ccb_contact );
+	static bool CCBIDFromString( CCBID & ccbid, char const * ccbid_str );
+
 	friend class CCBTarget;
  private:
 	bool m_registered_handlers;
@@ -64,6 +67,9 @@ class CCBServer: Service {
 	HashTable<CCBID,CCBServerRequest *> m_requests;// request_id --> req
 
 	int m_polling_timer;
+		// The epoll file descriptor.  Only used on platforms where
+		// epoll is available.
+	int m_epfd;
 
 	void AddTarget( CCBTarget *target );
 	void RemoveTarget( CCBTarget *target );
@@ -84,6 +90,9 @@ class CCBServer: Service {
 	int HandleRequestDisconnect( Stream *stream );
 
 	void PollSockets();
+	int EpollSockets(int);
+	void EpollAdd(CCBTarget *);
+	void EpollRemove(CCBTarget *);
 	void SetSmallBuffers(Sock *sock);
 
 	int HandleRegistration(int cmd,Stream *stream);

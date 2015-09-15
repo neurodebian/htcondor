@@ -52,12 +52,13 @@ struct SubmitDagShallowOptions
 	bool runValgrind;
 	MyString primaryDagFile;
 	StringList	dagFiles;
+	bool doRecovery;
 
 	// non-command line options
 	MyString strLibOut;
 	MyString strLibErr;
-	MyString strDebugLog;
-	MyString strSchedLog;
+	MyString strDebugLog; // the dagman.out file
+	MyString strSchedLog; // the user log of condor_dagman's events
 	MyString strSubFile;
 	MyString strRescueFile;
 	MyString strLockFile;
@@ -82,6 +83,7 @@ struct SubmitDagShallowOptions
 		dumpRescueDag = false;
 		runValgrind = false;
 		primaryDagFile = "";
+		doRecovery = false;
 		copyToSpool = param_boolean( "DAGMAN_COPY_TO_SPOOL", false );
 		iDebugLevel = DEBUG_UNSET;
 	}
@@ -110,11 +112,6 @@ struct SubmitDagDeepOptions
 	bool importEnv; // explicitly import environment into .condor.sub file
 	int priority; // Priority of parent of DAG node
 
-		// Use the default node log (<DAGfile>.nodes.log) for events
-		// Defaults to true
-		// Set to false if this dagman is going to be communicating
-		// with pre-7.9.0 schedd/shadow/submit
-	bool always_use_node_log;		 	
 	bool suppress_notification;
 
 	SubmitDagDeepOptions() 
@@ -131,7 +128,6 @@ struct SubmitDagDeepOptions
 		updateSubmit = false;
 		importEnv = false;
 		priority = 0;
-		always_use_node_log = true;
 		suppress_notification = true;
 	}
 };

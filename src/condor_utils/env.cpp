@@ -557,6 +557,19 @@ Env::SetEnv( const MyString & var, const MyString & val )
 }
 
 bool
+Env::DeleteEnv(const std::string & name)
+{
+	if (!name.size()) { return false; }
+
+	bool ret = (_envTable->remove(name.c_str()) == 0);
+
+#if defined(WIN32)
+	m_sorted_varnames.erase(name.c_str());
+#endif
+	return ret;
+}
+
+bool
 Env::getDelimitedStringV1or2Raw(ClassAd const *ad,MyString *result,MyString *error_msg)
 {
 	Clear();
@@ -760,6 +773,30 @@ Env::getStringArray() const {
 	}
 	array[i] = NULL;
 	return array;
+}
+
+void Env::Walk(bool (*walk_func)(void* pv, const MyString &var, MyString &val), void* pv)
+{
+	const MyString *var;
+	MyString *val;
+
+	_envTable->startIterations();
+	while (_envTable->iterate_nocopy(&var, &val)) {
+		if ( ! walk_func(pv, *var, *val))
+			break;
+	}
+}
+
+void Env::Walk(bool (*walk_func)(void* pv, const MyString &var, const MyString &val), void* pv) const
+{
+	const MyString *var;
+	MyString *val;
+
+	_envTable->startIterations();
+	while (_envTable->iterate_nocopy(&var, &val)) {
+		if ( ! walk_func(pv, *var, *val))
+			break;
+	}
 }
 
 bool

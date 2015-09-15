@@ -82,7 +82,7 @@ The input file used by DAGMan is called a DAG input file.
 It specifies the nodes of the DAG as well as the dependencies
 that order the DAG.
 All items are optional, except that there must be at least one \Arg{JOB}
-or \Arg{DATA} item.
+item.
 
 Comments may be placed in the DAG input file.
 The pound character (\verb@#@) as the first character on a
@@ -206,43 +206,7 @@ and the HTCondor job will not be submitted.
 \index{DAGMan input file!DATA keyword}
 \item \Bold{DATA}
 
-The \Arg{DATA} keyword specifies a job to be managed by the Stork data
-placement server.  
-Stork software is provided by the Stork project.
-Please refer to their website: 
-\URL{http://www.cct.lsu.edu/~kosar/stork/index.php}.
-
-The syntax used for each \Arg{DATA} entry is
-
-\Opt{DATA} \Arg{JobName} \Arg{SubmitDescriptionFileName}
-\oOptArg{DIR}{directory} \oOpt{NOOP} \oOpt{DONE}
-
-A \Arg{DATA} entry maps a \Arg{JobName} to a Stork submit description file.
-In all other respects, the \Arg{DATA} keyword is identical to the
-\Arg{JOB} keyword.
-
-The keywords \Arg{DIR}, \Arg{NOOP} and \Arg{DONE} 
-follow the same rules and restrictions, and they have the same effect
-for \Opt{DATA} nodes as they do for \Opt{JOB} nodes.
-
-Here is an example of a simple DAG that stages in data using Stork,
-processes the data using HTCondor, 
-and stages the processed data out using Stork.
-Depending upon the implementation, multiple data jobs to stage in data
-or to stage out data
-may be run in parallel.
-
-\footnotesize
-\begin{verbatim}
-    DATA    STAGE_IN1  stage_in1.stork
-    DATA    STAGE_IN2  stage_in2.stork
-    JOB     PROCESS    process.condor 
-    DATA    STAGE_OUT1 stage_out1.stork
-    DATA    STAGE_OUT2 stage_out2.stork
-    PARENT  STAGE_IN1 STAGE_IN2 CHILD PROCESS
-    PARENT  PROCESS CHILD STAGE_OUT1 STAGE_OUT2
-\end{verbatim}
-\normalsize
+As of version 8.3.5, \Condor{dagman} no longer supports DATA nodes.
 
 %----------------------------
 \label{dagman:ParentChild}
@@ -315,11 +279,13 @@ executed.
 
 The syntax used for each \Arg{PRE} or \Arg{POST} entry is
 
-\Opt{SCRIPT} \Opt{PRE} \Arg{JobName} \Arg{ExecutableName} \oArg{arguments}
+\Opt{SCRIPT} \oOptArg{DEFER}{status time}
+\Opt{PRE} \Arg{JobName} \Arg{ExecutableName} \oArg{arguments}
 
-\Opt{SCRIPT} \Opt{POST}  \Arg{JobName} \Arg{ExecutableName} \oArg{arguments}
+\Opt{SCRIPT} \oOptArg{DEFER}{status time}
+\Opt{POST}  \Arg{JobName} \Arg{ExecutableName} \oArg{arguments}
 
-The \Arg{SCRIPT} keyword is followed by either
+The \Arg{SCRIPT} keyword uses
 the \Arg{PRE} or \Arg{POST} keyword,
 which specifies the relative timing of when the script is to be run.
 The \Arg{JobName} identifies the node to which the script is attached.
@@ -336,6 +302,19 @@ the submit machine is not necessarily
 the same machine upon which the node's job is run.
 Further, a single cluster of HTCondor jobs may be
 spread across several machines.
+
+The optional \Arg{DEFER} feature causes a retry of only the script,
+if the execution of the script exits with the
+exit code given by \Arg{status}.
+The retry occurs after at least \Arg{time} seconds, 
+rather than being considered failed.  
+While waiting for the retry,
+the script does not count against a \Arg{maxpre} or \Arg{maxpost} limit.
+The ordering of the \Arg{DEFER} feature within the \Arg{SCRIPT} 
+specification is fixed.
+It must come directly after the \Arg{SCRIPT} keyword;
+this is done to avoid backward compatibility issues for any
+DAG with a \Arg{JobName} of DEFER.
 
 A PRE script is commonly used
 to place files in a staging area for the jobs to use.
@@ -473,7 +452,7 @@ the \Attr{ProcId} value is the one of the last job within the cluster.
 \item \index{DAGMan!Return@\verb^$RETURN^ value}
 \Expr{\$RETURN} (for POST scripts only) variable evaluates to
 the return value of the 
-HTCondor or Stork job, if there is a single job within a cluster.
+HTCondor job, if there is a single job within a cluster.
 With multiple jobs within the same cluster,
 there are two cases to consider.
 In the first case, all jobs within the cluster are successful;
@@ -898,7 +877,7 @@ the \Arg{DIR} keyword.
 Using both will be detected and generate an error. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\subsection{Job Monitoring, Job Failure, and Job Removal}
+\subsection{\label{sec:DAGMonitoring}Job Monitoring, Job Failure, and Job Removal}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 After submission, the progress of the DAG can be monitored
@@ -926,7 +905,7 @@ If a problem is detected,
 \Condor{submit\_dag} prints out an error message and aborts.
 
 To remove an entire DAG, consisting of the \Condor{dagman} job, 
-plus any jobs submitted to HTCondor or Stork,
+plus any jobs submitted to HTCondor,
 remove the \Condor{dagman} job by running \Condor{rm}.
 For example,
 \footnotesize
@@ -1138,7 +1117,7 @@ If this abort occurs, the return value for the DAG is 1.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{\label{dagman:VARS}Variable Values Associated with Nodes}
-\index{DAGMan input file!VARS keyword}
+\index{DAG input file!VARS keyword}
 
 \index{DAGMan!VARS (macro for submit description file)}
 \index{VARS}
@@ -1147,7 +1126,7 @@ file of the node job.
 The \Arg{VARS} keyword provides a method for defining a macro.
 Macros are defined on a per-node basis, using the syntax
 
-\Opt{VARS} \Arg{JobName} \Arg{macroname=}\Arg{"string"} [\Arg{macroname=}\Arg{"string"\Dots]}
+\Opt{VARS} \Arg{JobName} \Arg{macroname=}\Arg{"string"} [\Arg{macroname=}\Arg{"string"\Dots}]
 
 The macro may be used within the
 submit description file of the relevant node.  
@@ -1215,8 +1194,9 @@ In the case where the submit description file for each node
 varies only in file naming, 
 macros reduce the number of submit description files to one.
 
-The example uses a single submit description file in the DAG input
-file, and uses the \Arg{VARS} entry to name files used by each job.
+This example references a single submit description file for each of
+the nodes in the DAG input file, 
+and it uses the \Arg{VARS} entry to name files used by each job.
 
 The relevant portion of the DAG input file appears as 
 \begin{verbatim}
@@ -1276,12 +1256,14 @@ then the argument will be \Expr{bar}.
 \begin{description}
 \item[Special characters within VARS string definitions]
 \end{description}
+\index{DAGMan!VARS (use of special characters)}
+\index{VARS (use of special characters)}
 
 The value defined for a macro may contain spaces and tabs.
 It is also possible to have double quote marks and
 backslashes within a value.
-It is \emph{not} possible to have single quote marks within a value.
-In order to have spaces or tabs within a value,
+In order to have spaces or tabs within a value specified for a command line
+argument,
 use the New Syntax format for the \SubmitCmdNI{arguments} submit command,
 as described in section~\ref{man-condor-submit-arguments}.
 Escapes for double quote marks
@@ -1292,56 +1274,97 @@ double quote marks require two levels of escaping:
 one level is for the parsing of the DAG input file, and the other level is for
 passing the resulting value through \Condor{submit}.
 
-As an example, here are only the relevant parts of a DAG input file.
-Note that the NodeA value for macro \Expr{second} contains a tab.
+As of HTCondor version 8.3.7, 
+single quotes are permitted within the value specification.  
+For the specification of command line \SubmitCmdNI{arguments}, 
+single quotes can be used in three ways:
+\begin{itemize}
+\item in Old Syntax, within a macro's value specification
+\item in New Syntax, within a macro's value specification
+\item in New Syntax only, to delimit an argument containing white space 
+\end{itemize}
+There are examples of all three cases below.  
+In New Syntax, 
+to pass a single quote as part of an argument, 
+escape it with another single quote
+for \Condor{submit} parsing as in the example's NodeA \Expr{fourth} macro.
+
+As an example that shows uses of all special characters, 
+here are only the relevant parts of a DAG input file.
+Note that the NodeA value for the macro \Expr{second} contains a tab.
 \footnotesize
 \begin{verbatim}
     VARS NodeA first="Alberto Contador"
     VARS NodeA second="\"\"Andy	Schleck\"\""
     VARS NodeA third="Lance\\ Armstrong"
+    VARS NodeA fourth="Vincenzo ''The Shark'' Nibali"
     VARS NodeA misc="!@#$%^&*()_-=+=[]{}?/"
     
     VARS NodeB first="Lance_Armstrong"
     VARS NodeB second="\\\"Andreas_Kloden\\\""
     VARS NodeB third="Ivan\\_Basso"
+    VARS NodeB fourth="Bernard_'The_Badger'_Hinault"
     VARS NodeB misc="!@#$%^&*()_-=+=[]{}?/"
+
+    VARS NodeC args="'Nairo Quintana' 'Chris Froome'"
 \end{verbatim}
 \normalsize
 
-The New Syntax \SubmitCmdNI{arguments} line of the submit description file
-for NodeA is
+Consider an example in which
+the submit description file for NodeA uses the New Syntax for the
+\SubmitCmdNI{arguments} command:
 \footnotesize
 \begin{verbatim}
-  arguments = "'$(first)' '$(second)' '$(third)' '$(misc)'"
+  arguments = "'$(first)' '$(second)' '$(third)' '($fourth)' '$(misc)'"
 \end{verbatim}
 \normalsize
 The single quotes around each variable reference are only necessary
 if the variable value may contain spaces or tabs.
-The resulting values passed to the NodeA executable are
+The resulting values passed to the NodeA executable are:
 \footnotesize
 \begin{verbatim}
   Alberto Contador
   "Andy	Schleck"
   Lance\ Armstrong
+  Vincenzo 'The Shark' Nibali
   !@#$%^&*()_-=+=[]{}?/
 \end{verbatim}
 \normalsize
 
-The Old Syntax \SubmitCmdNI{arguments} line of the submit description file
-for NodeB is
+Consider an example in which
+the submit description file for NodeB uses the Old Syntax for the
+\SubmitCmdNI{arguments} command:
 \footnotesize
 \begin{verbatim}
-  arguments = $(first) $(second) $(third) $(misc)
+  arguments = $(first) $(second) $(third) $(fourth) $(misc)
 \end{verbatim}
 \normalsize
 
-The resulting values passed to the NodeB executable are
+The resulting values passed to the NodeB executable are:
 \footnotesize
 \begin{verbatim}
   Lance_Armstrong
   "Andreas_Kloden"
   Ivan\_Basso
+  Bernard_'The_Badger'_Hinault
   !@#$%^&*()_-=+=[]{}?/
+\end{verbatim}
+\normalsize
+
+Consider an example in which
+the submit description file for NodeC uses the New Syntax for the
+\SubmitCmdNI{arguments} command:
+\footnotesize
+\begin{verbatim}
+  arguments = "$(args)"
+\end{verbatim}
+\normalsize
+
+The resulting values passed to the NodeC executable are:
+\footnotesize
+\begin{verbatim}
+  Nairo Quintana
+  Chris Froome
 \end{verbatim}
 \normalsize
 
@@ -2568,8 +2591,9 @@ and partial contents of the Perl PRE script, \File{final\_pre.pl}:
 
 
 There are restrictions on the use of a FINAL node.
-There is no DONE option for the HTCondor job.
-And, other nodes may \emph{not} reference the FINAL node in specifications of 
+The DONE option is \emph{not} allowed for a FINAL node.
+And, a FINAL node may not be referenced in any of the following
+specifications:
 \begin{itemize}
 \item PARENT, CHILD
 \item RETRY
@@ -2577,6 +2601,10 @@ And, other nodes may \emph{not} reference the FINAL node in specifications of
 \item PRIORITY
 \item CATEGORY
 \end{itemize}
+
+As of HTCondor version 8.3.7, DAGMan allows at most two submit attempts
+of a FINAL node,
+if the DAG has been removed from the queue with \Condor{rm}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{\label{sec:DAGMan-rescue}The Rescue DAG}
@@ -3006,6 +3034,7 @@ To enable this feature, the DAG input file must contain a line with the
 The syntax for a \Arg{NODE\_STATUS\_FILE} specification is
 
 \Opt{NODE\_STATUS\_FILE} \Arg{statusFileName} \oArg{minimumUpdateTime}
+\oOpt{ALWAYS-UPDATE}
 
 The status file is written on the machine on which the DAG is submitted;
 its location is given by \Arg{statusFileName},
@@ -3024,6 +3053,16 @@ Also, the node status file will be updated when the DAG finishes,
 whether successful or not, even if \Arg{minimumUpdateTime} seconds
 have not elapsed since the last update.
 
+The optional \Arg{ALWAYS-UPDATE} keyword specifies that the
+node status file should be updated on every submission cycle,
+even if no nodes have changed status since the last time the
+file was updated.
+The file will change slightly,
+because timestamps will be updated.
+For performance reasons,
+large DAGs with approximately 10,000 or more nodes
+are poor candidates for using the \Arg{ALWAYS-UPDATE} option.
+
 As an example, if the DAG input file contains the line
 \begin{verbatim}
   NODE_STATUS_FILE my.dag.status 30
@@ -3034,7 +3073,6 @@ or more.
 This node status file is overwritten each time it is updated.
 Therefore, it only holds information about the \emph{current} status 
 of each node; it does not provide a history of the node status.
-The file contents do not distinguish between HTCondor jobs and Stork jobs.
 
 \Note HTCondor version 8.1.6 changes the format of the node status
 file.
@@ -3099,7 +3137,7 @@ or the node is a FINAL node.
 \item 1 (\verb@STATUS_READY@): All parents have finished, but the node is not
 yet running.
 \item 2 (\verb@STATUS_PRERUN@): The node's PRE script is running.
-\item 3 (\verb@STATUS_SUBMITTED@): The node's HTCondor or Stork job(s) are in 
+\item 3 (\verb@STATUS_SUBMITTED@): The node's HTCondor job(s) are in 
   the queue.
 \item 4 (\verb@STATUS_POSTRUN@): The node's POST script is running.
 \item 5 (\verb@STATUS_DONE@): The node has completed successfully.
@@ -3347,6 +3385,9 @@ The attributes are
 \item \Attr{DAG\_Status}
 \item \Attr{DAG\_InRecovery}
 \end{itemize}
+
+Note that most of this information is also available in the
+\File{dagman.out} file as described in section~\ref{sec:DAGMonitoring}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{\label{sec:DAGLotsaJobs}Utilizing the Power of DAGMan for Large Numbers of Jobs}

@@ -19,11 +19,12 @@
 
 #include "condor_common.h"
 #include "condor_config.h"
-#include "../condor_daemon_core.V6/condor_daemon_core.h"
-#include "daemon_core_sock_adapter.h"
+#include "condor_daemon_core.h"
 #include "subsystem_info.h"
 #include "shared_port_client.h"
 #include "shared_port_endpoint.h"
+
+#include <sstream>
 
 // Initialize static class members
 unsigned int SharedPortClient::m_currentPendingPassSocketCalls = 0;
@@ -151,9 +152,9 @@ SharedPortClient::myName()
 	// It is who we say we are when talking to the shared port server.
 	MyString name;
 	name = get_mySubSystem()->getName();
-	if( daemonCoreSockAdapter.isEnabled() ) {
+	if( daemonCore ) {
 		name += " ";
-		name += daemonCoreSockAdapter.publicNetworkIpAddr();
+		name += daemonCore->publicNetworkIpAddr();
 	}
 	return name;
 }
@@ -197,11 +198,9 @@ SharedPortClient::PassSocket(Sock *sock_to_pass,char const *shared_port_id,char 
 		return FALSE;
 	}
 
-	MyString pipe_name;
-	MyString socket_dir;
-
-	SharedPortEndpoint::paramDaemonSocketDir(pipe_name);
-	pipe_name.formatstr_cat("%c%s",DIR_DELIM_CHAR,shared_port_id);
+	std::string pipe_name;
+	SharedPortEndpoint::GetDaemonSocketDir(pipe_name);
+	formatstr_cat(pipe_name, "%c%s", DIR_DELIM_CHAR, shared_port_id);
 
 	MyString requested_by_buf;
 	if( !requested_by ) {
@@ -215,7 +214,7 @@ SharedPortClient::PassSocket(Sock *sock_to_pass,char const *shared_port_id,char 
 	while(true)
 	{
 		child_pipe = CreateFile(
-			pipe_name.Value(),
+			pipe_name.c_str(),
 			GENERIC_READ | GENERIC_WRITE,
 			0,
 			NULL,
@@ -228,7 +227,7 @@ SharedPortClient::PassSocket(Sock *sock_to_pass,char const *shared_port_id,char 
 
 		if(GetLastError() == ERROR_PIPE_BUSY)
 		{
-			if (!WaitNamedPipe(pipe_name.Value(), 20000)) 
+			if (!WaitNamedPipe(pipe_name.c_str(), 20000)) 
 			{
 				dprintf(D_ALWAYS, "ERROR: SharedPortClient: Wait for named pipe for sending socket timed out: %d\n", GetLastError());
 				SharedPortClient::m_failPassSocketCalls++;
@@ -379,8 +378,8 @@ SharedPortState::Handle(Stream *s)
 			result = FAILED;
 		}
 	}
-	if (result == WAIT && !daemonCoreSockAdapter.SocketIsRegistered(s)) {
-		int reg_rc = daemonCoreSockAdapter.Register_Socket(
+	if (result == WAIT && !daemonCore->SocketIsRegistered(s)) {
+		int reg_rc = daemonCore->Register_Socket(
 			s,
 			m_requested_by.c_str(),
 			(SocketHandlercpp)&SharedPortState::Handle,
@@ -407,7 +406,7 @@ SharedPortState::Handle(Stream *s)
 
 	// If we are done, clean up and dellocate
 	if (result == DONE || result == FAILED) {
-		if ((s) && (m_state != RECV_RESP || !m_non_blocking || !daemonCoreSockAdapter.SocketIsRegistered(s))) {
+		if ((s) && (m_state != RECV_RESP || !m_non_blocking || !daemonCore->SocketIsRegistered(s))) {
 			delete s;
 		}
 		delete this;
@@ -438,26 +437,60 @@ SharedPortState::HandleUnbound(Stream *&s)
 			return FAILED;
 	}
 
-	MyString sock_name;
-	MyString socket_dir;
+	std::string sock_name;
+	std::string alt_sock_name;
+	bool has_socket = SharedPortEndpoint::GetDaemonSocketDir(sock_name);;
+	bool has_alt_socket = SharedPortEndpoint::GetAltDaemonSocketDir(alt_sock_name);;
 
-	SharedPortEndpoint::paramDaemonSocketDir(sock_name);
-	sock_name.formatstr_cat("%c%s", DIR_DELIM_CHAR, m_shared_port_id);
-	m_sock_name = sock_name.Value();
+	std::stringstream ss;
+	ss << sock_name << DIR_DELIM_CHAR << m_shared_port_id;
+	sock_name = ss.str();
+	m_sock_name = m_shared_port_id;
+	ss.str("");
+	ss.clear();
+	ss << alt_sock_name << DIR_DELIM_CHAR << m_shared_port_id;
+	alt_sock_name = ss.str();
+	m_shared_port_id = NULL;
+	
 
 	if( !m_requested_by.size() ) {
-			formatstr(m_requested_by,
-					" as requested by %s", m_sock->peer_description());
+		formatstr(m_requested_by,
+				" as requested by %s", m_sock->peer_description());
 	}
 
 	struct sockaddr_un named_sock_addr;
 	memset(&named_sock_addr, 0, sizeof(named_sock_addr));
 	named_sock_addr.sun_family = AF_UNIX;
-	strncpy(named_sock_addr.sun_path, sock_name.Value(), sizeof(named_sock_addr.sun_path)-1);
-	if( strcmp(named_sock_addr.sun_path,sock_name.Value()) ) {
+	struct sockaddr_un alt_named_sock_addr;
+	memset(&alt_named_sock_addr, 0, sizeof(alt_named_sock_addr));
+	alt_named_sock_addr.sun_family = AF_UNIX;
+	unsigned named_sock_addr_len, alt_named_sock_addr_len = 0;
+	bool is_no_good;
+#ifdef USE_ABSTRACT_DOMAIN_SOCKET
+	strncpy(named_sock_addr.sun_path+1, sock_name.c_str(), sizeof(named_sock_addr.sun_path)-2);
+	named_sock_addr_len = sizeof(named_sock_addr) - sizeof(named_sock_addr.sun_path) + 1 + strlen(named_sock_addr.sun_path+1);
+	is_no_good = strcmp(named_sock_addr.sun_path+1, sock_name.c_str());
+#else
+	strncpy(named_sock_addr.sun_path, sock_name.c_str(), sizeof(named_sock_addr.sun_path)-1);
+	named_sock_addr_len = SUN_LEN(&named_sock_addr);
+	is_no_good = strcmp(named_sock_addr.sun_path, sock_name.c_str());
+#endif
+	if (has_alt_socket) {
+		strncpy(alt_named_sock_addr.sun_path, alt_sock_name.c_str(), sizeof(named_sock_addr.sun_path)-1);
+		has_alt_socket = !strcmp(alt_named_sock_addr.sun_path, alt_sock_name.c_str());
+		alt_named_sock_addr_len = SUN_LEN(&alt_named_sock_addr);
+		if (!has_socket && !has_alt_socket) {
+			dprintf(D_ALWAYS,"ERROR: SharedPortClient: primary socket is not available and alternate socket name%s is too long: %s\n",
+				m_requested_by.c_str(),
+				alt_sock_name.c_str());
+			return FAILED;
+		}
+	}
+
+	if( is_no_good ) {
 			dprintf(D_ALWAYS,"ERROR: SharedPortClient: full socket name%s is too long: %s\n",
 							m_requested_by.c_str(),
-							sock_name.Value());
+							m_sock_name.c_str());
 			return FAILED;
 	}
 
@@ -466,7 +499,7 @@ SharedPortState::HandleUnbound(Stream *&s)
 			dprintf(D_ALWAYS,
 					"ERROR: SharedPortClient: failed to created named socket%s to connect to %s: %s\n",
 					m_requested_by.c_str(),
-					m_shared_port_id,
+					m_sock_name.c_str(),
 					strerror(errno));
 			return FAILED;
 	}
@@ -479,7 +512,7 @@ SharedPortState::HandleUnbound(Stream *&s)
 	setsockopt(named_sock_fd, SOL_SOCKET, SO_LINGER, (char*)&linger, sizeof(linger));
 
 	ReliSock *named_sock = new ReliSock();
-	named_sock->assign(named_sock_fd);
+	named_sock->assignDomainSocket( named_sock_fd );
 	named_sock->set_deadline( m_sock->get_deadline() );
 
 	// If non_blocking requested, put socket into nonblocking mode.
@@ -499,10 +532,29 @@ SharedPortState::HandleUnbound(Stream *&s)
 		// Note: why not using condor_connect() here?
 		// Probably because we are connecting to a unix domain socket here,
 		// not a network (ipv4/ipv6) socket.
-		connect_rc = connect(named_sock_fd,
-				(struct sockaddr *)&named_sock_addr,
-				SUN_LEN(&named_sock_addr));
-		connect_errno = errno;	// stash away errno quick so not overwritten by sentry
+		if (has_socket)
+		{
+			connect_rc = connect(named_sock_fd,
+					(struct sockaddr *)&named_sock_addr,
+					named_sock_addr_len);
+			connect_errno = errno;	// stash away errno quick so not overwritten by sentry
+		}
+		if (!has_socket || (has_alt_socket && connect_rc && (connect_errno == ENOENT || connect_errno == ECONNREFUSED)))
+		{
+			int tmp_rc;
+			if (!(tmp_rc = connect(named_sock_fd,
+				(struct sockaddr *)&alt_named_sock_addr,
+				alt_named_sock_addr_len)))
+			{
+				connect_rc = 0;
+				connect_errno = 0;
+			}
+			if (!has_socket)
+			{
+				connect_rc = tmp_rc;
+				connect_errno = errno;
+			}
+		}
 	}
 
 	if( connect_rc != 0 )
@@ -538,7 +590,7 @@ SharedPortState::HandleUnbound(Stream *&s)
 
 		dprintf(D_ALWAYS,"SharedPortServer:%s failed to connect to %s%s: %s (err=%d)\n",
 			server_busy ? " server was busy," : "",
-			sock_name.Value(),
+			m_sock_name.c_str(),
 			m_requested_by.c_str(),
 			strerror(errno),errno);
 		delete named_sock;
@@ -618,6 +670,97 @@ SharedPortState::HandleFD(Stream *&s)
 
 	msg.msg_controllen = cmsg->cmsg_len;
 
+#ifdef USE_ABSTRACT_DOMAIN_SOCKET
+	//
+	// Even if we /can/ use abstract domain sockets, that doesn't meant that
+	// we are.  Check the socket's address; if the first byte of its "path"
+	// is \0, it's an abstract socket, and we just pass the FD to it.
+	// (See 'man 7 unix').
+	//
+	// Otherwise, it's a socket on-disk; since those are potentially
+	// less-secure (depending on filesystem permissions, which need to be lax
+	// to permit HTCondor tools like ssh_to_job to work with daemons using
+	// CCB), write an audit log entry about where the socket is going.
+	//
+	// In this construction, the non-error state is in the last if statement,
+	// rather than the inner-most.
+	//
+	struct sockaddr_un addr;
+	socklen_t addrlen = sizeof(struct sockaddr_un);
+	if( -1 == getpeername( sock->get_file_desc(), (struct sockaddr *) & addr, & addrlen ) ) {
+		dprintf( D_AUDIT, *sock, "Failure while auditing connection from %s: unable to obtain domain socket peer address: %s\n",
+			m_sock->peer_addr().to_ip_and_port_string().c_str(),
+			strerror( errno ) );
+	} else if( addrlen <= sizeof( sa_family_t ) ) {
+		dprintf( D_AUDIT, *sock, "Failure while auditing connection from %s: unable to obtain domain socket peer address because domain socket peer is unnamed.\n",
+			m_sock->peer_addr().to_ip_and_port_string().c_str() );
+	} else if( addr.sun_path[0] != '\0' ) {
+		struct ucred cred;
+		socklen_t len = sizeof(struct ucred);
+		int rc = getsockopt( sock->get_file_desc(), SOL_SOCKET, SO_PEERCRED, & cred, & len );
+		if( rc == -1 ) {
+		dprintf( D_AUDIT, *sock, "Failure while auditing connection via %s from %s: unable to obtain domain socket's peer credentials: %s.\n",
+			addr.sun_path,
+			m_sock->peer_addr().to_ip_and_port_string().c_str(),
+			strerror( errno ) );
+		} else {
+			std::string procPath;
+			formatstr( procPath, "/proc/%d", cred.pid );
+
+			// Needs security review.
+			char procExe[1025];
+			std::string procExePath = procPath + "/exe";
+			ssize_t procExeLength = readlink( procExePath.c_str(), procExe, 1024 );
+			if( procExeLength == -1 ) {
+				strcpy( procExe, "(readlink failed)" );
+			} else if( 0 <= procExeLength && procExeLength <= 1024 ) {
+				procExe[procExeLength] = '\0';
+			} else {
+				procExe[1024] = '\0';
+				procExe[1023] = '.';
+				procExe[1022] = '.';
+				procExe[1021] = '.';
+			}
+
+			// Needs security review.
+			char procCmdLine[1025];
+			std::string procCmdLinePath = procPath + "/cmdline";
+			// No _follow, since the kernel doesn't create symlinks for this.
+			int pclFD = safe_open_no_create( procCmdLinePath.c_str(), O_RDONLY );
+			ssize_t procCmdLineLength = _condor_full_read( pclFD, & procCmdLine, 1024 );
+			close( pclFD );
+			if( procCmdLineLength == -1 ) {
+				strcpy( procCmdLine, "(unable to read cmdline)" );
+			} else if( 0 <= procCmdLineLength && procCmdLineLength <= 1024 ) {
+				procCmdLine[procCmdLineLength] = '\0';
+			} else {
+				procCmdLineLength = 1024;
+				procCmdLine[1024] = '\0';
+				procCmdLine[1023] = '.';
+				procCmdLine[1022] = '.';
+				procCmdLine[1021] = '.';
+			}
+			for( unsigned i = 0; i < procCmdLineLength; ++i ) {
+				if( procCmdLine[i] == '\0' ) {
+					if( procCmdLine[i+1] == '\0' ) { break; }
+					procCmdLine[i] = ' ';
+				}
+			}
+
+			// We can't use m_requested_by because it was supplied by the
+			// remote process (and therefore can't be trusted).
+			dprintf( D_AUDIT, *sock,
+				"Forwarding connection to PID = %d, UID = %d, GID = %d [executable '%s'; command line '%s'] via %s from %s.\n",
+				cred.pid, cred.uid, cred.gid,
+				procExe,
+				procCmdLine,
+				addr.sun_path,
+				m_sock->peer_addr().to_ip_and_port_string().c_str()
+			);
+		}
+	}
+#endif
+
 	if( sendmsg(sock->get_file_desc(),&msg,0) != 1 ) {
 		dprintf(D_ALWAYS,"SharedPortClient: failed to pass socket to %s%s: %s\n",
 			m_sock_name.c_str(),
@@ -653,11 +796,13 @@ SharedPortState::HandleResp(Stream *&s)
 	int status = 0;
 	bool result;
 
-	bool read_would_block;
+	bool read_would_block = false;
 	{
-		BlockingModeGuard guard(sock, 1);
+		BlockingModeGuard guard(sock, m_non_blocking);
 		result = sock->code(status);
-		read_would_block = sock->clear_read_block_flag();
+		if ( m_non_blocking ) {
+			read_would_block = sock->clear_read_block_flag();
+		}
 	}
 	if (read_would_block)
 	{
@@ -666,7 +811,7 @@ SharedPortState::HandleResp(Stream *&s)
 			dprintf(D_ALWAYS, "SharedPortClient - server response deadline has passed for %s%s\n", m_sock_name.c_str(), m_requested_by.c_str());
 			return FAILED;
 		}
-		dprintf(D_ALWAYS, "SharedPortCliient read would block; waiting for result for SHARED_PORT_PASS_FD to %s%s.\n", m_sock_name.c_str(), m_requested_by.c_str());
+		dprintf(D_ALWAYS, "SharedPortClient read would block; waiting for result for SHARED_PORT_PASS_FD to %s%s.\n", m_sock_name.c_str(), m_requested_by.c_str());
 		return WAIT;
 	}
 

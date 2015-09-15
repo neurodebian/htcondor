@@ -44,6 +44,15 @@ extern void **curr_regdataptr;
 // disable warning about memory leaks due to exception. all memory freed on exit anyway
 MSC_DISABLE_WARNING(6211)
 
+TimerManager &
+TimerManager::GetTimerManager()
+{
+	if (!_t)
+	{
+		_t = new TimerManager();
+	}
+	return *_t;
+}
 
 TimerManager::TimerManager()
 {
@@ -112,7 +121,7 @@ int TimerManager::NewTimer(Service* s, unsigned deltawhen,
 	}
 
     if (daemonCore) {
-       daemonCore->dc_stats.New("Timer", event_descrip, AS_COUNT | IS_RCT | IF_NONZERO | IF_VERBOSEPUB);
+       daemonCore->dc_stats.NewProbe("Timer", event_descrip, AS_COUNT | IS_RCT | IF_NONZERO | IF_VERBOSEPUB);
     }
 
     new_timer->handler = handler;

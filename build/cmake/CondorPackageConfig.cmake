@@ -313,7 +313,7 @@ elseif( ${OS_NAME} STREQUAL "LINUX" AND CONDOR_PACKAGE_BUILD )
 		set ( CPACK_DEBIAN_PACKAGE_MAINTAINER "Condor Team <${CPACK_PACKAGE_CONTACT}>" )
 		set ( CPACK_DEBIAN_PACKAGE_VERSION "${PACKAGE_VERSION}-${PACKAGE_REVISION}")
 		set ( CPACK_DEBIAN_PACKAGE_HOMEPAGE "${URL}")
-		set ( CPACK_DEBIAN_PACKAGE_DEPENDS "python, adduser, libdate-manip-perl")
+		set ( CPACK_DEBIAN_PACKAGE_DEPENDS "python, adduser, libdate-manip-perl, ecryptfs-utils")
 
 		#Control files
 		set( CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
@@ -424,6 +424,8 @@ elseif( ${OS_NAME} STREQUAL "LINUX" AND CONDOR_PACKAGE_BUILD )
 		#This might break as we move to newer version of CMake
 		set(CMAKE_INSTALL_PREFIX "")
 		set(CPACK_SET_DESTDIR "ON")
+
+		set(CPACK_PACKAGE_RELOCATABLE "OFF")
 
 	endif()
 

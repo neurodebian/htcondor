@@ -81,6 +81,8 @@ public:
 		/** Cass family->resume() */
 	virtual void Continue();
 
+	virtual bool Ckpt();
+
 		/** Take a family snapshot, call OsProc::ShutDownGraceful() */
 	virtual bool ShutdownGraceful();
 
@@ -104,6 +106,11 @@ public:
 
 	bool finishShutdownFast();
 
+protected:
+
+	virtual int outputOpenFlags();
+	virtual int streamingOpenFlags( bool isOutput );
+
 private:
 		/// Final usage stats for this proc and all its children.
 	ProcFamilyUsage m_final_usage;
@@ -120,13 +127,19 @@ private:
 	int m_oom_fd; // The file descriptor which recieves events
 	int m_oom_efd; // The event FD "pipe" to watch
 	int m_oom_efd2; // The other end of m_oom_efd.
-	int setupOOMScore(int new_score);
+
+		// old kernels have /proc/self/oom_adj, newer /proc/self/oom_score_adj
+		// and the scales are different.
+	int setupOOMScore(int oom_adj, int oom_score_adj);
 	void cleanupOOM();
 	int outOfMemoryEvent(int fd);
 	int setupOOMEvent(const std::string & cgroup_string);
 
-	std::string m_pid_ns_init_filename;
+	std::string m_pid_ns_status_filename;
+	int pidNameSpaceReaper( int status );
 
+	bool isCheckpointing;
+	bool isSoftKilling;
 };
 
 #endif

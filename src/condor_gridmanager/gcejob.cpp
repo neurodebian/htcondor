@@ -22,7 +22,7 @@
 #include "condor_attributes.h"
 #include "condor_debug.h"
 #include "condor_string.h"	// for strnewp and friends
-#include "../condor_daemon_core.V6/condor_daemon_core.h"
+#include "condor_daemon_core.h"
 #include "basename.h"
 #include "nullfile.h"
 #include "filename_tools.h"
@@ -385,6 +385,7 @@ void GCEJob::doEvaluateState()
 
 		reevaluate_state = false;
 		old_gm_state = gmState;
+		ASSERT ( gahp != NULL || gmState == GM_HOLD || gmState == GM_DELETE );
 
 		switch ( gmState )
 		{

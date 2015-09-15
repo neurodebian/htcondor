@@ -33,12 +33,16 @@
 extern DLL_IMPORT_MAGIC char **environ;
 
 //-----------------------------------------------------------------------------
-Script::Script( bool post, const char* cmd, Job* node ) :
+Script::Script( bool post, const char* cmd, int deferStatus, time_t deferTime,
+			Job* node ) :
     _post         (post),
     _retValScript (-1),
     _retValJob    (-1),
 	_pid		  (0),
 	_done         (FALSE),
+	_deferStatus  (deferStatus),
+	_deferTime    (deferTime),
+	_nextRunTime  (0),
 	_node         (node)
 {
 	ASSERT( cmd != NULL );
@@ -144,7 +148,7 @@ Script::BackgroundRun( int reaperId, int dagStatus, int failedCount )
     }
 
 	_pid = daemonCore->Create_Process( cmd, args,
-									   PRIV_UNKNOWN, reaperId, FALSE,
+									   PRIV_UNKNOWN, reaperId, FALSE, FALSE,
 									   NULL, NULL, NULL, NULL, NULL, 0 );
     delete [] cmd;
 

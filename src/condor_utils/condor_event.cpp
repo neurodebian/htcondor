@@ -259,15 +259,10 @@ int ULogEvent::getEvent (FILE *file)
 }
 
 
-int ULogEvent::putEvent (FILE *file)
+bool ULogEvent::formatEvent( std::string &out )
 {
-	if( !file ) {
-		dprintf( D_ALWAYS, "ERROR: file == NULL in ULogEvent::putEvent()\n" );
-		return 0;
-	}
-	return (writeHeader (file) && writeEvent (file));
+	return formatHeader( out ) && formatBody( out );
 }
-
 
 const char* ULogEvent::eventName(void) const
 {
@@ -308,21 +303,21 @@ ULogEvent::readHeader (FILE *file)
 }
 
 
-// Write the header for the event to the file
-int
-ULogEvent::writeHeader (FILE *file)
+bool ULogEvent::formatHeader( std::string &out )
 {
 	int       retval;
 
 	// write header
 #ifdef ULOG_MICROSECONDS
-	retval = fprintf (file, "%03d (%03d.%03d.%03d) %02d/%02d %02d:%02d:%02d.%06d ",
+	retval = formatstr_cat(out,
+					  "%03d (%03d.%03d.%03d) %02d/%02d %02d:%02d:%02d.%06d ",
 					  eventNumber,
 					  cluster, proc, subproc,
 					  eventTime.tm_mon+1, eventTime.tm_mday,
 					  eventTime.tm_hour, eventTime.tm_min, eventTime.tm_sec, (int)eventTimeval.tv_usec);
 #else
-	retval = fprintf (file, "%03d (%03d.%03d.%03d) %02d/%02d %02d:%02d:%02d ",
+	retval = formatstr_cat(out,
+					  "%03d (%03d.%03d.%03d) %02d/%02d %02d:%02d:%02d ",
 					  eventNumber,
 					  cluster, proc, subproc,
 					  eventTime.tm_mon+1, eventTime.tm_mday,
@@ -331,12 +326,7 @@ ULogEvent::writeHeader (FILE *file)
 #endif
 
 	// check if all fields were sucessfully written
-	if (retval < 0)
-	{
-		return 0;
-	}
-
-	return 1;
+	return retval >= 0;
 }
 
 ClassAd*
@@ -454,8 +444,10 @@ ULogEvent::toClassAd(void)
 	if( eventTimeStr ) {
 		if ( !myad->InsertAttr("EventTime", eventTimeStr) ) {
 			delete myad;
+			free( eventTimeStr );
 			return NULL;
 		}
+		free( eventTimeStr );
 	} else {
 		delete myad;
 		return NULL;
@@ -508,6 +500,9 @@ void
 ULogEvent::insertCommonIdentifiers(ClassAd &adToFill)
 {
 	//if( !adToFill ) return;
+	if(!scheddname) {
+		scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
+	}
 	if(scheddname) {
 	  adToFill.Assign("scheddname", scheddname);
 	}
@@ -531,13 +526,13 @@ public:
 	std::string alloc;
 };
 
-// class to write the usage ClassAd to the userlog
+// function to format the usage ClassAd for the userlog
 // The usage ClassAd should contain attrbutes that match the pattern
 // "<RES>", "Request<RES>", or "<RES>Usage", where <RES> can be
 // Cpus, Disk, Memory, or others as defined for use by the ProvisionedResources
 // attribute.
 //
-static void writeUsageAd(FILE * file, ClassAd * pusageAd)
+static void formatUsageAd( std::string &out, ClassAd * pusageAd )
 {
 	if ( ! pusageAd)
 		return;
@@ -569,15 +564,16 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 			SlotResTermSumy * psumy = useMap[key];
 			if ( ! psumy) {
 				psumy = new SlotResTermSumy();
+				ASSERT(psumy);
 				useMap[key] = psumy;
-				//fprintf(file, "\tadded %x for key %s\n", psumy, key.c_str());
+				//formatstr_cat(out, "\tadded %x for key %s\n", psumy, key.c_str());
 			} else {
-				//fprintf(file, "\tfound %x for key %s\n", psumy, key.c_str());
+				//formatstr_cat(out, "\tfound %x for key %s\n", psumy, key.c_str());
 			}
 			std::string val = "";
 			unp.Unparse(val, iter->second);
 
-			//fprintf(file, "\t%-8s \t= %4s\t(efld%d, key = %s)\n", iter->first.c_str(), val.c_str(), efld, key.c_str());
+			//formatstr_cat(out, "\t%-8s \t= %4s\t(efld%d, key = %s)\n", iter->first.c_str(), val.c_str(), efld, key.c_str());
 
 			switch (efld)
 			{
@@ -594,7 +590,7 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 		} else {
 			std::string val = "";
 			unp.Unparse(val, iter->second);
-			fprintf(file, "\t%s = %s\n", iter->first.c_str(), val.c_str());
+			formatstr_cat(out, "\t%s = %s\n", iter->first.c_str(), val.c_str());
 		}
 	}
 	if (useMap.empty())
@@ -611,7 +607,7 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 				unp.Unparse(psumy->alloc, tree);
 			}
 		}
-		//fprintf(file, "\t%s %s %s %s\n", it->first.c_str(), psumy->use.c_str(), psumy->req.c_str(), psumy->alloc.c_str());
+		//formatstr_cat(out, "\t%s %s %s %s\n", it->first.c_str(), psumy->use.c_str(), psumy->req.c_str(), psumy->alloc.c_str());
 		cchRes = MAX(cchRes, (int)it->first.size());
 		cchUse = MAX(cchUse, (int)psumy->use.size());
 		cchReq = MAX(cchReq, (int)psumy->req.size());
@@ -620,7 +616,7 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 
 	MyString fmt;
 	fmt.formatstr("\tPartitionable Resources : %%%ds %%%ds %%%ds\n", cchUse, cchReq, MAX(cchAlloc,9));
-	fprintf(file, fmt.Value(), "Usage", "Request", cchAlloc ? "Allocated" : "");
+	formatstr_cat(out, fmt.Value(), "Usage", "Request", cchAlloc ? "Allocated" : "");
 	fmt.formatstr("\t   %%-%ds : %%%ds %%%ds %%%ds\n", cchRes+8, cchUse, cchReq, MAX(cchAlloc,9));
 	//fputs(fmt.Value(), file);
 	for (std::map<std::string, SlotResTermSumy*>::iterator it = useMap.begin();
@@ -630,10 +626,10 @@ static void writeUsageAd(FILE * file, ClassAd * pusageAd)
 		std::string lbl = it->first.c_str(); 
 		if (lbl.compare("Memory") == 0) lbl += " (MB)";
 		else if (lbl.compare("Disk") == 0) lbl += " (KB)";
-		fprintf(file, fmt.Value(), lbl.c_str(), psumy->use.c_str(), psumy->req.c_str(), psumy->alloc.c_str());
+		formatstr_cat(out, fmt.Value(), lbl.c_str(), psumy->use.c_str(), psumy->req.c_str(), psumy->alloc.c_str());
 		delete psumy;
 	}
-	//fprintf(file, "\t  *See Section %d.%d in the manual for information about requesting resources\n", 2, 5);
+	//formatstr_cat(out, "\t  *See Section %d.%d in the manual for information about requesting resources\n", 2, 5);
 }
 
 static void readUsageAd(FILE * file, /* in,out */ ClassAd ** ppusageAd)
@@ -762,30 +758,30 @@ SubmitEvent::setSubmitHost(char const *addr)
 	}
 }
 
-int
-SubmitEvent::writeEvent (FILE *file)
+bool
+SubmitEvent::formatBody( std::string &out )
 {
 	if( !submitHost ) {
 		setSubmitHost("");
 	}
-	int retval = fprintf (file, "Job submitted from host: %s\n", submitHost);
+	int retval = formatstr_cat (out, "Job submitted from host: %s\n", submitHost);
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 	if( submitEventLogNotes ) {
-		retval = fprintf( file, "    %.8191s\n", submitEventLogNotes );
+		retval = formatstr_cat( out, "    %.8191s\n", submitEventLogNotes );
 		if( retval < 0 ) {
-			return 0;
+			return false;
 		}
 	}
 	if( submitEventUserNotes ) {
-		retval = fprintf( file, "    %.8191s\n", submitEventUserNotes );
+		retval = formatstr_cat( out, "    %.8191s\n", submitEventUserNotes );
 		if( retval < 0 ) {
-			return 0;
+			return false;
 		}
 	}
-	return (1);
+	return true;
 }
 
 int
@@ -923,41 +919,42 @@ GlobusSubmitEvent::~GlobusSubmitEvent(void)
 	delete[] jmContact;
 }
 
-int GlobusSubmitEvent::writeEvent (FILE *file)
+bool
+GlobusSubmitEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * rm = unknown;
 	const char * jm = unknown;
 
-	int retval = fprintf (file, "Job submitted to Globus\n");
+	int retval = formatstr_cat( out, "Job submitted to Globus\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( rmContact ) rm = rmContact;
 	if ( jmContact ) jm = jmContact;
 
-	retval = fprintf( file, "    RM-Contact: %.8191s\n", rm );
+	retval = formatstr_cat( out, "    RM-Contact: %.8191s\n", rm );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	retval = fprintf( file, "    JM-Contact: %.8191s\n", jm );
+	retval = formatstr_cat( out, "    JM-Contact: %.8191s\n", jm );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
 	int newjm = 0;
 	if ( restartableJM ) {
 		newjm = 1;
 	}
-	retval = fprintf( file, "    Can-Restart-JM: %d\n", newjm );
+	retval = formatstr_cat( out, "    Can-Restart-JM: %d\n", newjm );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int GlobusSubmitEvent::readEvent (FILE *file)
@@ -1072,26 +1069,26 @@ GlobusSubmitFailedEvent::~GlobusSubmitFailedEvent(void)
 	delete[] reason;
 }
 
-int
-GlobusSubmitFailedEvent::writeEvent (FILE *file)
+bool
+GlobusSubmitFailedEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * reasonString = unknown;
 
-	int retval = fprintf (file, "Globus job submission failed!\n");
+	int retval = formatstr_cat( out, "Globus job submission failed!\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( reason ) reasonString = reason;
 
-	retval = fprintf( file, "    Reason: %.8191s\n", reasonString );
+	retval = formatstr_cat( out, "    Reason: %.8191s\n", reasonString );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -1169,26 +1166,26 @@ GlobusResourceUpEvent::~GlobusResourceUpEvent(void)
 	delete[] rmContact;
 }
 
-int
-GlobusResourceUpEvent::writeEvent (FILE *file)
+bool
+GlobusResourceUpEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * rm = unknown;
 
-	int retval = fprintf (file, "Globus Resource Back Up\n");
+	int retval = formatstr_cat( out, "Globus Resource Back Up\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( rmContact ) rm = rmContact;
 
-	retval = fprintf( file, "    RM-Contact: %.8191s\n", rm );
+	retval = formatstr_cat( out, "    RM-Contact: %.8191s\n", rm );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -1259,26 +1256,26 @@ GlobusResourceDownEvent::~GlobusResourceDownEvent(void)
 	delete[] rmContact;
 }
 
-int
-GlobusResourceDownEvent::writeEvent (FILE *file)
+bool
+GlobusResourceDownEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * rm = unknown;
 
-	int retval = fprintf (file, "Detected Down Globus Resource\n");
+	int retval = formatstr_cat( out, "Detected Down Globus Resource\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( rmContact ) rm = rmContact;
 
-	retval = fprintf( file, "    RM-Contact: %.8191s\n", rm );
+	retval = formatstr_cat( out, "    RM-Contact: %.8191s\n", rm );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -1348,16 +1345,16 @@ GenericEvent::~GenericEvent(void)
 {
 }
 
-int
-GenericEvent::writeEvent(FILE *file)
+bool
+GenericEvent::formatBody( std::string &out )
 {
-    int retval = fprintf(file, "%s\n", info);
+    int retval = formatstr_cat( out, "%s\n", info );
     if (retval < 0)
     {
-		return 0;
+		return false;
     }
 
-    return 1;
+    return true;
 }
 
 int
@@ -1431,58 +1428,52 @@ RemoteErrorEvent::setHoldReasonSubCode(int hold_reason_subcode_arg)
 	this->hold_reason_subcode = hold_reason_subcode_arg;
 }
 
-int
-RemoteErrorEvent::writeEvent(FILE *file)
+bool
+RemoteErrorEvent::formatBody( std::string &out )
 {
 	char const *error_type = "Error";
-	char messagestr[512];
-
-	ClassAd tmpCl1, tmpCl2;
-	//ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2;
 	int retval;
-
-	snprintf(messagestr, 512, "Remote %s from %s on %s",
-			error_type,
-			daemon_name,
-			execute_host);
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
 
 	if(!critical_error) error_type = "Warning";
 
-	if (critical_error) {
-		tmpCl1.Assign("endts", (int)eventclock);
-		tmpCl1.Assign("endtype", ULOG_REMOTE_ERROR);
-		tmpCl1.Assign("endmessage", messagestr);
+	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1, tmpCl2;
 
-		// this inserts scheddname, cluster, proc, etc
-		insertCommonIdentifiers(tmpCl2);
+		snprintf(messagestr, 512, "Remote %s from %s on %s",
+				 error_type,
+				 daemon_name,
+				 execute_host);
 
-		MyString tmp;
-		tmp.formatstr("endtype = null");
-		tmpCl2.Insert(tmp.Value());
+		if (critical_error) {
+			tmpCl1.Assign("endts", (int)eventclock);
+			tmpCl1.Assign("endtype", ULOG_REMOTE_ERROR);
+			tmpCl1.Assign("endmessage", messagestr);
+
+			// this inserts scheddname, cluster, proc, etc
+			insertCommonIdentifiers(tmpCl2);
+
+			MyString tmp;
+			tmp.formatstr("endtype = null");
+			tmpCl2.Insert(tmp.Value());
 
 			// critical error means this run is ended.
 			// condor_event.o is part of cplus_lib.a, which may be linked by
 			// non-daemons who wouldn't have initialized FILEObj. We don't
 			// need to log events for non-daemons.
-		if (FILEObj) {
 			if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2)
 				== QUILL_FAILURE) {
 				dprintf(D_ALWAYS, "Logging Event 5--- Error\n");
 				return 0; // return a error code, 0
 			}
-		}
-
-	} else {
+		} else {
 		        // this inserts scheddname, cluster, proc, etc
-        insertCommonIdentifiers(tmpCl1);
+			insertCommonIdentifiers(tmpCl1);
 
-		tmpCl1.Assign("eventtype", ULOG_REMOTE_ERROR);
-		tmpCl1.Assign("eventtime", (int)eventclock);
-		tmpCl1.Assign("description", messagestr);
+			tmpCl1.Assign("eventtype", ULOG_REMOTE_ERROR);
+			tmpCl1.Assign("eventtime", (int)eventclock);
+			tmpCl1.Assign("description", messagestr);
 
-		if (FILEObj) {
 			if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 				dprintf(D_ALWAYS, "Logging Event 5--- Error\n");
 				return 0; // return a error code, 0
@@ -1490,8 +1481,8 @@ RemoteErrorEvent::writeEvent(FILE *file)
 		}
 	}
 
-    retval = fprintf(
-	  file,
+	retval = formatstr_cat(
+	  out,
 	  "%s from %s on %s:\n",
 	  error_type,
 	  daemon_name,
@@ -1501,7 +1492,7 @@ RemoteErrorEvent::writeEvent(FILE *file)
 
     if (retval < 0)
     {
-	return 0;
+        return false;
     }
 
 	//output each line of error_str, indented by one tab
@@ -1511,7 +1502,7 @@ RemoteErrorEvent::writeEvent(FILE *file)
 		char *next_line = strchr(line,'\n');
 		if(next_line) *next_line = '\0';
 
-		retval = fprintf(file,"\t%s\n",line);
+		retval = formatstr_cat( out, "\t%s\n", line );
 		if(retval < 0) return 0;
 
 		if(!next_line) break;
@@ -1520,11 +1511,11 @@ RemoteErrorEvent::writeEvent(FILE *file)
 	}
 
 	if (hold_reason_code) {
-		fprintf(file,"\tCode %d Subcode %d\n",
-		        hold_reason_code, hold_reason_subcode);
+		formatstr_cat( out, "\tCode %d Subcode %d\n",
+					   hold_reason_code, hold_reason_subcode );
 	}
 
-    return 1;
+	return true;
 }
 
 int
@@ -1724,77 +1715,72 @@ ExecuteEvent::getExecuteHost()
 	return executeHost;
 }
 
-int
-ExecuteEvent::writeEvent (FILE *file)
+bool
+ExecuteEvent::formatBody( std::string &out )
 {
-	ClassAd tmpCl1, tmpCl2, tmpCl3;
-	//ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2, *tmpClP3 = &tmpCl3;
-	MyString tmp = "";
 	int retval;
 
-	//JobAd is defined in condor_shadow.V6/log_events.C and is simply
-	//defined as an external variable here
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	if(scheddname)
-		dprintf(D_FULLDEBUG, "scheddname = %s\n", scheddname);
-	else
-		dprintf(D_FULLDEBUG, "scheddname is null\n");
-
-	if( !executeHost ) {
-		setExecuteHost("");
-	}
-
-	dprintf(D_FULLDEBUG, "executeHost = %s\n", executeHost);
-
-	dprintf(D_FULLDEBUG, "Executehost name = %s\n", remoteName ? remoteName : "" );
-
-	tmpCl1.Assign("endts", (int)eventclock);
-
-	tmp.formatstr("endtype = -1");
-	tmpCl1.Insert(tmp.Value());
-
-	tmp.formatstr("endmessage = \"UNKNOWN ERROR\"");
-	tmpCl1.Insert(tmp.Value());
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl2);
-
-	tmp.formatstr("endtype = null");
-	tmpCl2.Insert(tmp.Value());
-
 	if (FILEObj) {
+		ClassAd tmpCl1, tmpCl2, tmpCl3;
+		MyString tmp = "";
+
+		scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
+
+		if(scheddname)
+			dprintf(D_FULLDEBUG, "scheddname = %s\n", scheddname);
+		else
+			dprintf(D_FULLDEBUG, "scheddname is null\n");
+
+		if( !executeHost ) {
+			setExecuteHost("");
+		}
+
+		dprintf(D_FULLDEBUG, "executeHost = %s\n", executeHost);
+
+		dprintf(D_FULLDEBUG, "Executehost name = %s\n", remoteName ? remoteName : "" );
+
+		tmpCl1.Assign("endts", (int)eventclock);
+
+		tmp.formatstr("endtype = -1");
+		tmpCl1.Insert(tmp.Value());
+
+		tmp.formatstr("endmessage = \"UNKNOWN ERROR\"");
+		tmpCl1.Insert(tmp.Value());
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl2);
+
+		tmp.formatstr("endtype = null");
+		tmpCl2.Insert(tmp.Value());
+
 		if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 1--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
-	}
 
-	if( !remoteName ) {
-		setRemoteName("");
-	}
-	tmpCl3.Assign("machine_id", remoteName);
+		if( !remoteName ) {
+			setRemoteName("");
+		}
+		tmpCl3.Assign("machine_id", remoteName);
 
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl3);
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl3);
 
-	tmpCl3.Assign("startts", (int)eventclock);
+		tmpCl3.Assign("startts", (int)eventclock);
 
-	if(FILEObj) {
 		if (FILEObj->file_newEvent("Runs", &tmpCl3) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 1--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	retval = fprintf (file, "Job executing on host: %s\n", executeHost);
+	retval = formatstr_cat( out, "Job executing on host: %s\n", executeHost );
 
 	if (retval < 0) {
-		return 0;
+		return false;
 	}
 
-	return 1;
+	return true;
 }
 
 int
@@ -1865,56 +1851,50 @@ ExecutableErrorEvent::~ExecutableErrorEvent(void)
 {
 }
 
-int
-ExecutableErrorEvent::writeEvent (FILE *file)
+bool
+ExecutableErrorEvent::formatBody( std::string &out )
 {
 	int retval;
-	char messagestr[512];
-	ClassAd tmpCl1, tmpCl2;
-	//ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2;
-	MyString tmp = "";
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	tmpCl1.Assign("endts", (int)eventclock);
-	tmpCl1.Assign("endtype", ULOG_EXECUTABLE_ERROR);
-	tmpCl1.Assign("endmessage", messagestr);
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl2);
-
-	tmp.formatstr( "endtype = null");
-	tmpCl2.Insert(tmp.Value());
 
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1, tmpCl2;
+		MyString tmp = "";
+
+		tmpCl1.Assign("endts", (int)eventclock);
+		tmpCl1.Assign("endtype", ULOG_EXECUTABLE_ERROR);
+		tmpCl1.Assign("endmessage", messagestr);
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl2);
+
+		tmp.formatstr( "endtype = null");
+		tmpCl2.Insert(tmp.Value());
+
 		if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 12--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
 	switch (errType)
 	{
 	  case CONDOR_EVENT_NOT_EXECUTABLE:
-		retval = fprintf (file, "(%d) Job file not executable.\n", errType);
-		sprintf(messagestr,  "Job file not executable");
+		retval = formatstr_cat( out, "(%d) Job file not executable.\n", errType );
 		break;
 
 	  case CONDOR_EVENT_BAD_LINK:
-		retval=fprintf(file,"(%d) Job not properly linked for Condor.\n", errType);
-		sprintf(messagestr,  "Job not properly linked for Condor");
+		retval=formatstr_cat( out, "(%d) Job not properly linked for Condor.\n", errType );
 		break;
 
 	  default:
-		retval = fprintf (file, "(%d) [Bad error number.]\n", errType);
-		sprintf(messagestr,  "Unknown error");
+		retval = formatstr_cat( out, "(%d) [Bad error number.]\n", errType );
 	}
 
-	if (retval < 0) return 0;
+	if (retval < 0) return false;
 
-	return 1;
+	return true;
 }
-
 
 int
 ExecutableErrorEvent::readEvent (FILE *file)
@@ -1989,46 +1969,43 @@ CheckpointedEvent::~CheckpointedEvent(void)
 {
 }
 
-int
-CheckpointedEvent::writeEvent (FILE *file)
+bool
+CheckpointedEvent::formatBody( std::string &out )
 {
-	char messagestr[512];
-	ClassAd tmpCl1;
-	//ClassAd *tmpClP1 = &tmpCl1;
-
-	sprintf(messagestr,  "Job was checkpointed");
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl1);
-
-	tmpCl1.Assign("eventtype", ULOG_CHECKPOINTED);
-	tmpCl1.Assign("eventtime", (int)eventclock);
-
-	tmpCl1.Assign("description", messagestr);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1;
+
+		sprintf(messagestr,  "Job was checkpointed");
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl1);
+
+		tmpCl1.Assign("eventtype", ULOG_CHECKPOINTED);
+		tmpCl1.Assign("eventtime", (int)eventclock);
+
+		tmpCl1.Assign("description", messagestr);
+
 		if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 6--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	if (fprintf (file, "Job was checkpointed.\n") < 0  		||
-		(!writeRusage (file, run_remote_rusage)) 			||
-		(fprintf (file, "  -  Run Remote Usage\n") < 0) 	||
-		(!writeRusage (file, run_local_rusage)) 			||
-		(fprintf (file, "  -  Run Local Usage\n") < 0))
-		return 0;
+	if ((formatstr_cat( out, "Job was checkpointed.\n" ) < 0)	||
+		(!formatRusage( out, run_remote_rusage ))				||
+		(formatstr_cat( out, "  -  Run Remote Usage\n" ) < 0)	||
+		(!formatRusage( out, run_local_rusage ))				||
+		(formatstr_cat( out, "  -  Run Local Usage\n" ) < 0))
+		return false;
 
-    if( fprintf(file, "\t%.0f  -  Run Bytes Sent By Job For Checkpoint\n",
-                sent_bytes) < 0 ) {
-        return 0;
-    }
+	if( formatstr_cat( out, "\t%.0f  -  Run Bytes Sent By Job For Checkpoint\n",
+					  sent_bytes) < 0 ) {
+		return false;
+	}
 
 
-	return 1;
+	return true;
 }
 
 int
@@ -2284,98 +2261,72 @@ JobEvictedEvent::readEvent( FILE *file )
 }
 
 
-int
-JobEvictedEvent::writeEvent( FILE *file )
+bool
+JobEvictedEvent::formatBody( std::string &out )
 {
-  char messagestr[512], checkpointedstr[6], terminatestr[512];
-  ClassAd tmpCl1, tmpCl2;
-  //ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2;
-  MyString tmp = "";
-
-  //JobAd is defined in condor_shadow.V6/log_events.C and is simply
-  //defined as an external variable here
-
-  strcpy(checkpointedstr, "");
-  strcpy(messagestr, "");
-  strcpy(terminatestr, "");
-
-
   int retval;
 
-  if( fprintf(file, "Job was evicted.\n\t") < 0 ) {
-    return 0;
+  if( formatstr_cat( out, "Job was evicted.\n\t" ) < 0 ) {
+    return false;
   }
 
   if( terminate_and_requeued ) {
-    retval = fprintf( file, "(0) Job terminated and was requeued\n\t" );
-    sprintf(messagestr,  "Job evicted, terminated and was requeued");
-    strcpy(checkpointedstr, "false");
+    retval = formatstr_cat( out, "(0) Job terminated and was requeued\n\t" );
   } else if( checkpointed ) {
-    retval = fprintf( file, "(1) Job was checkpointed.\n\t" );
-    sprintf(messagestr,  "Job evicted and was checkpointed");
-    strcpy(checkpointedstr, "true");
+    retval = formatstr_cat( out, "(1) Job was checkpointed.\n\t" );
   } else {
-    retval = fprintf( file, "(0) Job was not checkpointed.\n\t" );
-    sprintf(messagestr,  "Job evicted and was not checkpointed");
-    strcpy(checkpointedstr, "false");
+    retval = formatstr_cat( out, "(0) Job was not checkpointed.\n\t" );
   }
 
   if( retval < 0 ) {
-    return 0;
+    return false;
   }
 
-  if( (!writeRusage (file, run_remote_rusage)) 			||
-      (fprintf (file, "  -  Run Remote Usage\n\t") < 0) 	||
-      (!writeRusage (file, run_local_rusage)) 			||
-      (fprintf (file, "  -  Run Local Usage\n") < 0) )
+  if( (!formatRusage( out, run_remote_rusage ))				||
+      (formatstr_cat( out, "  -  Run Remote Usage\n\t" ) < 0)	||
+      (!formatRusage( out, run_local_rusage ))					||
+      (formatstr_cat( out, "  -  Run Local Usage\n" ) < 0) )
     {
-      return 0;
+      return false;
     }
 
-  if( fprintf(file, "\t%.0f  -  Run Bytes Sent By Job\n",
-	      sent_bytes) < 0 ) {
-    return 0;
+  if( formatstr_cat( out, "\t%.0f  -  Run Bytes Sent By Job\n",
+	      sent_bytes ) < 0 ) {
+    return false;
   }
-  if( fprintf(file, "\t%.0f  -  Run Bytes Received By Job\n",
-	      recvd_bytes) < 0 ) {
-    return 0;
+  if( formatstr_cat( out, "\t%.0f  -  Run Bytes Received By Job\n",
+	      recvd_bytes ) < 0 ) {
+    return false;
   }
 
   if(terminate_and_requeued ) {
     if( normal ) {
-      if( fprintf(file, "\t(1) Normal termination (return value %d)\n",
-		  return_value) < 0 ) {
-	return 0;
+      if( formatstr_cat( out, "\t(1) Normal termination (return value %d)\n",
+		  return_value ) < 0 ) {
+	return false;
       }
-      sprintf(terminatestr,  " (1) Normal termination (return value %d)", return_value);
     }
     else {
-      if( fprintf(file, "\t(0) Abnormal termination (signal %d)\n",
-		  signal_number) < 0 ) {
-	return 0;
+      if( formatstr_cat( out, "\t(0) Abnormal termination (signal %d)\n",
+		  signal_number ) < 0 ) {
+	return false;
       }
-      sprintf(terminatestr,  " (0) Abnormal termination (signal %d)", signal_number);
 
       if( core_file ) {
-	retval = fprintf( file, "\t(1) Corefile in: %s\n", core_file );
-	strcat(terminatestr, " (1) Corefile in: ");
-	strcat(terminatestr, core_file);
+	retval = formatstr_cat( out, "\t(1) Corefile in: %s\n", core_file );
       }
       else {
-	retval = fprintf( file, "\t(0) No core file\n" );
-	strcat(terminatestr, " (0) No core file ");
+	retval = formatstr_cat( out, "\t(0) No core file\n" );
       }
       if( retval < 0 ) {
-	return 0;
+	return false;
       }
     }
 
     if( reason ) {
-      if( fprintf(file, "\t%s\n", reason) < 0 ) {
-	return 0;
+      if( formatstr_cat( out, "\t%s\n", reason ) < 0 ) {
+	return false;
       }
-      strcat(terminatestr,  " reason: ");
-      strcat(terminatestr,  reason);
     }
 
   }
@@ -2383,35 +2334,72 @@ JobEvictedEvent::writeEvent( FILE *file )
 	// print out resource request/useage values.
 	//
 	if (pusageAd) {
-		writeUsageAd(file, pusageAd);
+		formatUsageAd( out, pusageAd );
 	}
 
-  scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
+	if (FILEObj) {
+		char messagestr[512], checkpointedstr[6], terminatestr[512];
+		ClassAd tmpCl1, tmpCl2;
+		MyString tmp = "";
 
-  tmpCl1.Assign("endts", (int)eventclock);
-  tmpCl1.Assign("endtype", ULOG_JOB_EVICTED);
+		strcpy(checkpointedstr, "");
+		strcpy(messagestr, "");
+		strcpy(terminatestr, "");
 
-  tmp.formatstr( "endmessage = \"%s%s\"", messagestr, terminatestr);
-  tmpCl1.Insert(tmp.Value());
+		if( terminate_and_requeued ) {
+			sprintf(messagestr,  "Job evicted, terminated and was requeued");
+			strcpy(checkpointedstr, "false");
+		} else if( checkpointed ) {
+			sprintf(messagestr,  "Job evicted and was checkpointed");
+			strcpy(checkpointedstr, "true");
+		} else {
+			sprintf(messagestr,  "Job evicted and was not checkpointed");
+			strcpy(checkpointedstr, "false");
+		}
 
-  tmpCl1.Assign("wascheckpointed", checkpointedstr);
-  tmpCl1.Assign("runbytessent", sent_bytes);
-  tmpCl1.Assign("runbytesreceived", recvd_bytes);
+		if(terminate_and_requeued ) {
+			if( normal ) {
+				sprintf(terminatestr,  " (1) Normal termination (return value %d)", return_value);
+			} else {
+				sprintf(terminatestr,  " (0) Abnormal termination (signal %d)", signal_number);
 
-  // this inserts scheddname, cluster, proc, etc
-  insertCommonIdentifiers(tmpCl2);
+				if( core_file ) {
+					strcat(terminatestr, " (1) Corefile in: ");
+					strcat(terminatestr, core_file);
+				} else {
+					strcat(terminatestr, " (0) No core file ");
+				}
+			}
 
-  tmp.formatstr( "endtype = null");
-  tmpCl2.Insert(tmp.Value());
+			if( reason ) {
+				strcat(terminatestr,  " reason: ");
+				strcat(terminatestr,  reason);
+			}
+		}
 
-  if (FILEObj) {
-	  if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
-		  dprintf(D_ALWAYS, "Logging Event 2 --- Error\n");
-		  return 0; // return a error code, 0
-	  }
-  }
+		tmpCl1.Assign("endts", (int)eventclock);
+		tmpCl1.Assign("endtype", ULOG_JOB_EVICTED);
 
-  return 1;
+		tmp.formatstr( "endmessage = \"%s%s\"", messagestr, terminatestr);
+		tmpCl1.Insert(tmp.Value());
+
+		tmpCl1.Assign("wascheckpointed", checkpointedstr);
+		tmpCl1.Assign("runbytessent", sent_bytes);
+		tmpCl1.Assign("runbytesreceived", recvd_bytes);
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl2);
+
+		tmp.formatstr( "endtype = null");
+		tmpCl2.Insert(tmp.Value());
+
+		if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
+			dprintf(D_ALWAYS, "Logging Event 2 --- Error\n");
+			return false; // return a error code, false
+		}
+	}
+
+  return true;
 }
 
 ClassAd*
@@ -2575,45 +2563,42 @@ JobAbortedEvent::getReason( void ) const
 }
 
 
-int
-JobAbortedEvent::writeEvent (FILE *file)
+bool
+JobAbortedEvent::formatBody( std::string &out )
 {
 
-	char messagestr[512];
-	ClassAd tmpCl1;
-	//ClassAd *tmpClP1 = &tmpCl1;
-	MyString tmp = "";
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	if (reason)
-		snprintf(messagestr,  512, "Job was aborted by the user: %s", reason);
-	else
-		sprintf(messagestr,  "Job was aborted by the user");
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl1);
-
-	tmpCl1.Assign("eventtype", ULOG_JOB_ABORTED);
-	tmpCl1.Assign("eventtime", (int)eventclock);
-	tmpCl1.Assign("description", messagestr);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1;
+		MyString tmp = "";
+
+		if (reason)
+			snprintf(messagestr,  512, "Job was aborted by the user: %s", reason);
+		else
+			sprintf(messagestr,  "Job was aborted by the user");
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl1);
+
+		tmpCl1.Assign("eventtype", ULOG_JOB_ABORTED);
+		tmpCl1.Assign("eventtime", (int)eventclock);
+		tmpCl1.Assign("description", messagestr);
+
 		if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 7--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	if( fprintf(file, "Job was aborted by the user.\n") < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Job was aborted by the user.\n" ) < 0 ) {
+		return false;
 	}
 	if( reason ) {
-		if( fprintf(file, "\t%s\n", reason) < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "\t%s\n", reason ) < 0 ) {
+			return false;
 		}
 	}
-	return 1;
+	return true;
 }
 
 
@@ -2721,94 +2706,94 @@ TerminatedEvent::getCoreFile( void )
 }
 
 
-int
-TerminatedEvent::writeEvent( FILE *file, const char* header )
+bool
+TerminatedEvent::formatBody( std::string &out, const char *header )
 {
-  char messagestr[512];
-  ClassAd tmpCl1, tmpCl2;
-  //ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2;
-  MyString tmp = "";
-
-  //JobAd is defined in condor_shadow.V6/log_events.C and is simply
-  //defined as an external variable here
-
-  strcpy(messagestr, "");
-
 	int retval=0;
 
 	if( normal ) {
-		if( fprintf(file, "\t(1) Normal termination (return value %d)\n\t",
+		if( formatstr_cat( out, "\t(1) Normal termination (return value %d)\n\t",
 					returnValue) < 0 ) {
-			return 0;
+			return false;
 		}
-		sprintf(messagestr,  "(1) Normal termination (return value %d)", returnValue);
 
 	} else {
-		if( fprintf(file, "\t(0) Abnormal termination (signal %d)\n",
-					signalNumber) < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "\t(0) Abnormal termination (signal %d)\n",
+					signalNumber ) < 0 ) {
+			return false;
 		}
 
-		sprintf(messagestr,  "(0) Abnormal termination (signal %d)", signalNumber);
-
 		if( core_file ) {
-			retval = fprintf( file, "\t(1) Corefile in: %s\n\t",
-							  core_file );
-			strcat(messagestr, " (1) Corefile in: ");
-			strcat(messagestr, core_file);
+			retval = formatstr_cat( out, "\t(1) Corefile in: %s\n\t",
+									core_file );
 		} else {
-			retval = fprintf( file, "\t(0) No core file\n\t" );
-			strcat(messagestr, " (0) No core file ");
+			retval = formatstr_cat( out, "\t(0) No core file\n\t" );
 		}
 	}
 
-	if ((retval < 0)										||
-		(!writeRusage (file, run_remote_rusage))			||
-		(fprintf (file, "  -  Run Remote Usage\n\t") < 0) 	||
-		(!writeRusage (file, run_local_rusage)) 			||
-		(fprintf (file, "  -  Run Local Usage\n\t") < 0)   	||
-		(!writeRusage (file, total_remote_rusage))			||
-		(fprintf (file, "  -  Total Remote Usage\n\t") < 0)	||
-		(!writeRusage (file,  total_local_rusage))			||
-		(fprintf (file, "  -  Total Local Usage\n") < 0))
-		return 0;
+	if ((retval < 0)												||
+		(!formatRusage( out, run_remote_rusage ))					||
+		(formatstr_cat( out, "  -  Run Remote Usage\n\t" ) < 0)	||
+		(!formatRusage( out, run_local_rusage ))					||
+		(formatstr_cat( out, "  -  Run Local Usage\n\t" ) < 0)		||
+		(!formatRusage( out, total_remote_rusage ))				||
+		(formatstr_cat( out, "  -  Total Remote Usage\n\t" ) < 0)	||
+		(!formatRusage( out,  total_local_rusage ))				||
+		(formatstr_cat( out, "  -  Total Local Usage\n" ) < 0))
+		return false;
 
 
-	if (fprintf(file, "\t%.0f  -  Run Bytes Sent By %s\n",
-				sent_bytes, header) < 0 ||
-		fprintf(file, "\t%.0f  -  Run Bytes Received By %s\n",
-				recvd_bytes, header) < 0 ||
-		fprintf(file, "\t%.0f  -  Total Bytes Sent By %s\n",
-				total_sent_bytes, header) < 0 ||
-		fprintf(file, "\t%.0f  -  Total Bytes Received By %s\n",
-				total_recvd_bytes, header) < 0)
-		return 1;				// backwards compatibility
+	if (formatstr_cat( out, "\t%.0f  -  Run Bytes Sent By %s\n",
+					   sent_bytes, header ) < 0 ||
+		formatstr_cat( out, "\t%.0f  -  Run Bytes Received By %s\n",
+					   recvd_bytes, header ) < 0 ||
+		formatstr_cat( out, "\t%.0f  -  Total Bytes Sent By %s\n",
+					   total_sent_bytes, header ) < 0 ||
+		formatstr_cat( out, "\t%.0f  -  Total Bytes Received By %s\n",
+					   total_recvd_bytes, header ) < 0)
+		return true;				// backwards compatibility
 
 	// print out resource request/useage values.
 	//
 	if (pusageAd) {
-		writeUsageAd(file, pusageAd);
+		formatUsageAd( out, pusageAd );
 	}
 
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	tmpCl1.Assign("endmessage", messagestr);
-	tmpCl1.Assign("runbytessent", sent_bytes);
-	tmpCl1.Assign("runbytesreceived", recvd_bytes);
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl2);
-
-	tmpCl2.Assign("endts", (int)eventclock);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1, tmpCl2;
+		MyString tmp = "";
+
+		strcpy(messagestr, "");
+
+		if( normal ) {
+			sprintf(messagestr,  "(1) Normal termination (return value %d)", returnValue);
+		} else {
+			sprintf(messagestr,  "(0) Abnormal termination (signal %d)", signalNumber);
+			if( core_file ) {
+				strcat(messagestr, " (1) Corefile in: ");
+				strcat(messagestr, core_file);
+			} else {
+				strcat(messagestr, " (0) No core file ");
+			}
+		}
+
+		tmpCl1.Assign("endmessage", messagestr);
+		tmpCl1.Assign("runbytessent", sent_bytes);
+		tmpCl1.Assign("runbytesreceived", recvd_bytes);
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl2);
+
+		tmpCl2.Assign("endts", (int)eventclock);
+
 		if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 3--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	return 1;
+	return true;
 }
 
 
@@ -2943,38 +2928,32 @@ JobTerminatedEvent::~JobTerminatedEvent(void)
 }
 
 
-int
-JobTerminatedEvent::writeEvent (FILE *file)
+bool
+JobTerminatedEvent::formatBody( std::string &out )
 {
-  ClassAd tmpCl1, tmpCl2;
-  //ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2;
-  MyString tmp = "";
+	if (FILEObj) {
+		ClassAd tmpCl1, tmpCl2;
+		MyString tmp = "";
 
-  //JobAd is defined in condor_shadow.V6/log_events.C and is simply
-  //defined as an external variable here
+		tmpCl1.Assign("endts", (int)eventclock);
+		tmpCl1.Assign("endtype", ULOG_JOB_TERMINATED);
 
-  scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl2);
 
-  tmpCl1.Assign("endts", (int)eventclock);
-  tmpCl1.Assign("endtype", ULOG_JOB_TERMINATED);
+		tmp.formatstr( "endtype = null");
+		tmpCl2.Insert(tmp.Value());
 
-  // this inserts scheddname, cluster, proc, etc
-  insertCommonIdentifiers(tmpCl2);
+		if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
+			dprintf(D_ALWAYS, "Logging Event 4--- Error\n");
+			return false; // return a error code, false
+		}
+	}
 
-  tmp.formatstr( "endtype = null");
-  tmpCl2.Insert(tmp.Value());
-
-  if (FILEObj) {
-	  if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
-		  dprintf(D_ALWAYS, "Logging Event 4--- Error\n");
-		  return 0; // return a error code, 0
-	  }
+  if( formatstr_cat( out, "Job terminated.\n" ) < 0 ) {
+	  return false;
   }
-
-  if( fprintf(file, "Job terminated.\n") < 0 ) {
-	  return 0;
-  }
-  return TerminatedEvent::writeEvent( file, "Job" );
+  return TerminatedEvent::formatBody( out, "Job" );
 }
 
 
@@ -3128,26 +3107,26 @@ JobImageSizeEvent::~JobImageSizeEvent(void)
 }
 
 
-int
-JobImageSizeEvent::writeEvent (FILE *file)
+bool
+JobImageSizeEvent::formatBody( std::string &out )
 {
-	if (fprintf (file, "Image size of job updated: %" PRId64"\n", image_size_kb) < 0)
-		return 0;
+	if (formatstr_cat( out, "Image size of job updated: %" PRId64"\n", image_size_kb ) < 0)
+		return false;
 
 	// when talking to older starters, memory_usage, rss & pss may not be set
 	if (memory_usage_mb >= 0 && 
-		fprintf (file, "\t%" PRId64"  -  MemoryUsage of job (MB)\n", memory_usage_mb) < 0)
-		return 0;
+		formatstr_cat( out, "\t%" PRId64"  -  MemoryUsage of job (MB)\n", memory_usage_mb ) < 0)
+		return false;
 
 	if (resident_set_size_kb >= 0 &&
-		fprintf (file, "\t%" PRId64"  -  ResidentSetSize of job (KB)\n", resident_set_size_kb) < 0)
-		return 0;
+		formatstr_cat( out, "\t%" PRId64"  -  ResidentSetSize of job (KB)\n", resident_set_size_kb ) < 0)
+		return false;
 
 	if (proportional_set_size_kb >= 0 &&
-		fprintf (file, "\t%" PRId64"  -  ProportionalSetSize of job (KB)\n", proportional_set_size_kb) < 0)
-		return 0;
+		formatstr_cat( out, "\t%" PRId64"  -  ProportionalSetSize of job (KB)\n", proportional_set_size_kb ) < 0)
+		return false;
 
-	return 1;
+	return true;
 }
 
 
@@ -3278,71 +3257,66 @@ ShadowExceptionEvent::readEvent (FILE *file)
 	return 1;
 }
 
-int
-ShadowExceptionEvent::writeEvent (FILE *file)
+bool
+ShadowExceptionEvent::formatBody( std::string &out )
 {
-	char messagestr[512];
-	ClassAd tmpCl1, tmpCl2;
-	//ClassAd *tmpClP1 = &tmpCl1, *tmpClP2 = &tmpCl2;
-	MyString tmp = "";
+	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1, tmpCl2;
+		MyString tmp = "";
 
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	snprintf(messagestr, 512, "Shadow exception: %s", message);
-	messagestr[COUNTOF(messagestr)-1] = 0;
+		snprintf(messagestr, 512, "Shadow exception: %s", message);
+		messagestr[COUNTOF(messagestr)-1] = 0;
 
 		// remove the new line in the end if any
-	if  (messagestr[strlen(messagestr)-1] == '\n')
-		messagestr[strlen(messagestr)-1] = '\0';
+		if  (messagestr[strlen(messagestr)-1] == '\n')
+			messagestr[strlen(messagestr)-1] = '\0';
 
-	if (began_execution) {
-		tmpCl1.Assign("endts", (int)eventclock);
-		tmpCl1.Assign("endtype", ULOG_SHADOW_EXCEPTION);
-		tmpCl1.Assign("endmessage", messagestr);
-		tmpCl1.Assign("runbytessent", sent_bytes);
+		if (began_execution) {
+			tmpCl1.Assign("endts", (int)eventclock);
+			tmpCl1.Assign("endtype", ULOG_SHADOW_EXCEPTION);
+			tmpCl1.Assign("endmessage", messagestr);
+			tmpCl1.Assign("runbytessent", sent_bytes);
 
-		tmpCl1.Assign("runbytesreceived", recvd_bytes);
+			tmpCl1.Assign("runbytesreceived", recvd_bytes);
 
-		// this inserts scheddname, cluster, proc, etc
-		insertCommonIdentifiers(tmpCl2);
+			// this inserts scheddname, cluster, proc, etc
+			insertCommonIdentifiers(tmpCl2);
 
-		tmp.formatstr( "endtype = null");
-		tmpCl2.Insert(tmp.Value());
+			tmp.formatstr( "endtype = null");
+			tmpCl2.Insert(tmp.Value());
 
-		if (FILEObj) {
 			if (FILEObj->file_updateEvent("Runs", &tmpCl1, &tmpCl2) == QUILL_FAILURE) {
 				dprintf(D_ALWAYS, "Logging Event 13--- Error\n");
-				return 0; // return a error code, 0
+				return false; // return a error code, false
 			}
-		}
-	} else {
-		// this inserts scheddname, cluster, proc, etc
-        insertCommonIdentifiers(tmpCl1);
+		} else {
+			// this inserts scheddname, cluster, proc, etc
+			insertCommonIdentifiers(tmpCl1);
 
-		tmpCl1.Assign("eventtype", ULOG_SHADOW_EXCEPTION);
-		tmpCl1.Assign("eventtime", (int)eventclock);
-		tmpCl1.Assign("description", messagestr);
+			tmpCl1.Assign("eventtype", ULOG_SHADOW_EXCEPTION);
+			tmpCl1.Assign("eventtime", (int)eventclock);
+			tmpCl1.Assign("description", messagestr);
 
-		if (FILEObj) {
 			if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 				dprintf(D_ALWAYS, "Logging Event 14 --- Error\n");
-				return 0; // return a error code, 0
+				return false; // return a error code, false
 			}
 		}
 
 	}
 
-	if (fprintf (file, "Shadow exception!\n\t") < 0)
-		return 0;
-	if (fprintf (file, "%s\n", message) < 0)
-		return 0;
+	if (formatstr_cat( out, "Shadow exception!\n\t" ) < 0)
+		return false;
+	if (formatstr_cat( out, "%s\n", message ) < 0)
+		return false;
 
-	if (fprintf (file, "\t%.0f  -  Run Bytes Sent By Job\n", sent_bytes) < 0 ||
-		fprintf (file, "\t%.0f  -  Run Bytes Received By Job\n",
-				 recvd_bytes) < 0)
-		return 1;				// backwards compatibility
+	if (formatstr_cat( out, "\t%.0f  -  Run Bytes Sent By Job\n", sent_bytes ) < 0 ||
+		formatstr_cat( out, "\t%.0f  -  Run Bytes Received By Job\n",
+				 recvd_bytes ) < 0)
+		return true;				// backwards compatibility
 
-	return 1;
+	return true;
 }
 
 ClassAd*
@@ -3405,39 +3379,36 @@ JobSuspendedEvent::readEvent (FILE *file)
 }
 
 
-int
-JobSuspendedEvent::writeEvent (FILE *file)
+bool
+JobSuspendedEvent::formatBody( std::string &out )
 {
-	char messagestr[512];
-	ClassAd tmpCl1;
-	//ClassAd *tmpClP1 = &tmpCl1;
-	MyString tmp = "";
-
-	sprintf(messagestr, "Job was suspended (Number of processes actually suspended: %d)", num_pids);
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl1);
-
-	tmpCl1.Assign("eventtype", ULOG_JOB_SUSPENDED);
-	tmpCl1.Assign("eventtime", (int)eventclock);
-	tmpCl1.Assign("description", messagestr);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1;
+		MyString tmp = "";
+
+		sprintf(messagestr, "Job was suspended (Number of processes actually suspended: %d)", num_pids);
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl1);
+
+		tmpCl1.Assign("eventtype", ULOG_JOB_SUSPENDED);
+		tmpCl1.Assign("eventtime", (int)eventclock);
+		tmpCl1.Assign("description", messagestr);
+
 		if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 8--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	if (fprintf (file, "Job was suspended.\n\t") < 0)
-		return 0;
-	if (fprintf (file, "Number of processes actually suspended: %d\n",
-			num_pids) < 0)
-		return 0;
+	if (formatstr_cat( out, "Job was suspended.\n\t" ) < 0)
+		return false;
+	if (formatstr_cat( out, "Number of processes actually suspended: %d\n",
+			num_pids ) < 0)
+		return false;
 
-	return 1;
+	return true;
 }
 
 ClassAd*
@@ -3482,36 +3453,33 @@ JobUnsuspendedEvent::readEvent (FILE *file)
 	return 1;
 }
 
-int
-JobUnsuspendedEvent::writeEvent (FILE *file)
+bool
+JobUnsuspendedEvent::formatBody( std::string &out )
 {
-	char messagestr[512];
-	ClassAd tmpCl1;
-	//ClassAd *tmpClP1 = &tmpCl1;
-	MyString tmp = "";
-
-	sprintf(messagestr, "Job was unsuspended");
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl1);
-
-	tmpCl1.Assign("eventtype", ULOG_JOB_UNSUSPENDED);
-	tmpCl1.Assign("eventtime", (int)eventclock);
-	tmpCl1.Assign("description", messagestr);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1;
+		MyString tmp = "";
+
+		sprintf(messagestr, "Job was unsuspended");
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl1);
+
+		tmpCl1.Assign("eventtype", ULOG_JOB_UNSUSPENDED);
+		tmpCl1.Assign("eventtime", (int)eventclock);
+		tmpCl1.Assign("description", messagestr);
+
  	    if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 9--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	if (fprintf (file, "Job was unsuspended.\n") < 0)
-		return 0;
+	if (formatstr_cat( out, "Job was unsuspended.\n" ) < 0)
+		return false;
 
-	return 1;
+	return true;
 }
 
 ClassAd*
@@ -3636,53 +3604,50 @@ JobHeldEvent::readEvent( FILE *file )
 }
 
 
-int
-JobHeldEvent::writeEvent( FILE *file )
+bool
+JobHeldEvent::formatBody( std::string &out )
 {
-	char messagestr[512];
-	ClassAd tmpCl1;
-	//ClassAd *tmpClP1 = &tmpCl1;
-
-	if (reason)
-		snprintf(messagestr, 512, "Job was held: %s", reason);
-	else
-		sprintf(messagestr, "Job was held: reason unspecified");
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl1);
-
-	tmpCl1.Assign("eventtype", ULOG_JOB_HELD);
-	tmpCl1.Assign("eventtime", (int)eventclock);
-	tmpCl1.Assign("description", messagestr);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1;
+
+		if (reason)
+			snprintf(messagestr, 512, "Job was held: %s", reason);
+		else
+			sprintf(messagestr, "Job was held: reason unspecified");
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl1);
+
+		tmpCl1.Assign("eventtype", ULOG_JOB_HELD);
+		tmpCl1.Assign("eventtime", (int)eventclock);
+		tmpCl1.Assign("description", messagestr);
+
 		if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 10--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	if( fprintf(file, "Job was held.\n") < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Job was held.\n" ) < 0 ) {
+		return false;
 	}
 	if( reason ) {
-		if( fprintf(file, "\t%s\n", reason) < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "\t%s\n", reason ) < 0 ) {
+			return false;
 		}
 	} else {
-		if( fprintf(file, "\tReason unspecified\n") < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "\tReason unspecified\n" ) < 0 ) {
+			return false;
 		}
 	}
 
 	// write the codes
-	if( fprintf(file, "\tCode %d Subcode %d\n", code,subcode) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "\tCode %d Subcode %d\n", code,subcode ) < 0 ) {
+		return false;
 	}
 
-	return 1;
+	return true;
 }
 
 ClassAd*
@@ -3797,48 +3762,45 @@ JobReleasedEvent::readEvent( FILE *file )
 }
 
 
-int
-JobReleasedEvent::writeEvent( FILE *file )
+bool
+JobReleasedEvent::formatBody( std::string &out )
 {
-	char messagestr[512];
-	ClassAd tmpCl1;
-	//ClassAd *tmpClP1 = &tmpCl1;
-	MyString tmp = "";
-
-	if (reason)
-		snprintf(messagestr, 512, "Job was released: %s", reason);
-	else
-		sprintf(messagestr, "Job was released: reason unspecified");
-
-	scheddname = getenv( EnvGetName( ENV_SCHEDD_NAME ) );
-
-	// this inserts scheddname, cluster, proc, etc
-	insertCommonIdentifiers(tmpCl1);
-
-	tmpCl1.Assign("eventtype", ULOG_JOB_RELEASED);
-	tmpCl1.Assign("eventtime", (int)eventclock);
-	tmpCl1.Assign("description", messagestr);
-
 	if (FILEObj) {
+		char messagestr[512];
+		ClassAd tmpCl1;
+		MyString tmp = "";
+
+		if (reason)
+			snprintf(messagestr, 512, "Job was released: %s", reason);
+		else
+			sprintf(messagestr, "Job was released: reason unspecified");
+
+		// this inserts scheddname, cluster, proc, etc
+		insertCommonIdentifiers(tmpCl1);
+
+		tmpCl1.Assign("eventtype", ULOG_JOB_RELEASED);
+		tmpCl1.Assign("eventtime", (int)eventclock);
+		tmpCl1.Assign("description", messagestr);
+
 		if (FILEObj->file_newEvent("Events", &tmpCl1) == QUILL_FAILURE) {
 			dprintf(D_ALWAYS, "Logging Event 11--- Error\n");
-			return 0; // return a error code, 0
+			return false; // return a error code, false
 		}
 	}
 
-	if( fprintf(file, "Job was released.\n") < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Job was released.\n" ) < 0 ) {
+		return false;
 	}
 	if( reason ) {
-		if( fprintf(file, "\t%s\n", reason) < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "\t%s\n", reason ) < 0 ) {
+			return false;
 		} else {
-			return 1;
+			return true;
 		}
 	}
 		// do we want to do anything else if there's no reason?
 		// should we fail?  EXCEPT()?
-	return 1;
+	return true;
 }
 
 ClassAd*
@@ -3879,8 +3841,8 @@ static const int minutes = 60 * seconds;
 static const int hours = 60 * minutes;
 static const int days = 24 * hours;
 
-int
-ULogEvent::writeRusage (FILE *file, rusage &usage)
+bool
+ULogEvent::formatRusage (std::string &out, const rusage &usage)
 {
 	int usr_secs = usage.ru_utime.tv_sec;
 	int sys_secs = usage.ru_stime.tv_sec;
@@ -3897,13 +3859,12 @@ ULogEvent::writeRusage (FILE *file, rusage &usage)
 	sys_minutes = sys_secs/minutes;		sys_secs %= minutes;
  
 	int retval;
-	retval = fprintf (file, "\tUsr %d %02d:%02d:%02d, Sys %d %02d:%02d:%02d",
+	retval = formatstr_cat( out, "\tUsr %d %02d:%02d:%02d, Sys %d %02d:%02d:%02d",
 					  usr_days, usr_hours, usr_minutes, usr_secs,
-					  sys_days, sys_hours, sys_minutes, sys_secs);
+					  sys_days, sys_hours, sys_minutes, sys_secs );
 
 	return (retval > 0);
 }
-
 
 int
 ULogEvent::readRusage (FILE *file, rusage &usage)
@@ -4013,14 +3974,14 @@ NodeExecuteEvent::setExecuteHost(char const *addr)
 	}
 }
 
-int
-NodeExecuteEvent::writeEvent (FILE *file)
+bool
+NodeExecuteEvent::formatBody( std::string &out )
 {
 	if( !executeHost ) {
 		setExecuteHost("");
 	}
-	return( fprintf(file, "Node %d executing on host: %s\n",
-					node, executeHost) >= 0 );
+	return( formatstr_cat( out, "Node %d executing on host: %s\n",
+						   node, executeHost ) >= 0 );
 }
 
 
@@ -4085,13 +4046,13 @@ NodeTerminatedEvent::~NodeTerminatedEvent(void)
 }
 
 
-int
-NodeTerminatedEvent::writeEvent( FILE *file )
+bool
+NodeTerminatedEvent::formatBody( std::string &out )
 {
-	if( fprintf(file, "Node %d terminated.\n", node) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Node %d terminated.\n", node ) < 0 ) {
+		return false;
 	}
-	return TerminatedEvent::writeEvent( file, "Node" );
+	return TerminatedEvent::formatBody( out, "Node" );
 }
 
 
@@ -4256,33 +4217,33 @@ PostScriptTerminatedEvent::~PostScriptTerminatedEvent(void)
 }
 
 
-int
-PostScriptTerminatedEvent::writeEvent( FILE* file )
+bool
+PostScriptTerminatedEvent::formatBody( std::string &out )
 {
-    if( fprintf( file, "POST Script terminated.\n" ) < 0 ) {
-        return 0;
+    if( formatstr_cat( out, "POST Script terminated.\n" ) < 0 ) {
+        return false;
     }
 
     if( normal ) {
-        if( fprintf( file, "\t(1) Normal termination (return value %d)\n",
+        if( formatstr_cat( out, "\t(1) Normal termination (return value %d)\n",
 					 returnValue ) < 0 ) {
-            return 0;
+            return false;
         }
     } else {
-        if( fprintf( file, "\t(0) Abnormal termination (signal %d)\n",
+        if( formatstr_cat( out, "\t(0) Abnormal termination (signal %d)\n",
 					 signalNumber ) < 0 ) {
-            return 0;
+            return false;
         }
     }
 
     if( dagNodeName ) {
-        if( fprintf( file, "    %s%.8191s\n",
+        if( formatstr_cat( out, "    %s%.8191s\n",
 					 dagNodeNameLabel, dagNodeName ) < 0 ) {
-            return 0;
+            return false;
         }
     }
 
-    return 1;
+    return true;
 }
 
 
@@ -4497,47 +4458,47 @@ JobDisconnectedEvent::setNoReconnectReason( const char* reason_str )
 }
 
 
-int
-JobDisconnectedEvent::writeEvent( FILE *file )
+bool
+JobDisconnectedEvent::formatBody( std::string &out )
 {
 	if( ! disconnect_reason ) {
-		EXCEPT( "JobDisconnectedEvent::writeEvent() called without "
+		EXCEPT( "JobDisconnectedEvent::formatBody() called without "
 				"disconnect_reason" );
 	}
 	if( ! startd_addr ) {
-		EXCEPT( "JobDisconnectedEvent::writeEvent() called without "
+		EXCEPT( "JobDisconnectedEvent::formatBody() called without "
 				"startd_addr" );
 	}
 	if( ! startd_name ) {
-		EXCEPT( "JobDisconnectedEvent::writeEvent() called without "
+		EXCEPT( "JobDisconnectedEvent::formatBody() called without "
 				"startd_name" );
 	}
 	if( ! can_reconnect && ! no_reconnect_reason ) {
-		EXCEPT( "impossible: JobDisconnectedEvent::writeEvent() called "
+		EXCEPT( "impossible: JobDisconnectedEvent::formatBody() called "
 				"without no_reconnect_reason when can_reconnect is FALSE" );
 	}
 
-	if( fprintf(file, "Job disconnected, %s reconnect\n",
-				can_reconnect ? "attempting to" : "can not") < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Job disconnected, %s reconnect\n",
+					   can_reconnect ? "attempting to" : "can not" ) < 0 ) {
+		return false;
 	}
-	if( fprintf(file, "    %.8191s\n", disconnect_reason) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "    %.8191s\n", disconnect_reason ) < 0 ) {
+		return false;
 	}
-	if( fprintf(file, "    %s reconnect to %s %s\n",
-				can_reconnect ? "Trying to" : "Can not",
-				startd_name, startd_addr) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "    %s reconnect to %s %s\n",
+					   can_reconnect ? "Trying to" : "Can not",
+					   startd_name, startd_addr ) < 0 ) {
+		return false;
 	}
 	if( no_reconnect_reason ) {
-		if( fprintf(file, "    %.8191s\n", no_reconnect_reason) < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "    %.8191s\n", no_reconnect_reason ) < 0 ) {
+			return false;
 		}
-		if( fprintf(file, "    Rescheduling job\n") < 0 ) {
-			return 0;
+		if( formatstr_cat( out, "    Rescheduling job\n" ) < 0 ) {
+			return false;
 		}
 	}
-	return( 1 );
+	return true;
 }
 
 
@@ -4782,32 +4743,32 @@ JobReconnectedEvent::setStarterAddr( const char* starter )
 }
 
 
-int
-JobReconnectedEvent::writeEvent( FILE *file )
+bool
+JobReconnectedEvent::formatBody( std::string &out )
 {
 	if( ! startd_addr ) {
-		EXCEPT( "JobReconnectedEvent::writeEvent() called without "
+		EXCEPT( "JobReconnectedEvent::formatBody() called without "
 				"startd_addr" );
 	}
 	if( ! startd_name ) {
-		EXCEPT( "JobReconnectedEvent::writeEvent() called without "
+		EXCEPT( "JobReconnectedEvent::formatBody() called without "
 				"startd_name" );
 	}
 	if( ! starter_addr ) {
-		EXCEPT( "JobReconnectedEvent::writeEvent() called without "
+		EXCEPT( "JobReconnectedEvent::formatBody() called without "
 				"starter_addr" );
 	}
 
-	if( fprintf(file, "Job reconnected to %s\n", startd_name) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Job reconnected to %s\n", startd_name ) < 0 ) {
+		return false;
 	}
-	if( fprintf(file, "    startd address: %s\n", startd_addr) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "    startd address: %s\n", startd_addr ) < 0 ) {
+		return false;
 	}
-	if( fprintf(file, "    starter address: %s\n", starter_addr) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "    starter address: %s\n", starter_addr ) < 0 ) {
+		return false;
 	}
-	return( 1 );
+	return true;
 }
 
 
@@ -4984,29 +4945,29 @@ JobReconnectFailedEvent::setStartdName( const char* name )
 }
 
 
-int
-JobReconnectFailedEvent::writeEvent( FILE *file )
+bool
+JobReconnectFailedEvent::formatBody( std::string &out )
 {
 	if( ! reason ) {
-		EXCEPT( "JobReconnectFailedEvent::writeEvent() called without "
+		EXCEPT( "JobReconnectFailedEvent::formatBody() called without "
 				"reason" );
 	}
 	if( ! startd_name ) {
-		EXCEPT( "JobReconnectFailedEvent::writeEvent() called without "
+		EXCEPT( "JobReconnectFailedEvent::formatBody() called without "
 				"startd_name" );
 	}
 
-	if( fprintf(file, "Job reconnection failed\n") < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "Job reconnection failed\n" ) < 0 ) {
+		return false;
 	}
-	if( fprintf(file, "    %.8191s\n", reason) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "    %.8191s\n", reason ) < 0 ) {
+		return false;
 	}
-	if( fprintf(file, "    Can not reconnect to %s, rescheduling job\n",
-				startd_name) < 0 ) {
-		return 0;
+	if( formatstr_cat( out, "    Can not reconnect to %s, rescheduling job\n",
+					   startd_name ) < 0 ) {
+		return false;
 	}
-	return( 1 );
+	return true;
 }
 
 
@@ -5128,25 +5089,26 @@ GridResourceUpEvent::~GridResourceUpEvent(void)
 	delete[] resourceName;
 }
 
-int GridResourceUpEvent::writeEvent (FILE *file)
+bool
+GridResourceUpEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * resource = unknown;
 
-	int retval = fprintf (file, "Grid Resource Back Up\n");
+	int retval = formatstr_cat( out, "Grid Resource Back Up\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( resourceName ) resource = resourceName;
 
-	retval = fprintf( file, "    GridResource: %.8191s\n", resource );
+	retval = formatstr_cat( out, "    GridResource: %.8191s\n", resource );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -5217,26 +5179,26 @@ GridResourceDownEvent::~GridResourceDownEvent(void)
 	delete[] resourceName;
 }
 
-int
-GridResourceDownEvent::writeEvent (FILE *file)
+bool
+GridResourceDownEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * resource = unknown;
 
-	int retval = fprintf (file, "Detected Down Grid Resource\n");
+	int retval = formatstr_cat( out, "Detected Down Grid Resource\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( resourceName ) resource = resourceName;
 
-	retval = fprintf( file, "    GridResource: %.8191s\n", resource );
+	retval = formatstr_cat( out, "    GridResource: %.8191s\n", resource );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -5309,33 +5271,33 @@ GridSubmitEvent::~GridSubmitEvent(void)
 	delete[] jobId;
 }
 
-int
-GridSubmitEvent::writeEvent (FILE *file)
+bool
+GridSubmitEvent::formatBody( std::string &out )
 {
 	const char * unknown = "UNKNOWN";
 	const char * resource = unknown;
 	const char * job = unknown;
 
-	int retval = fprintf (file, "Job submitted to grid resource\n");
+	int retval = formatstr_cat( out, "Job submitted to grid resource\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
 	if ( resourceName ) resource = resourceName;
 	if ( jobId ) job = jobId;
 
-	retval = fprintf( file, "    GridResource: %.8191s\n", resource );
+	retval = formatstr_cat( out, "    GridResource: %.8191s\n", resource );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	retval = fprintf( file, "    GridJobId: %.8191s\n", job );
+	retval = formatstr_cat( out, "    GridJobId: %.8191s\n", job );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -5429,24 +5391,24 @@ JobAdInformationEvent::~JobAdInformationEvent(void)
 	if ( jobad ) delete jobad;
 }
 
-int
-JobAdInformationEvent::writeEvent(FILE *file)
+bool
+JobAdInformationEvent::formatBody( std::string &out )
 {
-	return writeEvent(file,jobad);
+	return formatBody( out, jobad );
 }
 
-int
-JobAdInformationEvent::writeEvent(FILE *file, ClassAd *jobad_arg)
+bool
+JobAdInformationEvent::formatBody( std::string &out, ClassAd *jobad_arg )
 {
     int retval = 0;	 // 0 == FALSE == failure
 
-	fprintf(file,"Job ad information event triggered.\n");
+	formatstr_cat( out, "Job ad information event triggered.\n" );
 
 	if ( jobad_arg ) {
-		retval = fPrintAd(file, *jobad_arg);
+		retval = sPrintAd( out, *jobad_arg );
 	}
 
-    return retval;
+    return retval != 0;
 }
 
 int
@@ -5548,16 +5510,16 @@ JobStatusUnknownEvent::~JobStatusUnknownEvent(void)
 {
 }
 
-int
-JobStatusUnknownEvent::writeEvent (FILE *file)
+bool
+JobStatusUnknownEvent::formatBody( std::string &out )
 {
-	int retval = fprintf (file, "The job's remote status is unknown\n");
+	int retval = formatstr_cat( out, "The job's remote status is unknown\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 	
-	return (1);
+	return true;
 }
 
 int JobStatusUnknownEvent::readEvent (FILE *file)
@@ -5592,16 +5554,16 @@ JobStatusKnownEvent::~JobStatusKnownEvent(void)
 {
 }
 
-int
-JobStatusKnownEvent::writeEvent (FILE *file)
+bool
+JobStatusKnownEvent::formatBody( std::string &out )
 {
-	int retval = fprintf (file, "The job's remote status is known again\n");
+	int retval = formatstr_cat( out, "The job's remote status is known again\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int JobStatusKnownEvent::readEvent (FILE *file)
@@ -5638,16 +5600,16 @@ JobStageInEvent::~JobStageInEvent(void)
 {
 }
 
-int
-JobStageInEvent::writeEvent (FILE *file)
+bool
+JobStageInEvent::formatBody( std::string &out )
 {
-	int retval = fprintf (file, "Job is performing stage-in of input files\n");
+	int retval = formatstr_cat( out, "Job is performing stage-in of input files\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -5684,16 +5646,16 @@ JobStageOutEvent::~JobStageOutEvent(void)
 {
 }
 
-int
-JobStageOutEvent::writeEvent (FILE *file)
+bool
+JobStageOutEvent::formatBody( std::string &out )
 {
-	int retval = fprintf (file, "Job is performing stage-out of output files\n");
+	int retval = formatstr_cat( out, "Job is performing stage-out of output files\n" );
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
-	return (1);
+	return true;
 }
 
 int
@@ -5740,23 +5702,23 @@ AttributeUpdate::~AttributeUpdate(void)
 	}
 }
 
-int
-AttributeUpdate::writeEvent(FILE *file)
+bool
+AttributeUpdate::formatBody( std::string &out )
 {
 	int retval;
 	if (old_value)
 	{
-		retval = fprintf(file, "Changing job attribute %s from %s to %s\n", name, old_value, value);
+		retval = formatstr_cat( out, "Changing job attribute %s from %s to %s\n", name, old_value, value );
 	} else {
-		retval = fprintf(file, "Setting job attribute %s to %s\n", name, value);
+		retval = formatstr_cat( out, "Setting job attribute %s to %s\n", name, value );
 	}
 
 	if (retval < 0)
 	{
-		return 0;
+		return false;
 	}
 
-	return 1;
+	return true;
 }
 
 int
@@ -5881,7 +5843,7 @@ int PreSkipEvent::readEvent (FILE *file)
 
 	// check if event ended without specifying the DAG node.
 	// in this case, the submit host would be the event delimiter
-	if ( strncmp(skipEventLogNotes,"...",3)==0 ) {
+	if (skipEventLogNotes && (MATCH == strncmp(skipEventLogNotes,"...",3))) {
 			// This should not happen. The event should have a 
 			// DAGMan node associated with it.
 		skipEventLogNotes[0] = '\0';
@@ -5919,19 +5881,20 @@ int PreSkipEvent::readEvent (FILE *file)
 	return ( !skipEventLogNotes || strlen(skipEventLogNotes) == 0 )?0:1;
 }
 
-int PreSkipEvent::writeEvent (FILE* file)
+bool
+PreSkipEvent::formatBody( std::string &out )
 {
-	int retval = fprintf (file, "PRE script return value is PRE_SKIP value\n");
+	int retval = formatstr_cat( out, "PRE script return value is PRE_SKIP value\n" );
 		// 
 	if (!skipEventLogNotes || retval < 0)
 	{
-		return 0;
+		return false;
 	}
-	retval = fprintf( file, "    %.8191s\n", skipEventLogNotes );
+	retval = formatstr_cat( out, "    %.8191s\n", skipEventLogNotes );
 	if( retval < 0 ) {
-		return 0;
+		return false;
 	}
-	return (1);
+	return true;
 }
 
 ClassAd* PreSkipEvent::toClassAd(void)

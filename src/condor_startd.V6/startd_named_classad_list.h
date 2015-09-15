@@ -29,10 +29,13 @@ class StartdNamedClassAdList : public NamedClassAdList
 {
   public:
 	StartdNamedClassAdList( void );
-	~StartdNamedClassAdList( void ) { };
+	virtual ~StartdNamedClassAdList( void ) { };
 
 	bool Register( StartdNamedClassAd *ad );
 	int	Publish( ClassAd *ad, unsigned r_id );
+	int DeleteJob ( StartdCronJob * job );
+	int ClearJob ( StartdCronJob * job );
+	virtual NamedClassAd * New( const char *name, ClassAd *ad = NULL );
 };
 
 #endif

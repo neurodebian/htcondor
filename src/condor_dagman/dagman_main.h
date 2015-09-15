@@ -32,7 +32,8 @@ enum exit_value {
 	EXIT_RESTART = 3,	// exit but indicate that we should be restarted
 };
 
-void main_shutdown_rescue( int exitVal, Dag::dag_status dagStatus );
+void main_shutdown_rescue( int exitVal, Dag::dag_status dagStatus,
+			bool removeCondorJobs = true );
 void main_shutdown_graceful( void );
 void print_status();
 
@@ -54,10 +55,6 @@ class Dagman {
 		// whether we should fall back to non-default log mode.
 	void CheckLogFileMode( const CondorVersionInfo &submitFileVersion );
 
-		// Disable use of the default node log (use the log files from
-		// the submit files instead).
-	void DisableDefaultLog();
-
 		// Resolve macro substitutions in _defaultNodeLog.  Also check
 		// for some errors/warnings.
 	void ResolveDefaultLog();
@@ -71,8 +68,6 @@ class Dagman {
 
 	char* condorSubmitExe;
 	char* condorRmExe;
-	char* storkSubmitExe;
-	char* storkRmExe;
 
 	// number of seconds to wait before consecutive calls to
 	// condor_submit (or dap_submit, etc.)
@@ -218,9 +213,18 @@ class Dagman {
 		// If _runPost is true, we run a POST script even if the PRE
 		// script for the node fails.
 	bool _runPost;
+
 		// Default priority that DAGman uses for nodes.
 	int _defaultPriority;
+
 	int _claim_hold_time;
+
+		// True iff -DoRecov is specified on the command line.
+	bool _doRecovery;
+
+		// True iff we want to suppress jobs from writing to the
+		// log files specified in their submit files (see gittrac #4353).
+	bool _suppressJobLogs;
 
 	DagmanClassad *_dagmanClassad;
 };

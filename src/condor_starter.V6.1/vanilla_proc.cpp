@@ -28,7 +28,6 @@
 #include "vanilla_proc.h"
 #include "starter.h"
 #include "syscall_numbers.h"
-#include "dynuser.h"
 #include "condor_config.h"
 #include "domain_tools.h"
 #include "classad_helpers.h"
@@ -41,7 +40,6 @@
 
 #ifdef WIN32
 #include "executable_scripts.WINDOWS.h"
-extern dynuser* myDynuser;
 #endif
 
 #if defined(HAVE_EVENTFD)
@@ -62,7 +60,7 @@ void StarterStatistics::Clear() {
 void StarterStatistics::Init() {
     Clear();
 
-    if ( ! this->RecentWindowQuantum) this->RecentWindowQuantum = 1;
+    this->RecentWindowQuantum = 1;
     this->RecentWindowMax = this->RecentWindowQuantum;
 
     STATS_POOL_ADD_VAL_PUB_RECENT(Pool, "", BlockReads, IF_BASICPUB);
@@ -141,7 +139,9 @@ VanillaProc::VanillaProc(ClassAd* jobAd) : OsProc(jobAd),
 	m_memory_limit(-1),
 	m_oom_fd(-1),
 	m_oom_efd(-1),
-	m_oom_efd2(-1)
+	m_oom_efd2(-1),
+	isCheckpointing(false),
+	isSoftKilling(false)
 {
     m_statistics.Init();
 #if !defined(WIN32)
@@ -323,7 +323,7 @@ VanillaProc::StartJob()
 	// This way, the job will be heavily preferred to be killed over a normal process.
 	// OOM score is currently exponential - a score of 4 is a factor-16 increase in
 	// the OOM score.
-	setupOOMScore(4);
+	setupOOMScore(4,800);
 #endif
 
 #if defined(HAVE_EXT_LIBCGROUP)
@@ -466,14 +466,42 @@ VanillaProc::StartJob()
 
 	// On Linux kernel 2.4.19 and later, we can give each job its
 	// own FS mounts.
-	char * mount_under_scratch = param("MOUNT_UNDER_SCRATCH");
+	auto_free_ptr mount_under_scratch(param("MOUNT_UNDER_SCRATCH"));
 	if (mount_under_scratch) {
+		// try evaluating mount_under_scratch as a classad expression, if it is
+		// an expression it must return a string. if it's not an expression, just
+		// use it as a string (as we did before 8.3.6)
+		classad::Value value;
+		if (JobAd->EvaluateExpr(mount_under_scratch.ptr(), value)) {
+			const char * pval = NULL;
+			if (value.IsStringValue(pval)) {
+				mount_under_scratch.set(strdup(pval));
+			} else {
+				// was an expression, but not a string, so report and error and fail.
+				dprintf(D_ALWAYS | D_ERROR,
+					"ERROR: MOUNT_UNDER_SCRATCH does not evaluate to a string, it is : %s\n",
+					ClassAdValueToString(value));
+				return FALSE;
+			}
+		}
+	}
 
+	// if execute dir is encrypted, add /tmp and /var/tmp to mount_under_scratch
+	bool encrypt_execdir = false;
+	JobAd->LookupBool(ATTR_ENCRYPT_EXECUTE_DIRECTORY,encrypt_execdir);
+	if (encrypt_execdir || param_boolean_crufty("ENCRYPT_EXECUTE_DIRECTORY",false)) {
+		// prepend /tmp, /var/tmp to whatever admin wanted. don't worry
+		// if admin already listed /tmp etc - subdirs can appear twice
+		// in this list because AddMapping() ok w/ duplicate entries
+		MyString buf("/tmp,/var/tmp,");
+		buf += mount_under_scratch.ptr();
+		mount_under_scratch.set(buf.StrDup());
+	}
+	if (mount_under_scratch) {
 		std::string working_dir = Starter->GetWorkingDir();
 
 		if (IsDirectory(working_dir.c_str())) {
 			StringList mount_list(mount_under_scratch);
-			free(mount_under_scratch);
 
 			mount_list.rewind();
 			if (!fs_remap) {
@@ -495,15 +523,18 @@ VanillaProc::StartJob()
 						delete [] full_dir; full_dir = NULL;
 						if (!mkdir_and_parents_if_needed( full_dir_str.c_str(), S_IRWXU, PRIV_USER )) {
 							dprintf(D_ALWAYS, "Failed to create scratch directory %s\n", full_dir_str.c_str());
+							delete fs_remap;
 							return FALSE;
 						}
 						dprintf(D_FULLDEBUG, "Adding mapping: %s -> %s.\n", full_dir_str.c_str(), next_dir_str.c_str());
 						if (fs_remap->AddMapping(full_dir_str, next_dir_str)) {
 							// FilesystemRemap object prints out an error message for us.
+							delete fs_remap;
 							return FALSE;
 						}
 					} else {
 						dprintf(D_ALWAYS, "Unable to concatenate %s and %s.\n", working_dir.c_str(), next_dir_str.c_str());
+						delete fs_remap;
 						return FALSE;
 					}
 				} else {
@@ -512,8 +543,10 @@ VanillaProc::StartJob()
 			}
 		} else {
 			dprintf(D_ALWAYS, "Unable to perform mappings because %s doesn't exist.\n", working_dir.c_str());
+			delete fs_remap;
 			return FALSE;
 		}
+		mount_under_scratch.clear();
 	}
 
 #if defined(LINUX)
@@ -551,8 +584,8 @@ VanillaProc::StartJob()
 			env.SetEnv("_CONDOR_PID_NS_INIT_STATUS_FILENAME", filename);
 			env.InsertEnvIntoClassAd(JobAd, &env_errors);
 
-			Starter->jic->removeFromOutputFiles(filename.c_str());
-			this->m_pid_ns_init_filename = filename;
+			Starter->jic->removeFromOutputFiles(condor_basename(filename.c_str()));
+			this->m_pid_ns_status_filename = filename;
 			
 			// Now, set the job's CMD to the wrapper, and shift
 			// over the arguments by one
@@ -603,12 +636,26 @@ VanillaProc::StartJob()
 				uint64_t MemMb_big = MemMb;
 				m_memory_limit = MemMb_big;
 				climits.set_memory_limit_bytes(1024*1024*MemMb_big, mem_is_soft);
+
+				// Note that ATTR_VIRTUAL_MEMORY on Linux
+				// is sum of memory and swap, in Kilobytes
+
+				if (MachineAd->LookupInteger(ATTR_VIRTUAL_MEMORY, MemMb)) {
+					uint64_t VMemMb_big = MemMb;
+
+					if (MemMb > 0) {
+						climits.set_memsw_limit_bytes(1024*VMemMb_big);
+					}
+				} else {
+					dprintf(D_ALWAYS, "Not setting virtual memory limit in cgroup because "
+						"Virtual Memory attribute missing in machine ad.\n");
+				}
 			} else {
-				dprintf(D_ALWAYS, "Not setting memory soft limit in cgroup because "
+				dprintf(D_ALWAYS, "Not setting memory limit in cgroup because "
 					"Memory attribute missing in machine ad.\n");
 			}
 		} else if (mem_limit == "none") {
-			dprintf(D_FULLDEBUG, "Not enforcing memory soft limit.\n");
+			dprintf(D_FULLDEBUG, "Not enforcing memory limit.\n");
 		} else {
 			dprintf(D_ALWAYS, "Invalid value of CGROUP_MEMORY_LIMIT_POLICY: %s.  Ignoring.\n", mem_limit.c_str());
 		}
@@ -630,7 +677,7 @@ VanillaProc::StartJob()
 	// is killed instead of the job itself.
 	if (retval)
 	{
-		setupOOMScore(-4);
+		setupOOMScore(0,0);
 	}
 
 #endif
@@ -700,86 +747,126 @@ VanillaProc::PublishUpdateAd( ClassAd* ad )
 }
 
 
+int VanillaProc::pidNameSpaceReaper( int status ) {
+	TemporaryPrivSentry sentry(PRIV_ROOT);
+	FILE *f = safe_fopen_wrapper_follow(m_pid_ns_status_filename.c_str(), "r");
+	if (f == NULL) {
+		// Probably couldn't exec the wrapper.  Badness
+		dprintf(D_ALWAYS, "JobReaper: condor_pid_ns_init didn't drop filename %s (%d)\n", m_pid_ns_status_filename.c_str(), errno);
+		EXCEPT("Starter configured to use PID NAMESPACES, but libexec/condor_pid_ns_init did not run properly");
+	}
+	if (fscanf(f, "ExecFailed") > 0) {
+		EXCEPT("Starter configured to use PID NAMESPACES, but execing the job failed");
+	}
+	fseek(f, 0, SEEK_SET);
+	if (fscanf(f, "Exited: %d", &status) > 0) {
+		dprintf(D_FULLDEBUG, "Real job exit code of %d read from wrapper output file\n", status);
+	}
+	fclose(f);
+
+	return status;
+}
+
 bool
 VanillaProc::JobReaper(int pid, int status)
 {
 	dprintf(D_FULLDEBUG,"Inside VanillaProc::JobReaper()\n");
 
-	if (pid == JobPid) {
+	//
+	// Run all the reapers first, since some of them change the exit status.
+	//
+	if( m_pid_ns_status_filename.length() > 0 ) {
+		status = pidNameSpaceReaper( status );
+	}
+	bool jobExited = OsProc::JobReaper( pid, status );
+	if( pid != JobPid ) { return jobExited; }
 
-			// On newer kernels if memory.use_hierarchy==1, then we cannot disable
-			// the OOM killer.  Hence, we have to be ready for a SIGKILL to be delivered
-			// by the kernel at the same time we get the notification.  Hence, if we
-			// see an exit signal, we must also check the event file descriptor.
 #if defined(LINUX)
-		int efd = -1;
-		if ((m_oom_efd >= 0) && daemonCore->Get_Pipe_FD(m_oom_efd, &efd) && (efd != -1))
-		{
-			Selector selector;
-			selector.add_fd(efd, Selector::IO_READ);
-			selector.set_timeout(0);
-			selector.execute();
-			if (!selector.failed() && !selector.timed_out() && selector.has_ready() && selector.fd_ready(efd, Selector::IO_READ))
-			{
-				outOfMemoryEvent(m_oom_efd);
-			}
+	// On newer kernels if memory.use_hierarchy==1, then we cannot disable
+	// the OOM killer.  Hence, we have to be ready for a SIGKILL to be delivered
+	// by the kernel at the same time we get the notification.  Hence, if we
+	// see an exit signal, we must also check the event file descriptor.
+	//
+	// outOfMemoryEvent() is aware of checkpointing and will mention that
+	// the OOM event happened during a checkpoint.
+	int efd = -1;
+	if( (m_oom_efd >= 0) && daemonCore->Get_Pipe_FD(m_oom_efd, &efd) && (efd != -1) ) {
+		Selector selector;
+		selector.add_fd(efd, Selector::IO_READ);
+		selector.set_timeout(0);
+		selector.execute();
+		if( !selector.failed() && !selector.timed_out() && selector.has_ready() && selector.fd_ready(efd, Selector::IO_READ) ) {
+			outOfMemoryEvent( m_oom_efd );
 		}
+	}
 #endif
 
-			// To make sure that no job processes are still lingering
-			// on the machine, call Kill_Family().
-			//
-			// HOWEVER, iff we are tracking process families via a
-			// dedicated execute account, we want to delay killing until
-			// there is only one job under the starter.  We do this to
-		
-			// prevent the starter from killing the SSH daemon early, and
-			// therefore effectively killing any ssh_to_job session as soon
-			// as the job exits on machine configured with a dedicated
-			// execute account.
-		if ( !m_dedicated_account || Starter->numberOfJobs() == 1 )
-		{
-			dprintf(D_PROCFAMILY,"About to call Kill_Family()\n");
-			daemonCore->Kill_Family(JobPid);
+	if( isCheckpointing ) {
+		dprintf( D_FULLDEBUG, "Inside VanillaProc::JobReaper() during a checkpoint\n" );
+		isCheckpointing = false;
+
+		// The job signals that it's successfully written a checkpoint by
+		// exiting normally with status 0.
+		if( exit_status == 0 ) {
+			if( Starter->jic->uploadWorkingFiles() ) {
+				// FIXME: Update the job ad to reflect the succesful checkpoint.
+			} else {
+				// The logic in the base starter for failing to transfer
+				// output back is to wait for the shadow to reconnect, or,
+				// failing that, the job lease to expire.  So do nothing.
+				dprintf( D_ALWAYS, "Failed to transfer checkpoint.\n" );
+			}
+
+			if( ! isSoftKilling ) {
+				StartJob();
+
+				jobExited = false;
+			}
 		} else {
-			dprintf(D_PROCFAMILY,
-				"Postponing call to Kill_Family() (perhaps due to ssh_to_job)\n");
+			// The job exited without taking a checkpoint.  If we don't do
+			// anything, it will be reported as if the error code or signal
+			// had happened naturally (that job will usually exit the
+			// queue).  This could confuse the users.
+			//
+			// For now, we'll just force the job to requeue.
+
+			// The easiest way to do that is to pretend that this was an
+			// exit requested by HTCondor.  That's not untrue, but this
+			// variable is normally only used to flag external requests
+			// which have leases.
+
+			// This makes it show up as 'evicted', which is true but
+			// deceptive.  Fixing that may require adding a new starter
+			// exit code (JOB_FAILED_CHECKPOINT) and a new user log
+			// event ID (ULOG_JOB_FAILED_CHECKPOINT).
+			requested_exit = true;
+		}
+	} else {
+		// If the parent job process died, clean up all of the job's processes
+		// and record its final usage stats.
+
+		// Kill_Family() will (incorrectly?) kill the SSH-to-job daemon
+		// if we're using dedicated accounts, so don't unless we know
+		// we're the only job.
+		if ( ! m_dedicated_account || Starter->numberOfJobs() == 1 ) {
+			dprintf( D_PROCFAMILY, "About to call Kill_Family()\n" );
+			daemonCore->Kill_Family( JobPid );
+		} else {
+			dprintf( D_PROCFAMILY, "Postponing call to Kill_Family() "
+				"(perhaps due to ssh_to_job)\n" );
 		}
 
-			// Record final usage stats for this process family, since
-			// once the reaper returns, the family is no longer
-			// registered with DaemonCore and we'll never be able to
-			// get this information again.
-		if (daemonCore->Get_Family_Usage(JobPid, m_final_usage) == FALSE) {
-			dprintf(D_ALWAYS, "error getting family usage for pid %d in "
-					"VanillaProc::JobReaper()\n", JobPid);
+		// Record final usage stats for this process family, since
+		// once the reaper returns, the family is no longer
+		// registered with DaemonCore and we'll never be able to
+		// get this information again.
+		if( daemonCore->Get_Family_Usage(JobPid, m_final_usage) == FALSE ) {
+			dprintf( D_ALWAYS, "error getting family usage for pid %d in "
+				"VanillaProc::JobReaper()\n", JobPid );
 		}
 	}
 
-	// If we didn't kill it ourselves, and we've using pid namespaces
-	if (!requested_exit && (m_pid_ns_init_filename.length() > 0)) {
-		// We ran a job with a pid_ns_init wrapper.  This file contains
-		// true status
-		TemporaryPrivSentry sentry(PRIV_ROOT);
-		FILE *f = safe_fopen_wrapper_follow(m_pid_ns_init_filename.c_str(), "r");
-		if (f == NULL) {
-			// Probably couldn't exec the wrapper.  Badness
-			dprintf(D_ALWAYS, "JobReaper: condor_pid_ns_init didn't drop filename %s (%d)\n", m_pid_ns_init_filename.c_str(), errno);
-			EXCEPT("Starter configured to use PID NAMESPACES, but libexec/condor_pid_ns_init did not run properly");
-		}
-		if (fscanf(f, "ExecFailed") > 0) {
-			EXCEPT("Starter configured to use PID NAMESPACES, but execing the job failed");
-		}
-		
-		fseek(f, 0, SEEK_SET);
-		if (fscanf(f, "Exited: %d", &status) > 0) {
-			dprintf(D_FULLDEBUG, "Real job exit code of %d read from wrapper output file\n", status);
-		}
-		fclose(f);
-	}
-
-		// This will reset num_pids for us, too.
-	return OsProc::JobReaper( pid, status );
+	return jobExited;
 }
 
 
@@ -821,7 +908,7 @@ bool
 VanillaProc::ShutdownGraceful()
 {
 	dprintf(D_FULLDEBUG,"in VanillaProc::ShutdownGraceful()\n");
-	
+
 	if ( JobPid == -1 ) {
 		// there is no process family yet, probably because we are still
 		// transferring files.  just return true to say we're all done,
@@ -830,20 +917,12 @@ VanillaProc::ShutdownGraceful()
 		return true;
 	}
 
-	// WE USED TO.....
-	//
-	// take a snapshot before we softkill the parent job process.
-	// this helps ensure that if the parent exits without killing
-	// the kids, our JobExit() handler will get em all.
-	//
-	// TODO: should we make an explicit call to the procd here to tell
-	// it to take a snapshot???
-
-	// now softkill the parent job process.  this is exactly what
-	// OsProc::ShutdownGraceful does, so call it.
-	//
-	OsProc::ShutdownGraceful();
-	return false; // shutdown is pending (same as OsProc::ShutdownGraceful()
+	isSoftKilling = true;
+	// Because we allow the user to specify different signals for periodic
+	// checkpoint and for soft kills, don't suppress the soft kill signal
+	// if we're checkpointing when we're vacated.  (This also simplifies
+	// keeping signal semantics consistent with removing or holding jobs.)
+	return OsProc::ShutdownGraceful();
 }
 
 bool
@@ -932,11 +1011,14 @@ VanillaProc::outOfMemoryEvent(int /* fd */)
 	} else {
 		ss << "Job has encountered an out-of-memory event.";
 	}
+	if( isCheckpointing ) {
+		ss << "  This occurred while the job was checkpointing.";
+	}
 	Starter->jic->holdJob(ss.str().c_str(), CONDOR_HOLD_CODE_JobOutOfResources, 0);
 
 	// this will actually clean up the job
 	if ( Starter->Hold( ) ) {
-		dprintf( D_FULLDEBUG, "All jobs were removed due to OOM event.\n" );
+		dprintf( D_ALWAYS, "Job was held due to OOM event: %s\n", ss.str().c_str());
 		Starter->allJobsDone();
 	}
 
@@ -949,16 +1031,19 @@ VanillaProc::outOfMemoryEvent(int /* fd */)
 }
 
 int
-VanillaProc::setupOOMScore(int new_score)
+VanillaProc::setupOOMScore(int oom_adj, int oom_score_adj)
 {
 
 #if !(defined(HAVE_EVENTFD))
-	if (new_score) // Done to suppress compiler warnings.
+	if (oom_adj + oom_score_adj) // Done to suppress compiler warnings.
 		return 0;
 	return 0;
 #else 
 	TemporaryPrivSentry sentry(PRIV_ROOT);
 	// oom_adj is deprecated on modern kernels and causes a deprecation warning when used.
+
+	int oom_score = oom_adj; // assume the old way
+
 	int oom_score_fd = open("/proc/self/oom_score_adj", O_WRONLY | O_CLOEXEC);
 	if (oom_score_fd == -1) {
 		if (errno != ENOENT) {
@@ -976,15 +1061,12 @@ VanillaProc::setupOOMScore(int new_score)
 			}
 		}
 	} else {
-		// oom_score_adj is linear; oom_adj was exponential.
-		if (new_score > 0)
-			new_score = 1 << new_score;
-		else
-			new_score = -(1 << -new_score);
+		// oops, we've got the new kind.  Use that.
+		oom_score = oom_score_adj;
 	}
 
 	std::stringstream ss;
-	ss << new_score;
+	ss << oom_score;
 	std::string new_score_str = ss.str();
         ssize_t nwritten = full_write(oom_score_fd, new_score_str.c_str(), new_score_str.length());
 	if (nwritten < 0) {
@@ -1161,3 +1243,45 @@ VanillaProc::setupOOMEvent(const std::string &cgroup_string)
 #endif
 }
 
+bool VanillaProc::Ckpt() {
+	dprintf( D_FULLDEBUG, "Entering VanillaProc::Ckpt()\n" );
+
+	if( isSoftKilling ) { return false; }
+
+	int wantCheckpointSignal = 0;
+	JobAd->LookupBool( ATTR_WANT_CHECKPOINT_SIGNAL, wantCheckpointSignal );
+	if( wantCheckpointSignal && ! isCheckpointing ) {
+		int periodicCheckpointSignal = findCheckpointSig( JobAd );
+		if( periodicCheckpointSignal == -1 ) {
+			periodicCheckpointSignal = soft_kill_sig;
+		}
+		daemonCore->Send_Signal( JobPid, periodicCheckpointSignal );
+		isCheckpointing = true;
+
+		// Do not do intermediate file transfer, since we're not blocking.
+		// Instead, do intermediate file transfer in the reaper.
+		return false;
+	}
+
+	return OsProc::Ckpt();
+}
+
+int VanillaProc::outputOpenFlags() {
+	int wantCheckpoint = 0;
+	JobAd->LookupBool( ATTR_WANT_CHECKPOINT_SIGNAL, wantCheckpoint );
+	if( wantCheckpoint ) {
+		return O_WRONLY | O_CREAT | O_APPEND | O_LARGEFILE;
+	} else {
+		return this->OsProc::outputOpenFlags();
+	}
+}
+
+int VanillaProc::streamingOpenFlags( bool isOutput ) {
+	int wantCheckpoint = 0;
+	JobAd->LookupBool( ATTR_WANT_CHECKPOINT_SIGNAL, wantCheckpoint );
+	if( wantCheckpoint ) {
+		return isOutput ? O_CREAT | O_APPEND | O_WRONLY : O_RDONLY;
+	} else {
+		return this->OsProc::streamingOpenFlags( isOutput );
+	}
+}

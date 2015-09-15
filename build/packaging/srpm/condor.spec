@@ -84,7 +84,14 @@
 %if 0%{?hcc}
 %define blahp 0
 %define cream 0
+%if 0%{?rhel} >= 7
+%define aviary 0
+%else
 %define aviary 1
+%endif
+%if 0%{?rhel} >= 6
+%define std_univ 0
+%endif
 %endif
 
 %define glexec 1
@@ -206,7 +213,6 @@ Patch8: osg_sysconfig_in_init_script.patch
 
 # HCC patches
 # See gt3158
-Patch14: 0001-Apply-the-user-s-condor_config-last-rather-than-firs.patch
 Patch15: wso2-axis2.patch
 
 BuildRoot: %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
@@ -228,6 +234,7 @@ BuildRequires: /usr/include/expat.h
 BuildRequires: openldap-devel
 BuildRequires: python-devel
 BuildRequires: boost-devel
+BuildRequires: redhat-rpm-config
 
 %if %uw_build || %std_univ
 BuildRequires: cmake >= 2.8
@@ -339,6 +346,11 @@ BuildRequires: latex2html
 Requires: /usr/sbin/sendmail
 Requires: condor-classads = %{version}-%{release}
 Requires: condor-procd = %{version}-%{release}
+
+# ecryptfs was pulled from rhel 7
+%if (0%{?rhel} == 5 || 0%{?rhel} == 6)
+Requires: ecryptfs-utils
+%endif
 
 %if %blahp && ! %uw_build
 Requires: blahp >= 1.16.1
@@ -540,6 +552,16 @@ Header files for HTCondor's ClassAd Library, a powerful and flexible,
 semi-structured representation of data.
 
 #######################
+%package test
+Summary: HTCondor Self Tests
+Group: Applications/System
+Requires: %name = %version-%release
+Requires: %name-classads = %{version}-%{release}
+
+%description test
+A collection of tests to verify that HTCondor is operating properly.
+
+#######################
 %if %cream
 %package cream-gahp
 Summary: HTCondor's CREAM Gahp
@@ -612,7 +634,6 @@ Includes all the files necessary to support running standard universe jobs.
 %package static-shadow
 Summary: Statically linked condow_shadow and condor_master binaries
 Group: Applications/System
-Requires: %name = %version-%release
 
 %description static-shadow
 Provides condor_shadow_s and condor_master_s, which have all the globus
@@ -627,6 +648,13 @@ Requires: %name = %version-%release
 
 %description externals
 Includes the external packages built when UW_BUILD is enabled
+
+%package external-libs
+Summary: Libraries for external packages built into HTCondor
+Group: Applications/System
+
+%description external-libs
+Includes the libraries for external packages built when UW_BUILD is enabled
 
 %endif
 
@@ -648,6 +676,7 @@ Requires: %name-std-universe = %version-%release
 %endif
 %if %uw_build
 Requires: %name-externals = %version-%release
+Requires: %name-external-libs = %version-%release
 %endif
 
 %description all
@@ -672,7 +701,6 @@ exit 0
 %patch8 -p1
 
 %if 0%{?hcc}
-%patch14 -p1
 %patch15 -p0
 %endif
 
@@ -1120,6 +1148,7 @@ rm -rf %{buildroot}
 %_libdir/libcondor_utils_%{version_}.so
 %_libdir/libcondorapi.so
 %dir %_libexecdir/condor/
+%_libexecdir/condor/linux_kernel_tuning
 %_libexecdir/condor/accountant_log_fixer
 %_libexecdir/condor/condor_chirp
 %_libexecdir/condor/condor_ssh
@@ -1167,6 +1196,8 @@ rm -rf %{buildroot}
 %_libexecdir/condor/interactive.sub
 %_libexecdir/condor/condor_dagman_metrics_reporter
 %_libexecdir/condor/condor_gangliad
+%_libexecdir/condor/panda-plugin.so
+%_libexecdir/condor/pandad
 %_mandir/man1/condor_advertise.1.gz
 %_mandir/man1/condor_check_userlogs.1.gz
 %_mandir/man1/condor_chirp.1.gz
@@ -1179,6 +1210,7 @@ rm -rf %{buildroot}
 %_mandir/man1/condor_gpu_discovery.1.gz
 %_mandir/man1/condor_history.1.gz
 %_mandir/man1/condor_hold.1.gz
+%_mandir/man1/condor_job_router_info.1.gz
 %_mandir/man1/condor_master.1.gz
 %_mandir/man1/condor_off.1.gz
 %_mandir/man1/condor_on.1.gz
@@ -1202,6 +1234,7 @@ rm -rf %{buildroot}
 %_mandir/man1/condor_submit.1.gz
 %_mandir/man1/condor_submit_dag.1.gz
 %_mandir/man1/condor_transfer_data.1.gz
+%_mandir/man1/condor_update_machine_ad.1.gz
 %_mandir/man1/condor_updates_stats.1.gz
 %_mandir/man1/condor_urlfetch.1.gz
 %_mandir/man1/condor_userlog.1.gz
@@ -1268,6 +1301,7 @@ rm -rf %{buildroot}
 %_bindir/condor_qsub
 %_bindir/condor_pool_job_report
 %_bindir/condor_job_router_info
+%_bindir/condor_update_machine_ad
 # reconfig_schedd, restart
 # sbin/condor is a link for master_off, off, on, reconfig,
 %_sbindir/condor_advertise
@@ -1531,6 +1565,12 @@ rm -rf %{buildroot}
 %_includedir/classad/xmlSink.h
 %_includedir/classad/xmlSource.h
 
+#################
+%files test
+%defattr(-,root,root,-)
+%_libexecdir/condor/condor_sinful
+%_libexecdir/condor/condor_testingd
+
 %if %cream
 %files cream-gahp
 %defattr(-,root,root,-)
@@ -1547,6 +1587,7 @@ rm -rf %{buildroot}
 %files python
 %defattr(-,root,root,-)
 %_libdir/libpyclassad*.so
+%_libexecdir/condor/libclassad_python_user.so
 %{python_sitearch}/classad.so
 %{python_sitearch}/htcondor.so
 
@@ -1615,13 +1656,15 @@ rm -rf %{buildroot}
 %files static-shadow
 %{_sbindir}/condor_shadow_s
 
-%files externals
+%files external-libs
 %dir %_libdir/condor
 %_libdir/condor/libcondordrmaa.a
 %_libdir/condor/libdrmaa.so
 %_libdir/condor/libglobus*.so*
 %_libdir/condor/libvomsapi*.so*
 %_libdir/condor/ugahp.jar
+
+%files externals
 %_sbindir/deltacloud_gahp
 %_sbindir/unicore_gahp
 %if %blahp

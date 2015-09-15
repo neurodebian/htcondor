@@ -27,7 +27,7 @@ class DaemonCommandProtocol: Service, public ClassyCountedPtr {
 	friend class DaemonCore;
 
 public:
-	DaemonCommandProtocol(Stream* sock,bool is_command_sock);
+	DaemonCommandProtocol( Stream * sock, bool is_command_sock, bool isSharedPortLoopback = false );
 	~DaemonCommandProtocol();
 
 	int doProtocol();
@@ -40,7 +40,10 @@ private:
 		CommandProtocolReadHeader,
 		CommandProtocolReadCommand,
 		CommandProtocolAuthenticate,
-		CommandProtocolPostAuthenticate,
+		CommandProtocolAuthenticateContinue,
+		CommandProtocolEnableCrypto,
+		CommandProtocolVerifyCommand,
+		CommandProtocolSendResponse,
 		CommandProtocolExecCommand
 	} m_state;
 
@@ -57,6 +60,7 @@ private:
 	bool m_is_http_get;
 #endif
 
+	bool m_isSharedPortLoopback;
 	bool m_nonblocking;
 	bool m_delete_sock;
 	bool m_sock_had_no_deadline;
@@ -65,6 +69,7 @@ private:
 	int	m_reqFound;
 	int	m_result;
 	int m_perm;
+	int m_allow_empty;
 	MyString m_user;
 	ClassAd *m_policy;
 	ClassAd m_auth_info;
@@ -80,6 +85,8 @@ private:
 	const static std::string WaitForSocketDataString;
 	int m_real_cmd;       // for DC_AUTHENTICATE, the final command to execute
 	int m_auth_cmd;       // for DC_AUTHENTICATE, the command the security session will be used for
+	int m_cmd_index;
+	CondorError *m_errstack;
 
 	bool m_new_session;
 	SecMan::sec_feat_act m_will_enable_encryption;
@@ -90,7 +97,11 @@ private:
 	CommandProtocolResult ReadHeader();
 	CommandProtocolResult ReadCommand();
 	CommandProtocolResult Authenticate();
-	CommandProtocolResult PostAuthenticate();
+	CommandProtocolResult AuthenticateContinue();
+	CommandProtocolResult AuthenticateFinish(int auth_success, char *method_used);
+	CommandProtocolResult EnableCrypto();
+	CommandProtocolResult VerifyCommand();
+	CommandProtocolResult SendResponse();
 	CommandProtocolResult ExecCommand();
 	CommandProtocolResult WaitForSocketData();
 	int SocketCallback( Stream *stream );

@@ -17,7 +17,6 @@
  *
  ***************************************************************/
 
-#define _CONDOR_ALLOW_OPEN
 #include "condor_common.h"
 #include "condor_debug.h"
 #include "condor_config.h"
@@ -464,7 +463,6 @@ DCLeaseManagerLease_getConstList(
 	const list<DCLeaseManagerLease *>	&non_const_list
 	)
 {
-	typedef list<DCLeaseManagerLease *>			LeaseList;
 	typedef list<const DCLeaseManagerLease *>	ConstList;
 
 	const ConstList *const_list = (const ConstList *) &non_const_list;

@@ -240,6 +240,7 @@ DagmanMetrics::Report( int exitCode, Dag::dag_status status )
 					PRIV_UNKNOWN,
 					1, // reaper
 					false, // no command port
+					false, // no command port
 					NULL, // just inherit env of parent
 					NULL, // no cwd
 					NULL, // no FamilyInfo
@@ -379,9 +380,10 @@ DagmanMetrics::ParseBraindumpFile()
 		return;
 	}
 
+	int lineno = 0;
 	const char *line;
 		// Note:  getline() frees memory from the previous call each time.
-	while ( (line = getline( fp ) ) ) {
+	while ( (line = getline_trim( fp, lineno ) ) ) {
 		MyString lineStr( line );
 		lineStr.Tokenize();
 		const char *token1;

@@ -873,6 +873,18 @@ update_report_result:
 				"Number of submitted jobs would exceed MAX_JOBS_SUBMITTED\n";
 			dprintf( D_ALWAYS, "%s\n", error_msg.c_str() );
 		}
+		if( ProcId == -3 ) {
+			error = TRUE;
+			error_msg =
+				"Number of submitted jobs would exceed MAX_JOBS_PER_OWNER\n";
+			dprintf( D_ALWAYS, "%s\n", error_msg.c_str() );
+		}
+		if( ProcId == -4 ) {
+			error = TRUE;
+			error_msg =
+				"Number of submitted jobs would exceed MAX_JOBS_PER_SUBMISSION\n";
+			dprintf( D_ALWAYS, "%s\n", error_msg.c_str() );
+		}
 
 
 		// Adjust the argument/environment syntax based on the version
@@ -996,13 +1008,18 @@ submit_report_result:
 			}
 			current_command->status = SchedDRequest::SDCS_COMPLETED;
 		} else {
-			if ( RemoteCommitTransaction() < 0 ) {
+			CondorError errstack;
+			if ( RemoteCommitTransaction(0, &errstack) < 0 ) {
 				// We assume the preceeding SetAttribute() with NoAck
 				// is what really failed. Mark this command as failed
 				// and jump to the end (since the schedd has closed
 				// the connection). Any subsequent commands will be
 				// tried the next time we come through.
 				error_msg =  "ERROR: Failed to submit job";
+				if (errstack.subsys())
+				{
+					error_msg += ".  " + errstack.getFullText();
+				}
 				const char * result[] = {
 					GAHP_RESULT_FAILURE,
 					job_id_buff,
@@ -1096,6 +1113,7 @@ submit_report_result:
 
 			// now output this list of classads into a result
 			const char ** result  = new const char* [matching_ads.Length() + 3];
+			ASSERT(result);
 
 			std::string _ad_count;
 			formatstr( _ad_count, "%d", matching_ads.Length() );

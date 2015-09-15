@@ -149,13 +149,14 @@ enum {
    IF_ALWAYS     = 0x0000000, // publish regardless of publishing request
    IF_BASICPUB   = 0x0010000, // publish if 'basic' publishing is requested
    IF_VERBOSEPUB = 0x0020000, // publish if 'verbose' publishing is requested.
-   IF_NEVER      = 0x0030000, // publish if 'diagnostic' publishing is requested
+   IF_HYPERPUB   = 0x0030000, // publish if 'diagnostic' publishing is requested
    IF_RECENTPUB  = 0x0040000, // publish if 'recent' publishing is requested.
    IF_DEBUGPUB   = 0x0080000, // publish if 'debug' publishing is requested.
    IF_PUBLEVEL   = 0x0030000, // level bits
    IF_PUBKIND    = 0x0F00000, // category bits
    IF_NONZERO    = 0x1000000, // only publish non-zero values.
    IF_NOLIFETIME = 0x2000000, // don't publish lifetime values
+   IF_RT_SUM     = 0x4000000, // publish probe Sum value as Runtime
    IF_PUBMASK    = 0x0FF0000, // bits that affect publication
    };
 
@@ -293,6 +294,8 @@ public:
          // if there is an existing buffer copy items from it to the new buffer
          int cCopy = 0;
          if (pbuf) {
+            MSC_SUPPRESS_WARNING_FOREVER(6385) // Read overrun. ms analyze claims p can have readable range of 0 here, which isn't possible.
+            MSC_SUPPRESS_WARNING_FOREVER(6386) // Write overrun. ms analyze claims p can have writable range of 0 here, which isn't possible.
             cCopy = MIN(cItems,cSize);
             for (int ix = 0; ix > 0 - cCopy; --ix)
                p[(ix+cCopy)%cSize] = (*this)[ix];
@@ -557,10 +560,12 @@ public:
    }
 
    T Add(T val) { return Set(this->value + val); }
+   T Sub(T val) { return Set(this->value - val); }
 
    // operator overloads
    stats_entry_abs<T>& operator=(T val)  { Set(val); return *this; }
    stats_entry_abs<T>& operator+=(T val) { Add(val); return *this; }
+   stats_entry_abs<T>& operator-=(T val) { Sub(val); return *this; }
 
    // callback methods/fetchers for use by the StatisticsPool class
    static const int unit = IS_CLS_ABS | stats_entry_type<T>::id;
@@ -822,6 +827,7 @@ public:
 
    static const int PubValue = 1;
    static const int PubRecent = 2;
+   static const int PubDetailMask = 0x7C; // control visibility of internal structure, use when T is Probe
    static const int PubDebug = 0x80;
    static const int PubDecorateAttr = 0x100;
    static const int PubValueAndRecent = PubValue | PubRecent | PubDecorateAttr;
@@ -1036,10 +1042,11 @@ public:
 // its 'value' field to hold the count of samples.  the value of the
 // samples themselves are not stored, only the sum, min and max are stored.
 //
-template <class T> class stats_entry_probe : protected stats_entry_count<T> {
+GCC_DIAG_OFF(float-equal)
+template <typename T> class stats_entry_probe : public stats_entry_count<T> {
 public:
    stats_entry_probe() 
-      : Max(std::numeric_limits<T>::min())
+      : Max(-(std::numeric_limits<T>::max()))
       , Min(std::numeric_limits<T>::max())
       , Sum(0)
       , SumSq(0) 
@@ -1058,7 +1065,7 @@ public:
 
    void Clear() {
       this->value = 0; // value is use to store the count of samples.
-      Max = std::numeric_limits<T>::min();
+      Max = -(std::numeric_limits<T>::max());
       Min = std::numeric_limits<T>::max();
       Sum = 0;
       SumSq = 0;
@@ -1073,9 +1080,11 @@ public:
       return Sum;
    }
 
-   T Count() { return this->value; }
+   T Count() const { return this->value; }
 
-   T Avg() {
+   T Total() const { return this->Sum; }
+
+   T Avg() const {
       if (Count() > 0) {
          return this->Sum / Count();
       } else {
@@ -1083,7 +1092,7 @@ public:
       }
    }
 
-   T Var() {
+   T Var() const {
       if (Count() <= 1) {
          return this->Min;
       } else {
@@ -1092,7 +1101,7 @@ public:
       }
    }
 
-   T Std() {
+   T Std() const {
       if (Count() <= 1) {
          return this->Min;
       } else {
@@ -1108,6 +1117,7 @@ public:
    static FN_STATS_ENTRY_UNPUBLISH GetFnUnpublish() { return (FN_STATS_ENTRY_UNPUBLISH)&stats_entry_probe<T>::Unpublish; };
    static void Delete(stats_entry_probe<T> * probe) { delete probe; }
 };
+GCC_DIAG_ON(float-equal)
 
 // --------------------------------------------------------------------
 //   Full Min/Max/Avg/Std Probe class for use with stats_entry_recent
@@ -1116,7 +1126,7 @@ class Probe {
 public:
    Probe(int=0) 
       : Count(0)
-      , Max(std::numeric_limits<double>::min())
+      , Max(-std::numeric_limits<double>::max())
       , Min(std::numeric_limits<double>::max())
       , Sum(0.0)
       , SumSq(0.0) 
@@ -1157,6 +1167,11 @@ public:
 template <> void stats_entry_recent<Probe>::Publish(ClassAd& ad, const char * pattr, int flags) const;
 template <> void stats_entry_recent<Probe>::Unpublish(ClassAd& ad, const char * pattr) const;
 int ClassAdAssign(ClassAd & ad, const char * pattr, const Probe& probe);
+// detail mode must fit inside the stats_entry_recent<Probe>::PubDetailMask which is 0x7C, so we shift up by 2 bits
+const int ProbeDetailMode_Normal  = (0<<2); // show all 6 fields Count, Sum, Avg, Min, Max, Std
+const int ProbeDetailMode_Tot     = (1<<2); // show Sum as integer value without tag
+const int ProbeDetailMode_Brief   = (2<<2); // show Avg without tag, Min, Max
+const int ProbeDetailMode_RT_SUM  = (3<<2); // show runtime fields, Sum=Runtime, Count published without tag
 
 // --------------------------------------------------------------------
 //  statistcs probe for histogram data.
@@ -1341,9 +1356,9 @@ T stats_histogram<T>::Add(T val)
     */
 
     return val;
-															}
+}
 
-															template<class T>
+template<class T>
 T stats_histogram<T>::Remove(T val)
 {
    int ix = 0;
@@ -1644,6 +1659,14 @@ public:
    }
 
    int RemoveProbe (const char * name); // remove from pool, will delete if owned by pool
+   int RemoveProbesByAddress(void * first, void * last); // remove all probes that point to between first & last (inclusive)
+
+   /* call this to set verbosites using a whitelist
+    * probes that publish attributes that match the list are set to pub_flags,
+    * if set_nonmatching is true, then probes that don't match the are set to nonmatch_pub_flags
+    */
+   int SetVerbosities(const char * attrs_list, int pub_flags, bool restore_nonmatching = false);
+   int SetVerbosities(classad::References & attrs, int pub_flags, bool restore_nonmatching = false);
 
    /* tj: IMPLEMENT THIS
    double  SetSample(const char * probe_name, double sample);
@@ -1664,7 +1687,9 @@ private:
    struct pubitem {
       int    units;    // copied from the class->unit, identifies the class and type of probe
       int    flags;    // passed to Publish
-      int    fOwnedByPool;
+      bool   fOwnedByPool;
+      bool   fWhitelisted;
+      unsigned short def_verbosity;
       void * pitem;    // pointer to stats_entry_base derived class instance class/struct
       const char * pattr; // if non-null passed to Publish, if null name is passed.
       FN_STATS_ENTRY_PUBLISH Publish;

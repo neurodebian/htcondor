@@ -89,7 +89,7 @@ void Pigeon::initialize() {
   	dprintf(D_ALWAYS, "You need to specify the QPID executable as QPID_EXEC in your condor config \n");
   	EXCEPT("No qpid executable (QPID_EXEC) specified!");
   }
-  const char *hostname = my_full_hostname() ;
+  MyString hostname = get_local_fqdn();
   
   ArgList arglist; 
   arglist.AppendArg("qpidd");
@@ -113,7 +113,7 @@ void Pigeon::initialize() {
   int fd_stdout = safe_open_wrapper(path, O_RDWR|O_CREAT, 0666);
   free(path);
   int fds[3] = {-1, fd_stdout, -1};
-  int mm_pid = daemonCore->Create_Process(proc,arglist,PRIV_CONDOR_FINAL, 0,FALSE,NULL,NULL,NULL,NULL,fds);
+  int mm_pid = daemonCore->Create_Process(proc,arglist,PRIV_CONDOR_FINAL, 0,FALSE,FALSE,NULL,NULL,NULL,NULL,fds);
   if (mm_pid <= 0) 
     EXCEPT("Failed to launch qpid process using Create_Process.");
 
@@ -132,7 +132,7 @@ void Pigeon::initialize() {
   SetMyTypeName(m_qpidAd, "pigeon");
   SetTargetTypeName(m_qpidAd, "");
   std::string hostAddr = "pigeon@";
-  hostAddr += hostname;
+  hostAddr += hostname.Value();
   m_qpidAd.Assign(ATTR_NAME, "pigeon"); //hostAddr.c_str());
   m_qpidAd.Assign("Key", "qpidKey");
   m_qpidAd.Assign("IP","128" );
@@ -156,7 +156,7 @@ void Pigeon::initialize() {
   	qArglist.AppendArg(proc);
   	qArglist.AppendArg(hostname);
   	qArglist.AppendArg(portStr.c_str());
-  	mm_pid = daemonCore->Create_Process(proc,qArglist,PRIV_CONDOR_FINAL, 0,FALSE,NULL,NULL,NULL,NULL);
+  	mm_pid = daemonCore->Create_Process(proc,qArglist,PRIV_CONDOR_FINAL, 0,FALSE,FALSE,NULL,NULL,NULL,NULL);
   	if (mm_pid <= 0) 
 		EXCEPT("Failed to launch declareQueues process using Create_Process.");
     free(proc);

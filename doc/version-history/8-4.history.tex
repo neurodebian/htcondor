@@ -1,0 +1,62 @@
+%%%      PLEASE RUN A SPELL CHECKER BEFORE COMMITTING YOUR CHANGES!
+%%%      PLEASE RUN A SPELL CHECKER BEFORE COMMITTING YOUR CHANGES!
+%%%      PLEASE RUN A SPELL CHECKER BEFORE COMMITTING YOUR CHANGES!
+%%%      PLEASE RUN A SPELL CHECKER BEFORE COMMITTING YOUR CHANGES!
+%%%      PLEASE RUN A SPELL CHECKER BEFORE COMMITTING YOUR CHANGES!
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\label{sec:History-8-4}Stable Release Series 8.4}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This is a stable release series of HTCondor.
+As usual, only bug fixes (and potentially, ports to new platforms)
+will be provided in future 8.4.x releases.
+New features will be added in the 8.5.x development series.
+
+The details of each version are described below.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{\label{sec:New-8-4-0}Version 8.4.0}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\noindent Release Notes:
+
+\begin{itemize}
+
+%\item HTCondor version 8.4.0 not yet released.
+\item HTCondor version 8.4.0 released on September 14, 2015.
+
+\end{itemize}
+
+
+\noindent New Features:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+\noindent Bugs Fixed:
+
+\begin{itemize}
+
+\item Fixed a bug introduced in HTCondor version 8.3.7 that caused the
+\Condor{shared\_port} daemon to leak file descriptors.
+Also made HTCondor work better when some HTCondor daemons
+are using shared port, but the \Condor{master} is not.
+\Ticket{5259}
+
+\item The \Condor{starter} lowers the OOM (out of memory) score of jobs
+so the OOM killer is more likely to chose an HTCondor job rather than
+an HTCondor daemon or other user process.
+\Ticket{5249}
+
+\item Job submission fails if X.509 certificates are advertised with EC2 
+grid universe jobs.
+Therefore EC2 grid universe jobs no longer advertise their access keys.
+\Ticket{5252}
+
+\end{itemize}
+

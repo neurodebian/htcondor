@@ -89,7 +89,6 @@ my @minimal_build_configure_args =
 	 '-DWITH_GLOBUS:BOOL'		 => 'OFF',
 	 '-DWITH_GSOAP:BOOL'		 => 'OFF',
 	 '-DWITH_HADOOP:BOOL'		 => 'OFF',
-	 '-DWITH_KRB5:BOOL'			 => 'OFF',
 	 '-DWITH_LIBDELTACLOUD:BOOL' => 'OFF',
 	 '-DWITH_LIBVIRT:BOOL'		 => 'OFF',
 	 '-DWITH_LIBXML2:BOOL'		 => 'OFF',
@@ -334,6 +333,8 @@ our %submit_info = (
 	# Add the SWAMP's (temporary) platform name
 	'swamp:rhel-6.4-64'	=> 'x86_64_RedHat6',
 
+	'x86_64_SL7'	=> 'x86_64_SL6',
+
 	# for now SL6 is the same as RedHat6
 	'x86_64_SL6'	=> 'x86_64_RedHat6',
 	'x86_64_sl_6.0' => 'x86_64_SL6',
@@ -513,6 +514,8 @@ our %submit_info = (
 	'x86_64_fedora_20'				=> 'x86_64_Fedora',
 	'x86_64_fedora_21'				=> 'x86_64_Fedora',
 	'x86_64_fedora_22'				=> 'x86_64_Fedora',
+	'x86_64_fedora_23'				=> 'x86_64_Fedora',
+	'x86_64_fedora_24'				=> 'x86_64_Fedora',
 
 	##########################################################################
 	# Platform Solaris 11 on x86_64
@@ -526,7 +529,6 @@ our %submit_info = (
 			# we can use ssh_to_job on solaris if we use the proper kerberose
 			# this is OK since we build kerberose only for batlab.
 			'configure_args' => { @default_build_configure_args,
-								  '-DWITH_KRB5:BOOL' => 'OFF',
 								  '-DWITH_GSOAP:BOOL' => 'OFF', 
 								  '-DWITH_CURL:BOOL' => 'OFF',
 								  #'-DHAVE_SSH_TO_JOB:BOOL' => 'OFF',
