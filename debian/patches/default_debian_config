@@ -9,7 +9,7 @@ Author: Michael Hanke <mih@debian.org>
 
 --- a/src/condor_utils/param_info.in
 +++ b/src/condor_utils/param_info.in
-@@ -1396,7 +1396,7 @@
+@@ -1393,7 +1393,7 @@
  tags=accountant,Accountant
  
  [SPOOL]
@@ -18,7 +18,7 @@ Author: Michael Hanke <mih@debian.org>
  type=path
  reconfig=true
  customization=seldom
-@@ -2398,7 +2398,7 @@
+@@ -2330,7 +2330,7 @@
  tags=daemon_core,daemon_core_main
  
  [COLLECTOR_NAME]
@@ -27,7 +27,16 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=seldom
-@@ -3013,7 +3013,7 @@
+@@ -2376,7 +2376,7 @@
+ tags=collector,collector
+ 
+ [CONDOR_ADMIN]
+-default=root@$(FULL_HOSTNAME)
++default=root@localhost
+ type=string
+ reconfig=true
+ customization=normal
+@@ -2945,7 +2945,7 @@
  
  [MAIL]
  # default location for mail on RHEL is /bin/mail, default on debian is /usr/bin/mail
@@ -36,7 +45,7 @@ Author: Michael Hanke <mih@debian.org>
  win32_default=$(BIN)\condor_mail.exe
  type=path
  reconfig=true
-@@ -3812,7 +3812,7 @@
+@@ -3771,7 +3771,7 @@
  tags=c++_util,condor_config
  
  [REQUIRE_LOCAL_CONFIG_FILE]
@@ -45,7 +54,7 @@ Author: Michael Hanke <mih@debian.org>
  win32_default=false
  type=bool
  reconfig=true
-@@ -4342,7 +4342,7 @@
+@@ -4362,7 +4362,7 @@
  tags=starter,StarterHookMgr
  
  [JAVA_BENCHMARK_TIME]
@@ -54,7 +63,7 @@ Author: Michael Hanke <mih@debian.org>
  type=int
  reconfig=true
  customization=seldom
-@@ -6856,7 +6856,7 @@
+@@ -7003,7 +7003,7 @@
  tags=c++_util,condor_config
  
  [GANGLIA_LIB64_PATH]
@@ -63,16 +72,7 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=seldom
-@@ -7084,7 +7084,7 @@
- review=?
- 
- [CONDOR_ADMIN]
--default=root@$(FULL_HOSTNAME)
-+default=root@localhost
- customization=normal
- friendly_name=HTCondor sends email to this address on pool failure
- review=?
-@@ -7426,7 +7426,7 @@
+@@ -7658,7 +7658,7 @@
  review=?
  
  [CRED_STORE_DIR]

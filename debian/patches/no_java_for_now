@@ -37,7 +37,7 @@ Last-Update: <YYYY-MM-DD>
      install ( FILES chirp_client.h DESTINATION ${C_INCLUDE})
 --- a/src/condor_starter.V6.1/CMakeLists.txt
 +++ b/src/condor_starter.V6.1/CMakeLists.txt
-@@ -30,7 +30,7 @@
+@@ -31,7 +31,7 @@
  endif()
  
  # need to add all the other install targets for libexec.
