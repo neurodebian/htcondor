@@ -2,6 +2,9 @@ condor (8.4.0~dfsg.1-1) UNRELEASED; urgency=medium
 
   * First upstream in new stable series.
   * Install systemd service file.
+  * Install default submit configuration for interactive jobs in
+    /etc/condor/interactive.sub and set default configuration for
+    INTERACTIVE_SUBMIT_FILE accordingly.
 
  -- Michael Hanke <mih@debian.org>  Tue, 15 Sep 2015 07:32:31 +0200
 

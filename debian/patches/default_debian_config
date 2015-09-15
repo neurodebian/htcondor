@@ -63,6 +63,15 @@ Author: Michael Hanke <mih@debian.org>
  type=int
  reconfig=true
  customization=seldom
+@@ -6781,7 +6781,7 @@
+ tags=starter
+ 
+ [INTERACTIVE_SUBMIT_FILE]
+-default=$(LIBEXEC)/interactive.sub
++default=/etc/condor/interactive.sub
+ version=7.9.0
+ type=string
+ reconfig=true
 @@ -7003,7 +7003,7 @@
  tags=c++_util,condor_config
  

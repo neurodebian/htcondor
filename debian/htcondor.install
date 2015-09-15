@@ -7,3 +7,4 @@ debian/tmp/usr/lib/condor/libexec usr/lib/condor/
 debian/tmp/usr/sbin/* usr/sbin/
 debian/tmp/usr/src/* usr/src/condor/
 src/condor_examples/condor.service /lib/systemd/system/
+src/condor_examples/interactive.sub /etc/condor/
