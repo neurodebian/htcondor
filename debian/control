@@ -56,7 +56,7 @@ Depends: adduser,
          ${perl:Depends},
          ${python:Depends},
          ${shlibs:Depends}
-Recommends: dmtcp
+Recommends: dmtcp, ecryptfs-utils
 Suggests: docker, coop-computing-tools
 Breaks: condor (<< 8.0.5~)
 Replaces: condor (<< 8.0.5~)
