@@ -9,6 +9,15 @@ Author: Michael Hanke <mih@debian.org>
 
 --- a/src/condor_utils/param_info.in
 +++ b/src/condor_utils/param_info.in
+@@ -1315,7 +1315,7 @@
+ review=?
+ 
+ [ETC]
+-default=$(RELEASE_DIR)/etc
++default=/etc/condor
+ type=path
+ friendly_name=etc
+ 
 @@ -1393,7 +1393,7 @@
  tags=accountant,Accountant
  
