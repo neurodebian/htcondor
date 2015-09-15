@@ -9,6 +9,8 @@ condor (8.4.0~dfsg.1-1) UNRELEASED; urgency=medium
     symbols, despite unchanged SO version.
   * Install documentation under /usr/share/doc/htcondor (no longer just
     'condor').
+  * Add docker as suggested package, due to the addition of the
+    DockerUniverse.
 
  -- Michael Hanke <mih@debian.org>  Tue, 15 Sep 2015 07:32:31 +0200
 

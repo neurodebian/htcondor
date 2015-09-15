@@ -57,7 +57,7 @@ Depends: adduser,
          ${python:Depends},
          ${shlibs:Depends}
 Recommends: dmtcp
-Suggests: coop-computing-tools
+Suggests: docker, coop-computing-tools
 Breaks: condor (<< 8.0.5~)
 Replaces: condor (<< 8.0.5~)
 Description: distributed workload management system
