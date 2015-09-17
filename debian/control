@@ -182,7 +182,6 @@ Description: HTCondor classads expression language - runtime library
 Package: condor
 Architecture: all
 Section: oldlibs
-Priority: extra
 Depends: htcondor,
          ${misc:Depends}
 Description: transitional dummy package
@@ -193,7 +192,6 @@ Description: transitional dummy package
 Package: condor-doc
 Architecture: all
 Section: oldlibs
-Priority: extra
 Depends: htcondor-doc,
          ${misc:Depends}
 Description: transitional dummy package
@@ -204,7 +202,6 @@ Description: transitional dummy package
 Package: condor-dev
 Architecture: all
 Section: oldlibs
-Priority: extra
 Depends: htcondor-dev,
          ${misc:Depends}
 Description: transitional dummy package
@@ -215,7 +212,6 @@ Description: transitional dummy package
 Package: condor-dbg
 Architecture: all
 Section: oldlibs
-Priority: extra
 Depends: htcondor-dbg,
          ${misc:Depends}
 Description: transitional dummy package
