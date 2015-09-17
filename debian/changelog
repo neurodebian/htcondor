@@ -1,4 +1,4 @@
-condor (8.4.0~dfsg.1-1) UNRELEASED; urgency=medium
+condor (8.4.0~dfsg.1-1) unstable; urgency=medium
 
   * First upstream in new 8.4 stable series. Updates:
     - leaner resource footprint for up to 200k simultaneous jobs in a
