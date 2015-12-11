@@ -187,6 +187,8 @@ case "$1" in
         condor_local_cfg_template
         condor_put_debconf_cfg
         condor_make_homedir
+        # tell systemd to create tmpfiles, but do no harm if not available
+        systemd-tmpfiles --create --exclude-prefix=/dev || true
         # take care of starting condor if it is not yet running -- if it is
         # already running this command should have no effect
         if [ -x "/etc/init.d/condor" ]; then
