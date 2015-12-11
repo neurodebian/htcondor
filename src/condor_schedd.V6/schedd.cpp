@@ -5926,6 +5926,12 @@ MainScheddNegotiate::scheduler_handleJobRejected(PROC_ID job_id,char const *reas
 	dprintf(D_FULLDEBUG, "Job %d.%d (delivered=%d) rejected: %s\n",
 			job_id.cluster, job_id.proc, m_current_resources_delivered, reason);
 
+	if ( job_id.cluster < 0 || job_id.proc < 0 ) {
+		// If we asked the negotiator for matches for jobs that can no
+		// longer use them, the negotiation code uses a job id of -1.-1.
+		return;
+	}
+
 	SetAttributeString(
 		job_id.cluster, job_id.proc,
 		ATTR_LAST_REJ_MATCH_REASON,	reason, NONDURABLE);
@@ -12256,7 +12262,7 @@ Scheduler::Init()
 		delete slotWeightMapAd;
 		slotWeightMapAd = 0;
 	}
-	m_use_slot_weights = param_boolean("SCHEDD_USE_SLOT_WEIGHT", false);
+	m_use_slot_weights = param_boolean("SCHEDD_USE_SLOT_WEIGHT", true);
 
 	std::string sswma = "Memory = RequestMemory \n Disk = RequestDisk \n Cpus = RequestCpus";
 	slotWeightMapAd = new ClassAd;
@@ -12791,6 +12797,7 @@ Scheduler::shutdown_fast()
 		CronJobMgr->Shutdown( true );
 	}
 
+	DestroyJobQueue();
 		// Since this is just sending a bunch of UDP updates, we can
 		// still invalidate our classads, even on a fast shutdown.
 	invalidate_ads();
@@ -15253,6 +15260,7 @@ WriteCompletionVisa(ClassAd* ad)
 	                   iwd.Value(),
 	                   NULL);
 	set_priv(prev_priv_state);
+	uninit_user_ids();
 }
 
 int
