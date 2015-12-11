@@ -1,3 +1,15 @@
+condor (8.4.2~dfsg.1-1) unstable; urgency=medium
+
+  * New upstream release.
+    - Simplified configuration to hold or preempt jobs that exceed resource
+      claims.
+    - Fix FTBFS on non-amd64 64bit platforms (Closes: #804386).
+    - Various other bug fixes.
+  * Install tmpfiles configuration for systemd to prevent service start
+    failure due to missing /var/run/condor.
+
+ -- Michael Hanke <mih@debian.org>  Fri, 11 Dec 2015 20:30:35 +0100
+
 condor (8.4.0~dfsg.1-1) unstable; urgency=medium
 
   * First upstream in new 8.4 stable series. Updates:
