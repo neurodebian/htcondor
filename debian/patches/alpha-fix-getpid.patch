@@ -1,6 +1,6 @@
 --- a/src/condor_daemon_core.V6/daemon_core.cpp
 +++ b/src/condor_daemon_core.V6/daemon_core.cpp
-@@ -5649,8 +5649,12 @@
+@@ -5692,8 +5692,12 @@
  		// caching in libc).  Therefore, use the syscall to get
  		// the answer directly.
  
@@ -15,7 +15,7 @@
  		// If we were fork'd with CLONE_NEWPID, we think our PID is 1.
  		// In this case, ask the parent!
  	if (retval == 1) {
-@@ -5670,7 +5674,13 @@
+@@ -5713,7 +5717,13 @@
  		// See above comment for clone_safe_getpid() for explanation of
  		// why we need to do this.
  	

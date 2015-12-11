@@ -54,7 +54,7 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=normal
-@@ -2945,7 +2945,7 @@
+@@ -2951,7 +2951,7 @@
  
  [MAIL]
  # default location for mail on RHEL is /bin/mail, default on debian is /usr/bin/mail
@@ -63,7 +63,7 @@ Author: Michael Hanke <mih@debian.org>
  win32_default=$(BIN)\condor_mail.exe
  type=path
  reconfig=true
-@@ -3771,7 +3771,7 @@
+@@ -3786,7 +3786,7 @@
  tags=c++_util,condor_config
  
  [REQUIRE_LOCAL_CONFIG_FILE]
@@ -72,7 +72,7 @@ Author: Michael Hanke <mih@debian.org>
  win32_default=false
  type=bool
  reconfig=true
-@@ -4362,7 +4362,7 @@
+@@ -4377,7 +4377,7 @@
  tags=starter,StarterHookMgr
  
  [JAVA_BENCHMARK_TIME]
@@ -81,7 +81,7 @@ Author: Michael Hanke <mih@debian.org>
  type=int
  reconfig=true
  customization=seldom
-@@ -6781,7 +6781,7 @@
+@@ -6804,7 +6804,7 @@
  tags=starter
  
  [INTERACTIVE_SUBMIT_FILE]
@@ -90,7 +90,7 @@ Author: Michael Hanke <mih@debian.org>
  version=7.9.0
  type=string
  reconfig=true
-@@ -7003,7 +7003,7 @@
+@@ -7026,7 +7026,7 @@
  tags=c++_util,condor_config
  
  [GANGLIA_LIB64_PATH]
@@ -99,7 +99,7 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=seldom
-@@ -7658,7 +7658,7 @@
+@@ -7705,7 +7705,7 @@
  review=?
  
  [CRED_STORE_DIR]
