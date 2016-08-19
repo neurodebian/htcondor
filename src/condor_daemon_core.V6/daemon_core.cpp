@@ -49,7 +49,6 @@ static const int DEFAULT_MAXREAPS = 100;
 static const int DEFAULT_PIDBUCKETS = 11;
 static const int DEFAULT_MAX_PID_COLLISIONS = 9;
 static const char* DEFAULT_INDENT = "DaemonCore--> ";
-static const int MAX_TIME_SKIP = (60*20); //20 minutes
 static const int MIN_FILE_DESCRIPTOR_SAFETY_LIMIT = 20;
 static const int MIN_REGISTERED_SOCKET_SAFETY_LIMIT = 15;
 static const int DC_PIPE_BUF_SIZE = 65536;
@@ -272,6 +271,8 @@ DaemonCore::DaemonCore(int PidSize, int ComSize,int SigSize,
 	EnterCriticalSection(&Big_fat_mutex);
 
 	mypid = ::GetCurrentProcessId();
+
+	InitializeSListHead(&PumpWorkHead);
 #else
 	mypid = ::getpid();
 #endif
@@ -392,6 +393,8 @@ DaemonCore::DaemonCore(int PidSize, int ComSize,int SigSize,
 	super_dc_ssock = NULL;
 	m_iMaxReapsPerCycle = 1;
     m_iMaxAcceptsPerCycle = 1;
+
+	m_MaxTimeSkip = 60 * 20;  // 20 minutes
 
 	inheritedSocks[0] = NULL;
 	inServiceCommandSocket_flag = FALSE;
@@ -848,21 +851,64 @@ int	DaemonCore::Register_Timer(unsigned deltawhen, TimerHandler handler,
 	return( t.NewTimer(deltawhen, handler, event_descrip, 0) );
 }
 
+int DaemonCore::Register_PumpWork_TS(PumpWorkCallback handler, void* cls, void* data)
+{
 #ifdef WIN32
-int DaemonCore::Register_Timer_TS(unsigned deltawhen, TimerHandlercpp handler,
-				const char *event_descrip, Service* s)
-{
-	EnterCriticalSection(&Big_fat_mutex);
-	int status = Register_Timer(deltawhen, handler, event_descrip, s);
-	Do_Wake_up_select();
-	LeaveCriticalSection(&Big_fat_mutex);
+	PumpWorkItem * work = (PumpWorkItem*)_aligned_malloc(sizeof(PumpWorkItem), MEMORY_ALLOCATION_ALIGNMENT);
+	if ( ! work) return -1;
 
-	return status;
+	work->callback = handler;
+	work->cls = cls;
+	work->data = data;
+	if ( ! InterlockedPushEntrySList(&PumpWorkHead, &work->slist)) {
+		// we get false back when the list used to be empty
+	}
+	if (GetCurrentThreadId() != dcmainThreadId) {
+		Do_Wake_up_select();
+	}
+	return 1;
 #else
-int DaemonCore::Register_Timer_TS(unsigned /* deltawhen */,
-				TimerHandlercpp /* handler */,
-				const char * /* event_descrip */, Service * /* s */ )
-{
+	// implement for non-windows?
+	dprintf(D_ALWAYS|D_FAILURE, "Register_PumpWork_TS(%p, %p, %p) called, but has not (yet) been implemented on this platform\n",
+			handler, cls, data);
+	return -1;
+#endif
+}
+
+// call on main thread to handle all of work in the PumpWork list, returns number of callbacks handled
+int DaemonCore::DoPumpWork() {
+#ifdef WIN32
+	// the InterlockedSList is a stack (LIFO) but we want to handle them in FIFO
+	// order, so first step it to remove items from the interlocked stack and put
+	// them in the order we want to handle them. We can re-use the Next pointer
+	// of items we have removed from the slist to build this processing list.
+	PumpWorkItem * work;
+	PumpWorkItem * last = (PumpWorkItem*)InterlockedPopEntrySList(&PumpWorkHead);
+	if (last) {
+		last->slist.Next = NULL;
+		while ((work = (PumpWorkItem*)InterlockedPopEntrySList(&PumpWorkHead))) {
+			work->slist.Next = &(last->slist);
+			last = work;
+		}
+	}
+
+	// now process the items.
+	int citems = 0;
+	for (work = last; work; ) {
+
+		// call the handler
+		work->callback(work->cls, work->data);
+		++citems;
+
+		// advance the pointer along the list
+		// and then free the current item.
+		last = work;
+		work = (PumpWorkItem*)work->slist.Next;
+		_aligned_free(last);
+	}
+	return citems;
+#else
+	// implement for non-windows?
 	return 0;
 #endif
 }
@@ -973,7 +1019,7 @@ int DaemonCore::Register_Command(int command, const char* command_descrip,
 		if ( comTable[j].num == command ) {
 			MyString msg;
 			msg.formatstr("DaemonCore: Same command registered twice (id=%d)", command);
-			EXCEPT(msg.c_str());
+			EXCEPT("%s",msg.c_str());
 		}
 	}
 	if ( i == -1 ) {
@@ -2918,6 +2964,8 @@ DaemonCore::reconfig(void) {
 	// Default is 10k (10*1024 bytes)
 	maxPipeBuffer = param_integer("PIPE_BUFFER_MAX", 10240);
 
+	m_MaxTimeSkip = param_integer("MAX_TIME_SKIP", 1200, 0);
+
     m_iMaxAcceptsPerCycle = param_integer("MAX_ACCEPTS_PER_CYCLE", 8);
     if( m_iMaxAcceptsPerCycle != 1 ) {
         dprintf(D_FULLDEBUG,"Setting maximum accepts per cycle %d.\n", m_iMaxAcceptsPerCycle);
@@ -3374,6 +3422,10 @@ void DaemonCore::Driver()
 
 		// Prepare to enter main select()
 
+		// handle queued pump work. these are like zero timeout one-shot timers
+		// but unlike timers, can be registered from any thread
+		int num_pumpwork_fired = DoPumpWork();
+
 		// call Timeout() - this function does 2 things:
 		//   first, it calls any timer handlers whose time has arrived.
 		//   second, it returns how many seconds until the next timer
@@ -3388,6 +3440,7 @@ void DaemonCore::Driver()
         int num_timers_fired = 0;
 		timeout = t.Timeout(&num_timers_fired, &runtime);
 
+		num_timers_fired += num_pumpwork_fired;
         dc_stats.TimersFired += num_timers_fired;
 
 		if ( sent_signal == TRUE ) {
@@ -10228,7 +10281,7 @@ InitCommandSockets(int tcp_port, int udp_port, DaemonCore::SockPairVec & socks, 
 
 					std::string message;
 					formatstr( message, "Warning: Failed to create IPv6 command socket for ports %d/%d%s", tcp_port, udp_port, want_udp ? "" : "no UDP" );
-					if( fatal ) { EXCEPT( message.c_str() ); }
+					if( fatal ) { EXCEPT( "%s", message.c_str() ); }
 					dprintf(D_ALWAYS | D_FAILURE, "%s\n", message.c_str() );
 					return false;
 				}
@@ -10700,7 +10753,7 @@ DaemonCore::CheckForTimeSkip(time_t time_before, time_t okay_delta)
 		represent a given time_t value.  This means
 		different code paths depending on which variable is
 		larger. */
-	if((time_after + MAX_TIME_SKIP) < time_before) {
+	if((time_after + m_MaxTimeSkip) < time_before) {
 		// We've jumped backward in time.
 
 		// If this test is ever made more aggressive, remember that
@@ -10709,7 +10762,7 @@ DaemonCore::CheckForTimeSkip(time_t time_before, time_t okay_delta)
 
 		delta = -(int)(time_before - time_after);
 	}
-	if((time_before + okay_delta*2 + MAX_TIME_SKIP) < time_after) {
+	if((time_before + okay_delta*2 + m_MaxTimeSkip) < time_after) {
 		/*
 		We've jumped forward in time.
 
@@ -10825,10 +10878,12 @@ DaemonCore::publish(ClassAd *ad) {
 
 void
 DaemonCore::initCollectorList() {
+	DCCollectorAdSequences * adSeq = NULL;
 	if (m_collector_list) {
+		adSeq = m_collector_list->detachAdSequences();
 		delete m_collector_list;
 	}
-	m_collector_list = CollectorList::create();
+	m_collector_list = CollectorList::create(NULL, adSeq);
 }
 
 

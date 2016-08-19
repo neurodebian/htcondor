@@ -80,18 +80,20 @@ void Usage(char* name, int iExitCode)
 		"\t-long\t\t\tDisplay entire classads\n"
 		"\t-wide[:<width>]\tcon\tDon't truncate fields to fit into 80 columns\n"
 		"\t-format <fmt> <attr>\tDisplay attr using printf formatting\n"
-		"\t-autoformat[:lhVr,tng] <attr> [<attr2 ...]   Display attr(s) with automatic formatting\n"
-		"\t-af[:lhVr,tng] <attr> [<attr2 ...]\t    Same as -autoformat above\n"
-		"\t    where the [lhVr,tng] options influence the automatic formatting:\n"
-		"\t    l\tattribute labels\n"
-		"\t    h\tattribute column headings\n"
-		"\t    V\t%%V formatting (string values are quoted)\n"
-		"\t    r\t%%r formatting (raw/unparsed values)\n"
-		"\t    t\ttab before each value (default is space)\n"
-		"\t    g\tnewline between ClassAds, no space before values\n"
-		"\t    ,\tcomma after each value\n"
-		"\t    n\tnewline after each value\n"
+		"\t-autoformat[:lhVr,tng] <attr> [<attr2> [...]]\n"
+		"\t-af[:lhVr,tng] <attr> [attr2 [...]]\n"
+		"\t    Print attr(s) with automatic formatting\n"
+		"\t    the [lhVr,tng] options modify the formatting\n"
+		"\t        l   attribute labels\n"
+		"\t        h   attribute column headings\n"
+		"\t        V   %%V formatting (string values are quoted)\n"
+		"\t        r   %%r formatting (raw/unparsed values)\n"
+		"\t        ,   comma after each value\n"
+		"\t        t   tab before each value (default is space)\n"
+		"\t        n   newline after each value\n"
+		"\t        g   newline between ClassAds, no space before values\n"
 		"\t    use -af:h to get tabular values with headings\n"
+		"\t    use -af:lrng to get -long equivalent format\n"
 		"\t-print-format <file>\tUse <file> to specify the attributes and formatting\n"
 		"\t\t\t\t(experimental, see htcondor-wiki for more information)\n"
 		, name);
@@ -418,7 +420,11 @@ main(int argc, char* argv[])
         remoteread = true;
        #endif
     }
-    else {
+	else if (argv[i][0] == '-') {
+		fprintf(stderr, "Error: Unknown argument %s\n", argv[i]);
+		break; // quitting now will print usage and exit with an error below.
+	}
+	else {
 		std::string ownerconst;
 		owner = argv[i];
 		formatstr(ownerconst, "%s == \"%s\"", ATTR_OWNER, owner);
@@ -747,7 +753,7 @@ static void init_default_custom_format()
 	mask.SetAutoSep(NULL, " ", NULL, "\n");
 
 	int opts = wide_format ? (FormatOptionNoTruncate | FormatOptionAutoWidth) : 0;
-	AddPrintColumn(" ID",        -7, FormatOptionNoTruncate, ATTR_CLUSTER_ID, format_job_id);
+	AddPrintColumn(" ID",        -7, FormatOptionNoTruncate | FormatOptionAutoWidth, ATTR_CLUSTER_ID, format_job_id);
 	AddPrintColumn("OWNER",     -14, FormatOptionAutoWidth | opts, ATTR_OWNER);
 	AddPrintColumn("SUBMITTED",  11,    0, ATTR_Q_DATE, format_int_date);
 	AddPrintColumn("RUN_TIME",   12,    0, ATTR_CLUSTER_ID, format_hist_runtime);

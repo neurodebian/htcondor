@@ -1330,11 +1330,13 @@ void CollectorDaemon::Config()
 		UpdateTimerId = -1;
 	}
 
+	DCCollectorAdSequences * adSeq = NULL;
 	if( collectorsToUpdate ) {
+		adSeq = collectorsToUpdate->detachAdSequences();
 		delete collectorsToUpdate;
 		collectorsToUpdate = NULL;
 	}
-	collectorsToUpdate = CollectorList::create( NULL );
+	collectorsToUpdate = CollectorList::create(NULL, adSeq);
 
 	//
 	// If we don't use the network to update ourselves, we could allow
@@ -1360,6 +1362,7 @@ void CollectorDaemon::Config()
 		Sinful currentSinful( current );
 		if( mySinful.addressPointsToMe( currentSinful ) ) {
 			collectorsToUpdate->deleteCurrent();
+			continue;
 		}
 
 		// addressPointsToMe() doesn't know that the shared port daemon
@@ -1372,12 +1375,14 @@ void CollectorDaemon::Config()
 		// process of doing something else -- we can safely assume that
 		// any currentSinful without a shared port ID intends to connect
 		// to the default collector.
+		dprintf( D_FULLDEBUG, "checking for self: '%s', '%s, '%s'\n", mySinful.getSharedPortID(), mySharedPortDaemonSinful.getSinful(), currentSinful.getSinful() );
 		if( mySinful.getSharedPortID() != NULL && mySharedPortDaemonSinful.addressPointsToMe( currentSinful ) ) {
 			// Check to see if I'm the default collector.
 			std::string collectorSPID;
 			param( collectorSPID, "SHARED_PORT_DEFAULT_ID" );
 			if(! collectorSPID.size()) { collectorSPID = "collector"; }
 			if( strcmp( mySinful.getSharedPortID(), collectorSPID.c_str() ) == 0 ) {
+				dprintf( D_FULLDEBUG, "Skipping sending update to myself via my shared port daemon.\n" );
 				collectorsToUpdate->deleteCurrent();
 			}
 		}
@@ -1648,7 +1653,7 @@ void CollectorDaemon::sendCollectorAd()
 		char update_addr_default [] = "(null)";
 		char *update_addr = worldCollector->addr();
 		if (!update_addr) update_addr = update_addr_default;
-		if( ! worldCollector->sendUpdate(UPDATE_COLLECTOR_AD, ad, NULL, false) ) {
+		if( ! worldCollector->sendUpdate(UPDATE_COLLECTOR_AD, ad, collectorsToUpdate->getAdSeq(), NULL, false) ) {
 			dprintf( D_ALWAYS, "Can't send UPDATE_COLLECTOR_AD to collector "
 					 "(%s): %s\n", update_addr,
 					 worldCollector->error() );

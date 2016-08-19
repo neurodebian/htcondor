@@ -1302,6 +1302,10 @@ void CondorJob::ProcessRemoteAd( ClassAd *remote_ad )
 		ATTR_JOB_CORE_DUMPED,
 		ATTR_EXECUTABLE_SIZE,
 		ATTR_IMAGE_SIZE,
+		ATTR_MEMORY_USAGE,
+		ATTR_RESIDENT_SET_SIZE,
+		ATTR_PROPORTIONAL_SET_SIZE,
+		ATTR_DISK_USAGE,
 		ATTR_SPOOLED_OUTPUT_FILES,
 		NULL };		// list must end with a NULL
 
@@ -1630,7 +1634,7 @@ ClassAd *CondorJob::buildSubmitAd()
 	if ( universeCanReconnect( tmp_int ) &&
 		 submit_ad->Lookup( ATTR_JOB_LEASE_DURATION ) == NULL ) {
 
-		submit_ad->Assign( ATTR_JOB_LEASE_DURATION, 20 * 60 );
+		submit_ad->Assign( ATTR_JOB_LEASE_DURATION, 40 * 60 );
 	}
 
 		// worry about ATTR_JOB_[OUTPUT|ERROR]_ORIG

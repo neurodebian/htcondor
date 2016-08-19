@@ -2628,6 +2628,16 @@ SetAttribute(int cluster_id, int proc_id, const char *attr_name,
 				return -1;
 		}
 
+#if !defined(WIN32)
+		uid_t user_uid;
+		if ( can_switch_ids() && !pcache()->get_user_uid( owner, user_uid ) ) {
+			errno = EACCES;
+			dprintf( D_ALWAYS, "SetAttribute security violation: "
+					 "setting owner to %s, which is not a valid user account\n",
+					 attr_value );
+			return -1;
+		}
+#endif
 
 			// If we got this far, we're allowing the given value for
 			// ATTR_OWNER to be set.  However, now, we should try to
@@ -3032,7 +3042,7 @@ SetTimerAttribute( int cluster, int proc, const char *attr_name, int dur )
 		return -1;
 	}
 
-	rc = SetAttributeInt( cluster, proc, attr_name, xact_start_time + dur );
+	rc = SetAttributeInt( cluster, proc, attr_name, xact_start_time + dur, SETDIRTY );
 	return rc;
 }
 
@@ -3891,7 +3901,7 @@ dollarDollarExpand(int cluster_id, int proc_id, ClassAd *ad, ClassAd *startd_ad,
 			bool expanded_something = false;
 			int search_pos = 0;
 			while( !attribute_not_found &&
-					find_config_macro(attribute_value,&left,&name,&right,NULL,true,search_pos) )
+					next_dollardollar_macro(attribute_value, search_pos, &left, &name, &right) )
 			{
 				expanded_something = true;
 				

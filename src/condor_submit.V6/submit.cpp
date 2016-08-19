@@ -76,7 +76,7 @@
 #include "condor_holdcodes.h"
 #include "condor_url.h"
 #include "condor_version.h"
-#include "ConcurrencyLimitUtils.h"
+#include "NegotiationUtils.h"
 #include "submit_internal.h"
 
 #include "list.h"
@@ -334,6 +334,7 @@ const MACRO_SOURCE LiveMacro = { true, false, 3, -2, -1, -2 };    // for macros 
 MACRO_SOURCE FileMacroSource = { false, false, 0, 0, -1, -2 };
 
 #define MEG	(1<<20)
+
 
 //
 // Dump ClassAd to file junk
@@ -674,7 +675,7 @@ void 	compress( MyString &path );
 char const*full_path(const char *name, bool use_iwd=true);
 void 	get_time_conv( int &hours, int &minutes );
 int	  SaveClassAd ();
-void InsertJobExpr (const char *expr);
+void InsertJobExpr (const char *expr, bool from_config_file=false);
 void InsertJobExpr (const MyString &expr);
 void InsertJobExprInt(const char * name, int val);
 void InsertJobExprString(const char * name, const char * val);
@@ -716,6 +717,7 @@ char *owner = NULL;
 char *ntdomain = NULL;
 char *myproxy_password = NULL;
 bool stream_std_file = false;
+classad::References forced_submit_attrs;
 
 extern DLL_IMPORT_MAGIC char **environ;
 
@@ -1120,7 +1122,40 @@ init_job_ad()
 	buffer.formatstr( "%s = FALSE", ATTR_ON_EXIT_BY_SIGNAL);
 	InsertJobExpr (buffer);
 
+#if 0 
+	// can't use this because it doesn't handle of MY. or +attrs correctly
 	config_fill_ad( job );
+#else
+	void param_and_insert_unique_items(const char * param_name, classad::References & attrs);
+
+	classad::References submit_attrs;
+	param_and_insert_unique_items("SUBMIT_ATTRS", submit_attrs);
+	param_and_insert_unique_items("SUBMIT_EXPRS", submit_attrs);
+	param_and_insert_unique_items("SYSTEM_SUBMIT_ATTRS", submit_attrs);
+
+	if ( ! submit_attrs.empty()) {
+		MyString buffer;
+
+		for (classad::References::const_iterator it = submit_attrs.begin(); it != submit_attrs.end(); ++it) {
+			if (starts_with(*it,"+")) {
+				forced_submit_attrs.insert(it->substr(1));
+				continue;
+			} else if (starts_with_ignore_case(*it, "MY.")) {
+				forced_submit_attrs.insert(it->substr(3));
+				continue;
+			}
+
+			auto_free_ptr expr(param(it->c_str()));
+			if ( ! expr) continue;
+			buffer.formatstr("%s = %s", it->c_str(), expr.ptr());
+			InsertJobExpr(buffer.c_str(), true);
+		}
+	}
+	
+	/* Insert the version into the ClassAd */
+	job->Assign( ATTR_VERSION, CondorVersion() );
+	job->Assign( ATTR_PLATFORM, CondorPlatform() );
+#endif
 }
 
 
@@ -1410,7 +1445,8 @@ main( int argc, const char *argv[] )
 				fprintf( stderr, "%s: invalid attribute name '%s' for attrib=value assigment\n", MyName, name.c_str() );
 				exit(1);
 			}
-			insert(name.c_str(), value.c_str(), SubmitMacroSet, ArgumentMacro);
+			MACRO_EVAL_CONTEXT ctx = { NULL, "SUBMIT", false, 0 };
+			insert_macro(name.c_str(), value.c_str(), SubmitMacroSet, ArgumentMacro, ctx);
 		} else {
 			cmd_file = *ptr;
 		}
@@ -1774,8 +1810,8 @@ main( int argc, const char *argv[] )
 		// Force non-zero ref count for DAG_STATUS and FAILED_COUNT
 		// these are specified for all DAG node jobs (see dagman_submit.cpp).
 		// wenger 2012-03-26 (refactored by TJ 2015-March)
-		lookup_macro("DAG_STATUS", NULL, SubmitMacroSet);
-		lookup_macro("FAILED_COUNT", NULL, SubmitMacroSet);
+		increment_macro_use_count("DAG_STATUS", SubmitMacroSet);
+		increment_macro_use_count("FAILED_COUNT", SubmitMacroSet);
 
 		HASHITER it = hash_iter_begin(SubmitMacroSet);
 		for ( ; !hash_iter_done(it); hash_iter_next(it) ) {
@@ -5653,7 +5689,7 @@ SetJobLease( void )
 {
 	static bool warned_too_small = false;
 	long lease_duration = 0;
-	char *tmp = condor_param( "job_lease_duration", ATTR_JOB_LEASE_DURATION );
+	auto_free_ptr tmp(condor_param( "job_lease_duration", ATTR_JOB_LEASE_DURATION ));
 	if( ! tmp ) {
 		if( universeCanReconnect(JobUniverse)) {
 				/*
@@ -5671,38 +5707,38 @@ SetJobLease( void )
 		}
 	} else {
 		char *endptr = NULL;
-		lease_duration = strtol(tmp, &endptr, 10);
-		if (endptr != tmp) {
+		lease_duration = strtol(tmp.ptr(), &endptr, 10);
+		if (endptr != tmp.ptr()) {
 			while (isspace(*endptr)) {
 				endptr++;
 			}
 		}
-		bool valid = (endptr != tmp && *endptr == '\0');
-		if (!valid) {
-			fprintf(stderr, "\nERROR: invalid %s given: %s\n",
-					ATTR_JOB_LEASE_DURATION, tmp);
-			DoCleanup(0, 0, NULL);
-			exit(1);
-		}
-		if (lease_duration == 0) {
+		bool is_number = (endptr != tmp.ptr() && *endptr == '\0');
+		if ( ! is_number) {
+			lease_duration = 0; // set to zero to indicate it's an expression
+		} else {
+			if (lease_duration == 0) {
 				// User explicitly didn't want a lease, so we're done.
-			free(tmp);
-			return;
-		}
-		else if (lease_duration < 20) {
-			if (! warned_too_small) { 
-				fprintf(stderr, "\nWARNING: %s less than 20 seconds is not "
-						"allowed, using 20 instead\n",
-						ATTR_JOB_LEASE_DURATION);
-				warned_too_small = true;
+				return;
 			}
-			lease_duration = 20;
+			if (lease_duration < 20) {
+				if (! warned_too_small) { 
+					fprintf(stderr, "\nWARNING: %s less than 20 seconds is not "
+							"allowed, using 20 instead\n",
+							ATTR_JOB_LEASE_DURATION);
+					warned_too_small = true;
+				}
+				lease_duration = 20;
+			}
 		}
-		free(tmp);
 	}
 	MyString val = ATTR_JOB_LEASE_DURATION;
 	val += "=";
-	val += lease_duration;
+	if (lease_duration) {
+		val += lease_duration;
+	} else if (tmp) {
+		val += tmp.ptr();
+	}
 	InsertJobExpr( val.Value() );
 }
 
@@ -5711,6 +5747,19 @@ void
 SetForcedAttributes()
 {
 	MyString buffer;
+
+	for (classad::References::const_iterator it = forced_submit_attrs.begin(); it != forced_submit_attrs.end(); ++it) {
+		char * value = param(it->c_str());
+		if ( ! value)
+			continue;
+	#ifdef PLUS_ATTRIBS_IN_CLUSTER_AD
+		buffer.formatstr( "%s = %s", it->c_str(), value);
+		InsertJobExpr(buffer);
+	#else
+		this is unsupported...
+	#endif
+		free(value);
+	}
 
 	HASHITER it = hash_iter_begin(SubmitMacroSet);
 	for( ; ! hash_iter_done(it); hash_iter_next(it)) {
@@ -7113,7 +7162,7 @@ int SpecialSubmitParse(void* pv, MACRO_SOURCE& source, MACRO_SET& macro_set, cha
 {
 	FILE* fp_submit = (FILE*)pv;
 	int rval = 0;
-	const char * subsys = get_mySubSystem()->getName();
+	MACRO_EVAL_CONTEXT ctx = { NULL, "SUBMIT", false, 2 };
 
 	// Check to see if this is a queue statement.
 	//
@@ -7122,7 +7171,23 @@ int SpecialSubmitParse(void* pv, MACRO_SOURCE& source, MACRO_SET& macro_set, cha
 
 		GotQueueCommand = true;
 
-		auto_free_ptr expanded_queue_args(expand_macro(queue_args, SubmitMacroSet));
+		// parse the extra lines before doing $ expansion on the queue line
+		ErrContext.phase = PHASE_DASH_APPEND;
+		ExtraLineNo = 0;
+		extraLines.Rewind();
+		const char * exline;
+		while (extraLines.Next(exline)) {
+			++ExtraLineNo;
+			rval = Parse_config_string(source, 1, exline, macro_set, ctx);
+			if (rval < 0)
+				return rval;
+			rval = 0;
+		}
+		ExtraLineNo = 0;
+		ErrContext.phase = PHASE_QUEUE;
+		ErrContext.step = -1;
+
+		auto_free_ptr expanded_queue_args(expand_macro(queue_args, SubmitMacroSet, ctx));
 		char * pqargs = expanded_queue_args.ptr();
 		ASSERT(pqargs);
 
@@ -7135,33 +7200,17 @@ int SpecialSubmitParse(void* pv, MACRO_SOURCE& source, MACRO_SET& macro_set, cha
 			return -1;
 		}
 
-		// now parse the extra lines.
-		ErrContext.phase = PHASE_DASH_APPEND;
-		ExtraLineNo = 0;
-		extraLines.Rewind();
-		const char * exline;
-		while (extraLines.Next(exline)) {
-			++ExtraLineNo;
-			rval = Parse_config_string(source, 1, exline, macro_set, subsys);
-			if (rval < 0)
-				return rval;
-			rval = 0;
-		}
-		ExtraLineNo = 0;
-		ErrContext.phase = PHASE_QUEUE;
-		ErrContext.step = -1;
-
 		// HACK! the queue function uses a global flag to know whether or not to ask for a new cluster
 		// In 8.2 this flag is set whenever the "executable" or "cmd" value is set in the submit file.
 		// As of 8.3, we don't believe this is still necessary, but we are afraid to change it. This
 		// code is *mostly* the same, but will differ in cases where the users is setting cmd or executble
 		// to the *same* value between queue statements. - hopefully this is close enough.
-		MyString cur_submit_executable(lookup_macro(Executable, NULL, macro_set, 0));
+		MyString cur_submit_executable(lookup_macro_exact_no_default(Executable, macro_set, 0));
 		if (last_submit_executable != cur_submit_executable) {
 			NewExecutable = true;
 			last_submit_executable = cur_submit_executable;
 		}
-		MyString cur_submit_cmd(lookup_macro("cmd", NULL, macro_set, 0));
+		MyString cur_submit_cmd(lookup_macro_exact_no_default("cmd", macro_set, 0));
 		if (last_submit_cmd != cur_submit_cmd) {
 			NewExecutable = true;
 			last_submit_cmd = cur_submit_cmd;
@@ -7363,10 +7412,12 @@ int read_submit_file(FILE * fp)
 {
 	ErrContext.phase = PHASE_READ_SUBMIT;
 
+	MACRO_EVAL_CONTEXT ctx = { NULL, "SUBMIT", false, 2 };
+
 	std::string errmsg;
 	int rval = Parse_macros(fp, FileMacroSource,
 		0, SubmitMacroSet, READ_MACROS_SUBMIT_SYNTAX,
-		get_mySubSystem()->getName(), errmsg,
+		&ctx, errmsg,
 		SpecialSubmitParse, fp);
 
 	if( rval < 0 ) {
@@ -7411,10 +7462,13 @@ void param_and_insert_unique_items(const char * param_name, classad::References 
 char *
 condor_param( const char* name, const char* alt_name )
 {
+	MACRO_EVAL_CONTEXT ctx = { NULL, "SUBMIT", false, 3 };
+
 	bool used_alt = false;
-	const char *pval = lookup_macro(name, NULL, SubmitMacroSet);
+	const char *pval = lookup_macro(name, SubmitMacroSet, ctx);
 	char * pval_expanded = NULL;
 
+#ifdef SUBMIT_ATTRS_IS_ALSO_CONDOR_PARAM
 	// TODO: change this to use the defaults table from SubmitMacroSet
 	static classad::References submit_attrs;
 	static bool submit_attrs_initialized = false;
@@ -7424,29 +7478,32 @@ condor_param( const char* name, const char* alt_name )
 		param_and_insert_unique_items("SYSTEM_SUBMIT_ATTRS", submit_attrs);
 		submit_attrs_initialized = true;
 	}
+#endif
 
 	if( ! pval && alt_name ) {
-		pval = lookup_macro(alt_name, NULL, SubmitMacroSet);
+		pval = lookup_macro(alt_name, SubmitMacroSet, ctx);
 		used_alt = true;
 	}
 
 	if( ! pval ) {
+#ifdef SUBMIT_ATTRS_IS_ALSO_CONDOR_PARAM // for (broken) legacy behavior
 			// if the value isn't in the submit file, check in the
 			// submit_exprs list and use that as a default.  
 		if ( ! submit_attrs.empty()) {
 			if (submit_attrs.find(name) != submit_attrs.end()) {
 				return param(name);
 			}
-			if (submit_attrs.find(name) != submit_attrs.end()) {
+			if (alt_name && (submit_attrs.find(alt_name) != submit_attrs.end())) {
 				return param(alt_name);
 			}
 		}
+#endif
 		return NULL;
 	}
 
 	ErrContext.macro_name = used_alt ? alt_name : name;
 	ErrContext.raw_macro_val = pval;
-	pval_expanded = expand_macro(pval, SubmitMacroSet);
+	pval_expanded = expand_macro(pval, SubmitMacroSet, ctx);
 
 	if( pval == NULL ) {
 		fprintf( stderr, "\nERROR: Failed to expand macros in: %s\n",
@@ -7464,7 +7521,8 @@ condor_param( const char* name, const char* alt_name )
 void
 set_condor_param( const char *name, const char *value )
 {
-	insert(name, value, SubmitMacroSet, DefaultMacro);
+	MACRO_EVAL_CONTEXT ctx = { NULL, "SUBMIT", false, 2 };
+	insert_macro(name, value, SubmitMacroSet, DefaultMacro, ctx);
 }
 
 #ifdef PLUS_ATTRIBS_IN_CLUSTER_AD
@@ -7505,10 +7563,11 @@ void SetNoClusterAttr(const char * name)
 void
 set_live_submit_variable( const char *name, const char *live_value, bool force_used /*=true*/ )
 {
-	MACRO_ITEM* pitem = find_macro_item(name, SubmitMacroSet);
+	static MACRO_EVAL_CONTEXT ctx = { NULL, "SUBMIT", false, 2 };
+	MACRO_ITEM* pitem = find_macro_item(name, NULL, SubmitMacroSet);
 	if ( ! pitem) {
-		insert(name, "", SubmitMacroSet, LiveMacro);
-		pitem = find_macro_item(name, SubmitMacroSet);
+		insert_macro(name, "", SubmitMacroSet, LiveMacro, ctx);
+		pitem = find_macro_item(name, NULL, SubmitMacroSet);
 	}
 	ASSERT(pitem);
 	pitem->raw_value = live_value;
@@ -7714,7 +7773,7 @@ int queue_item(int num, StringList & vars, char * item, int item_index, int opti
 			vars.rewind();
 			std::string empties;
 			while ((var = vars.next())) {
-				MACRO_ITEM* pitem = find_macro_item(var, SubmitMacroSet);
+				MACRO_ITEM* pitem = find_macro_item(var, NULL, SubmitMacroSet);
 				if ( ! pitem || (pitem->raw_value != EmptyItemString && 0 == strlen(pitem->raw_value))) {
 					if ( ! empties.empty()) empties += ",";
 					empties += var;
@@ -7734,7 +7793,7 @@ int queue_item(int num, StringList & vars, char * item, int item_index, int opti
 		char * var;
 		vars.rewind();
 		while ((var = vars.next())) {
-			MACRO_ITEM* pitem = find_macro_item(var, SubmitMacroSet);
+			MACRO_ITEM* pitem = find_macro_item(var, NULL, SubmitMacroSet);
 			fprintf (stdout, "  %s = %s\n", var, pitem ? pitem->raw_value : "");
 		}
 		fprintf(stdout, "-----\n");
@@ -8535,7 +8594,7 @@ check_open( const char *name, int flags )
 		return;
 	}
 
-	if ( IsUrl( name ) ) {
+	if ( IsUrl( name ) || strstr(name, "$$(") ) {
 		return;
 	}
 
@@ -8953,11 +9012,10 @@ InsertJobExpr (MyString const &expr)
 }
 
 void 
-InsertJobExpr (const char *expr)
+InsertJobExpr (const char *expr, bool from_config_file /*=false*/)
 {
 	MyString attr_name;
 	ExprTree *tree = NULL;
-	MyString hashkey(expr);
 	int pos = 0;
 	int retval = Parse (expr, attr_name, tree, &pos);
 
@@ -8968,7 +9026,7 @@ InsertJobExpr (const char *expr)
 			fputc( ' ', stderr );
 		}
 		fprintf (stderr, "^^^\n");
-		fprintf(stderr,"Error in submit file\n");
+		fprintf(stderr,"Error in %s file\n", from_config_file ? "config file SUBMIT_ATTRS or SUBMIT_EXPRS value" : "submit file");
 		DoCleanup(0,0,NULL);
 		exit( 1 );
 	}
@@ -9466,6 +9524,17 @@ void SetAccountingGroup() {
         group_user = gu;
         free(gu);
     }
+
+	if ( group && !IsValidSubmitterName(group) ) {
+		fprintf(stderr, "\nERROR: Invalid %s: %s\n", AcctGroup, group);
+		DoCleanup(0,0,NULL);
+		exit( 1 );
+	}
+	if ( !IsValidSubmitterName(group_user.c_str()) ) {
+		fprintf(stderr, "\nERROR: Invalid %s: %s\n", AcctGroupUser, group_user.c_str());
+		DoCleanup(0,0,NULL);
+		exit( 1 );
+	}
 
     // set attributes AcctGroup, AcctGroupUser and AccountingGroup on the job ad:
     std::string assign;

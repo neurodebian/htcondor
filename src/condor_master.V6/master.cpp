@@ -425,11 +425,20 @@ main_init( int argc, char* argv[] )
 		if (syscall(__NR_keyctl, KEYCTL_JOIN_SESSION_KEYRING, "htcondor")==-1 &&
 			errno != ENOSYS)
 		{
+			int saved_errno = errno;
+#if defined(EDQUOT)
+			if (saved_errno == EDQUOT) {
+				dprintf(D_ALWAYS | D_FAILURE,
+				   "Error during DISCARD_SESSION_KEYRING_ON_STARTUP, suggest "
+				   "increasing /proc/sys/kernel/keys/root_maxkeys\n");
+			}
+#endif /* defined EDQUOT */
+
 			EXCEPT("Failed DISCARD_SESSION_KEYRING_ON_STARTUP=True errno=%d",
-					errno);
+					saved_errno);
 		}
 	}
-#endif
+#endif /* defined LINUX */
 
     if (runfor != 0) {
         // We will construct an environment variable that 
@@ -1457,16 +1466,13 @@ main_pre_command_sock_init()
 #endif
 	}
 
-	MyString daemon_list;
-	if( param(daemon_list,"DAEMON_LIST") ) {
-		StringList sl(daemon_list.Value());
-		if( sl.contains("SHARED_PORT") ) {
-				// in case a shared port address file got left behind by an
-				// unclean shutdown, clean it up now before we create our
-				// command socket to avoid confusion
-			SharedPortServer::RemoveDeadAddressFile();
-		}
-	}
+ 	// in case a shared port address file got left behind by an
+ 	// unclean shutdown, clean it up now before we create our
+ 	// command socket to avoid confusion
+	// Do so unconditionally, because the master will decide later (when
+	// it's ready to start daemons) if it will be starting the shared
+	// port daemon.
+ 	SharedPortServer::RemoveDeadAddressFile();
 
 	// The master and its daemons may disagree on if they're using shared
 	// port, so make sure everything's ready, just in case.

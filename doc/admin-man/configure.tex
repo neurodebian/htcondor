@@ -2945,6 +2945,15 @@ which use DaemonCore).
   this setting is ignored and treated as \Expr{False}, to work around
   incompatibilities.
 
+\label{param:MaxTimeSkip}
+\item[\Macro{MAX\_TIME\_SKIP}]
+  When an HTCondor daemon notices the system clock skip forwards or
+  backwards more than the number of seconds specified by this parameter,
+  it may take special action.  For instance, the \Condor{master} will
+  restart HTCondor in the event of a clock skip.  Defaults to a value of
+  1200, which in effect means that HTCondor will restart if the system clock
+  jumps by more than 20 minutes.
+
 \label{param:NotRespondingTimeout}
 \item[\Macro{NOT\_RESPONDING\_TIMEOUT}]
   When an HTCondor daemon's parent process is another HTCondor daemon, 
@@ -9381,8 +9390,8 @@ Configuration File Macros}
   from other HTCondor daemons. On Unix, this should point to a file system
   location that can be used for a named pipe. On Windows, named pipes
   are also used but they do not exist in the file system. The default
-  setting therefore depends on the platform: 
-  \verb@$(LOCK)/procd_pipe@ on Unix and
+  setting therefore depends on the platform and distribution: 
+  \verb@$(LOCK)/procd_pipe@ or \verb@$(RUN)/procd_pipe@ on Unix and
 %  \Code{$\backslash$$\backslash$.$\backslash$pipe$\backslash$procd\_pipe}
   \verb@\\.\pipe\procd_pipe@ on Windows.
 
@@ -9621,6 +9630,11 @@ These macros affect the \Condor{gridmanager}.
   The number of seconds after
   which a pending GAHP command should time out. 
   The default is 5 minutes (300 seconds).
+
+\label{param:GridmanagerGahpResponseTimeout}
+\item[\Macro{GRIDMANAGER\_GAHP\_RESPONSE\_TIMEOUT}]
+  The \Condor{gridmanager} will assume a GAHP is hung if this many
+  seconds pass without a response.  The default is 20.
 
 \label{param:GridmanagerMaxPendingRequests}
 \item[\Macro{GRIDMANAGER\_MAX\_PENDING\_REQUESTS}]
@@ -10554,21 +10568,15 @@ in section~\ref{sec:DAG-configuration}.
 \label{param:DAGManLogOnNfsIsError}
 \item[\Macro{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR}]
   A boolean value that controls whether \Condor{dagman} prohibits
-  node job submit description files with job event log files on NFS.
-  This value is ignored if \MacroNI{CREATE\_LOCKS\_ON\_LOCAL\_DISK} is 
-  \Expr{True} and
-  \MacroNI{ENABLE\_USERLOG\_LOCKING} is \Expr{True}.
-  If a DAG references such a submit description file and
-  \MacroNI{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR} is \Expr{True},
+  a DAG workflow log from being on an NFS file system.
+  This value is ignored if \MacroNI{CREATE\_LOCKS\_ON\_LOCAL\_DISK} 
+  and \MacroNI{ENABLE\_USERLOG\_LOCKING} are both \Expr{True}.
+  If a DAG uses such a workflow log file file and
+  \MacroNI{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR} is \Expr{True}
+  (and not ignored),
   the DAG will abort during the initialization process. 
-  If \MacroNI{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR} is \Expr{False}, a warning
-  will be issued, but the DAG will still be submitted.
-  It is \emph{strongly}
-  recommended that \MacroNI{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR}
-  remain set to the default value, because running a DAG with node job
-  log files on NFS will often cause errors.
   If not defined, \MacroNI{DAGMAN\_LOG\_ON\_NFS\_IS\_ERROR} defaults to
-  \Expr{True}.
+  \Expr{False}.
 
 \label{param:DAGManAbortDuplicates}
 \item[\Macro{DAGMAN\_ABORT\_DUPLICATES}]

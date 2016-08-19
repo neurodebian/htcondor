@@ -500,6 +500,12 @@ match_rec::~match_rec()
 		free(pool);
 	}
 
+		// If we are shuting down, the daemonCore instance will be null
+		// and any use of it will cause a core dump.  At best.
+	if (!daemonCore) {
+		return;
+	}
+
 	if( claim_requester.get() ) {
 			// misc_data points to this object, so NULL it out, just to be safe
 		claim_requester->setMiscDataPtr( NULL );
@@ -507,7 +513,7 @@ match_rec::~match_rec()
 		claim_requester = NULL;
 	}
 
-	if( secSessionId() && daemonCore ) {
+	if( secSessionId()) {
 			// Expire the session after enough time to let the final
 			// RELEASE_CLAIM command finish, in case it is still in
 			// progress.  This also allows us to more gracefully
@@ -1005,9 +1011,12 @@ Scheduler::fill_submitter_ad(ClassAd & pAd, const OwnerData & Owner, int flock_l
 	}
 
 	int JobsRunningHere = Counters.JobsRunning;
+	int WeightedJobsRunningHere = Counters.WeightedJobsRunning;
 	int JobsRunningElsewhere = Counters.JobsFlocked;
+
 	if (flock_level > 0) {
 		JobsRunningHere = Counters.JobsFlockedHere;
+		WeightedJobsRunningHere = Counters.WeightedJobsFlockedHere;
 		JobsRunningElsewhere = (Counters.JobsRunning + Counters.JobsFlocked) - Counters.JobsFlockedHere;
 	}
 
@@ -1019,9 +1028,9 @@ Scheduler::fill_submitter_ad(ClassAd & pAd, const OwnerData & Owner, int flock_l
 	if (want_dprintf)
 		dprintf (dprint_level, "Changed attribute: %s = %d\n", ATTR_IDLE_JOBS, Counters.JobsIdle);
 
-	pAd.Assign(ATTR_WEIGHTED_RUNNING_JOBS, Counters.WeightedJobsRunning);
+	pAd.Assign(ATTR_WEIGHTED_RUNNING_JOBS, WeightedJobsRunningHere);
 	if (want_dprintf)
-		dprintf (dprint_level, "Changed attribute: %s = %d\n", ATTR_WEIGHTED_RUNNING_JOBS, Counters.WeightedJobsRunning);
+		dprintf (dprint_level, "Changed attribute: %s = %d\n", ATTR_WEIGHTED_RUNNING_JOBS, WeightedJobsRunningHere);
 
 	pAd.Assign(ATTR_WEIGHTED_IDLE_JOBS, Counters.WeightedJobsIdle);
 	if (want_dprintf)
@@ -1127,7 +1136,7 @@ void Scheduler::userlog_file_cache_erase(const int& cluster, const int& proc) {
     // possible userlog file names associated with this job
     if (getPathToUserLog(ad, userlog_name)) log_names.push_back(userlog_name.Value());
     if (getPathToUserLog(ad, dagman_log_name, ATTR_DAGMAN_WORKFLOW_LOG)) log_names.push_back(dagman_log_name.Value());
-    
+
     for (std::vector<char const*>::iterator j(log_names.begin());  j != log_names.end();  ++j) {
 
         // look for file name in the cache
@@ -1212,23 +1221,7 @@ Scheduler::count_jobs()
 				// Sum up the # of cpus claimed by this user and advertise it as
 				// WeightedJobsRunning. 
 
-			int job_weight = 1;
-			if (m_use_slot_weights && slotWeight && rec->my_match_ad) {
-					// if the schedd slot weight expression is set and parses,
-					// evaluate it here
-				classad::Value result;
-				int rval = EvalExprTree( slotWeight, rec->my_match_ad, NULL, result );
-				if( !rval || !result.IsNumber(job_weight)) {
-					job_weight = 1;
-				}
-			} else {
-					// slot weight isn't set, fall back to assuming cpus
-				if (rec->my_match_ad) {
-					if(0 == rec->my_match_ad->LookupInteger(ATTR_CPUS, job_weight)) {
-						job_weight = 1; // or fall back to one if CPUS isn't in the startds
-					}
-				}
-			}
+			int job_weight = calcSlotWeight(rec);
 			
 			Owner->num.WeightedJobsRunning += job_weight;
 			Owner->num.JobsRunning++;
@@ -1401,12 +1394,13 @@ Scheduler::count_jobs()
 	// appear in condor_q -global and condor_status -schedd
 	if( FlockCollectors ) {
 		FlockCollectors->rewind();
+		DCCollectorAdSequences & adSeq = daemonCore->getUpdateAdSeq();
 		Daemon* d;
 		DCCollector* col;
 		FlockCollectors->next(d);
 		for(int ii=0; d && ii < FlockLevel; ii++ ) {
 			col = (DCCollector*)d;
-			col->sendUpdate( UPDATE_SCHEDD_AD, cad, NULL, true );
+			col->sendUpdate( UPDATE_SCHEDD_AD, cad, adSeq, NULL, true );
 			FlockCollectors->next( d );
 		}
 	}
@@ -1450,6 +1444,7 @@ Scheduler::count_jobs()
 
 	// update collector of the pools with which we are flocking, if
 	// any
+	DCCollectorAdSequences & adSeq = daemonCore->getUpdateAdSeq();
 	Daemon* d;
 	Daemon* flock_neg;
 	DCCollector* flock_col;
@@ -1473,6 +1468,7 @@ Scheduler::count_jobs()
 			for (OwnerDataMap::iterator it = Owners.begin(); it != Owners.end(); ++it) {
 				OwnerData & Owner = it->second;
 				Owner.num.JobsFlockedHere = 0;
+				Owner.num.WeightedJobsFlockedHere = 0;
 			}
 			matches->startIterations();
 			match_rec *mRec;
@@ -1484,6 +1480,8 @@ Scheduler::count_jobs()
 				if (mRec->shadowRec && mRec->pool &&
 					!strcmp(mRec->pool, flock_neg->pool())) {
 					Owner->num.JobsFlockedHere++;
+
+					Owner->num.WeightedJobsFlockedHere += calcSlotWeight(mRec);
 				}
 			}
 
@@ -1501,7 +1499,7 @@ Scheduler::count_jobs()
 					// CM we are negotiating with when we negotiate
 				pAd.Assign(ATTR_SUBMITTER_TAG,flock_col->name());
 
-				flock_col->sendUpdate( UPDATE_SUBMITTOR_AD, &pAd, NULL, true );
+				flock_col->sendUpdate( UPDATE_SUBMITTOR_AD, &pAd, adSeq, NULL, true );
 			}
 		}
 	}
@@ -1594,7 +1592,7 @@ Scheduler::count_jobs()
 		  for( flock_level=1, FlockCollectors->rewind();
 			   flock_level <= old_flock_level &&
 				   FlockCollectors->next(da); flock_level++ ) {
-			  ((DCCollector*)da)->sendUpdate( UPDATE_SUBMITTOR_AD, &pAd, NULL, true );
+			  ((DCCollector*)da)->sendUpdate( UPDATE_SUBMITTOR_AD, &pAd, adSeq, NULL, true );
 		  }
 	  }
 	}
@@ -1810,24 +1808,20 @@ int Scheduler::command_history(int, Stream* stream)
 	unparser.Unparse(requirements_str, requirements);
 
 	classad::Value value;
-	classad::ExprList *list = NULL;
-	if ((queryAd.find(ATTR_PROJECTION) != queryAd.end()) &&
-		(!queryAd.EvaluateAttr(ATTR_PROJECTION, value) || !value.IsListValue(list)))
-	{
-		return sendHistoryErrorAd(stream, 2, "Unable to evaluate projection list");
+	classad::References projection;
+	int proj_err = mergeProjectionFromQueryAd(queryAd, ATTR_PROJECTION, projection, true);
+	if (proj_err < 0) {
+		if (proj_err == -1) {
+			return sendHistoryErrorAd(stream, 2, "Unable to evaluate projection list");
+		}
+		return sendHistoryErrorAd(stream, 3, "Unable to convert projection list to string list");
 	}
 	std::stringstream ss;
 	bool multiple = false;
-	if (list) for (classad::ExprList::const_iterator it = list->begin(); it != list->end(); it++)
-	{
-		std::string attr;
-		if (!(*it)->Evaluate(value) || !value.IsStringValue(attr))
-		{
-			return sendHistoryErrorAd(stream, 3, "Unable to convert projection list to string");
-		}
+	for (classad::References::const_iterator it = projection.begin(); it != projection.end(); ++it) {
 		if (multiple) ss << ",";
 		multiple = true;
-		ss << attr;
+		ss << *it;
 	}
 
 	int matchCount = -1;
@@ -1864,27 +1858,30 @@ int Scheduler::history_helper_reaper(int, int) {
 
 int Scheduler::history_helper_launcher(const HistoryHelperState &state) {
 
-	std::string history_helper;
-	if ( !param(history_helper, "HISTORY_HELPER") ) {
-		char *tmp = expand_param("$(LIBEXEC)/condor_history_helper");
-		history_helper = tmp;
-		free(tmp);
+	auto_free_ptr history_helper(param("HISTORY_HELPER"));
+	if ( ! history_helper) {
+#ifdef WIN32
+		history_helper.set(expand_param("$(LIBEXEC)\\condor_history_helper.exe"));
+#else
+		history_helper.set(expand_param("$(LIBEXEC)/condor_history_helper"));
+#endif
 	}
 	ArgList args;
 	args.AppendArg("condor_history_helper");
 	args.AppendArg("-f");
 	args.AppendArg("-t");
+	// NOTE: before 8.4.8 and 8.5.6 the argument order was: requirements projection match max
+	// starting with 8.4.8 and 8.5.6 the argument order was changed to: match max requirements projection
+	// this change was made so that projection could be empty without causing problems on Windows.
+	args.AppendArg(state.MatchCount());
+	args.AppendArg(param_integer("HISTORY_HELPER_MAX_HISTORY", 10000));
 	args.AppendArg(state.Requirements());
 	args.AppendArg(state.Projection());
-	args.AppendArg(state.MatchCount());
-	std::stringstream ss;
-	ss << param_integer("HISTORY_HELPER_MAX_HISTORY", 10000);
-	args.AppendArg(ss.str());
 
 	Stream *inherit_list[] = {state.GetStream(), NULL};
 
 	FamilyInfo fi;
-	pid_t pid = daemonCore->Create_Process(history_helper.c_str(), args, PRIV_ROOT, m_history_helper_rid,
+	pid_t pid = daemonCore->Create_Process(history_helper.ptr(), args, PRIV_ROOT, m_history_helper_rid,
 		false, false, NULL, NULL, NULL, inherit_list);
 	if (!pid)
 	{
@@ -2294,6 +2291,51 @@ clear_autocluster_id(JobQueueJob *job, const JOB_ID_KEY & /*jid*/, void *)
 	return 0;
 }
 
+	// This function, given a job, calculates the "weight", or cost
+	// of the slot for accounting purposes.  Usually the # of cpus
+int 
+Scheduler::calcSlotWeight(match_rec *mrec) {
+	if (!mrec) {
+		// shouldn't ever happen, but be defensive
+		return 1;
+	}
+
+
+		// machine may be null	
+	ClassAd *machine = mrec->my_match_ad;
+	int job_weight = 1;
+	if (m_use_slot_weights && slotWeight && machine) {
+			// if the schedd slot weight expression is set and parses,
+			// evaluate it here
+		classad::Value result;
+		int rval = EvalExprTree( slotWeight, machine, NULL, result );
+		if( !rval || !result.IsNumber(job_weight)) {
+			job_weight = 1;
+		}
+	} else {
+			// slot weight isn't set, fall back to assuming cpus
+		if (machine) {
+			if(0 == machine->LookupInteger(ATTR_CPUS, job_weight)) {
+				job_weight = 1; // or fall back to one if CPUS isn't in the startds
+			}
+		} else {
+			// machine == NULL, this happens on schedd restart and reconnect
+			// calculate using request_* attributes, as we do with idle
+			ClassAd *job = GetJobAd(mrec->cluster, mrec->proc);
+
+			if (job) {
+				classad::Value result;
+				int rval = EvalExprTree( scheduler.slotWeight, scheduler.slotWeightMapAd, job, result );
+
+				if( !rval || !result.IsNumber(job_weight)) {
+					job_weight = 1; // Fall back if it doesn't eval
+				}
+			}
+		}
+	}
+	
+	return job_weight;
+}
 
 int
 count_a_job(JobQueueJob* job, const JOB_ID_KEY& /*jid*/, void*)
@@ -2580,8 +2622,8 @@ count_a_job(JobQueueJob* job, const JOB_ID_KEY& /*jid*/, void*)
 		if ((scheduler.m_use_slot_weights) && (cur_hosts == 0) && scheduler.slotWeightMapAd) {
 
 				// if we're biasing idle jobs by SLOT_WEIGHT, eval that here
-			classad::Value result;
 			int job_weight;
+			classad::Value result;
 			int rval = EvalExprTree( scheduler.slotWeight, scheduler.slotWeightMapAd, job, result );
 
 			if( !rval || !result.IsNumber(job_weight)) {
@@ -6639,10 +6681,10 @@ Scheduler::claimedStartd( DCMsgCallback *cb ) {
 			// probably could/should be changed to be declared as a static method.
 			// Actually, must pass in owner so FindRunnableJob will find a job.
 
-			sn = new DedicatedScheddNegotiate(0, NULL, match->user, NULL);
+			sn = new DedicatedScheddNegotiate(0, NULL, match->user, match->pool);
 		} else {
 			// Use the DedSched
-			sn = new MainScheddNegotiate(0, NULL, match->user, NULL);
+			sn = new MainScheddNegotiate(0, NULL, match->user, match->pool);
 		}		
 
 			// Setting cluster.proc to -1.-1 should result in the schedd
@@ -12890,12 +12932,13 @@ Scheduler::invalidate_ads()
 					  ATTR_NAME, submitter.Value() );
 		cad->Insert( line.Value() );
 
+		DCCollectorAdSequences & adSeq = daemonCore->getUpdateAdSeq();
 		Daemon* d;
 		if( FlockCollectors && FlockLevel > 0 ) {
 			int level;
 			for( level=1, FlockCollectors->rewind();
 				 level <= FlockLevel && FlockCollectors->next(d); level++ ) {
-				((DCCollector*)d)->sendUpdate( INVALIDATE_SUBMITTOR_ADS, cad, NULL, false );
+				((DCCollector*)d)->sendUpdate( INVALIDATE_SUBMITTOR_ADS, cad, adSeq, NULL, false );
 			}
 		}
 	}

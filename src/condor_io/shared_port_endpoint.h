@@ -98,7 +98,7 @@ class SharedPortEndpoint: Service {
 #ifdef WIN32
 	void PipeListenerThread();
 
-	void PipeListenerHelper();
+	static int PipeListenerHelper(void* pthis, void* data);
 
 	//Event used to notify the class that the thread is dead.
 	HANDLE thread_killed;
@@ -157,6 +157,8 @@ class SharedPortEndpoint: Service {
 	bool kill_thread;
 	//Handle to the pipe that listens for connections.
 	HANDLE pipe_end;
+	//temporary inheritable handle to above pipe
+	HANDLE inheritable_to_child;
 
 	//Bookkeeping information for the listener thread.
 	HANDLE thread_handle;

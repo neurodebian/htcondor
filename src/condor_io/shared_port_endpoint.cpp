@@ -98,6 +98,7 @@ SharedPortEndpoint::SharedPortEndpoint(char const *sock_name):
 	thread_killed = INVALID_HANDLE_VALUE;
 
 	pipe_end = INVALID_HANDLE_VALUE;
+	inheritable_to_child = INVALID_HANDLE_VALUE;
 
 	thread_handle = INVALID_HANDLE_VALUE;
 
@@ -122,7 +123,7 @@ SharedPortEndpoint::~SharedPortEndpoint()
 		DWORD wait_result = WaitForSingleObject(thread_killed, 100);
 		if(wait_result != WAIT_OBJECT_0)
 			dprintf(D_ALWAYS, "SharedPortEndpoint: Destructor: Problem in thread shutdown notification: %d\n", GetLastError());
-		CloseHandle(thread_killed);
+		CloseHandle(thread_killed); thread_killed = INVALID_HANDLE_VALUE;
 	}
 #endif
 }
@@ -170,11 +171,16 @@ SharedPortEndpoint::StopListener()
 	On Windows we only need to close the pipe ends for the
 	two pipes we're using.
 	*/
-	dprintf(D_FULLDEBUG, "SharedPortEndpoint: Inside stop listener.\n");
-	if( m_registered_listener )
-	{
+	dprintf(D_FULLDEBUG, "SharedPortEndpoint: Inside stop listener. m_registered_listener=%d\n", m_registered_listener);
+	if (inheritable_to_child && inheritable_to_child != INVALID_HANDLE_VALUE) {
+		CloseHandle(inheritable_to_child); inheritable_to_child = INVALID_HANDLE_VALUE;
+	}
+	if ( ! m_registered_listener) {
+		if (pipe_end && pipe_end != INVALID_HANDLE_VALUE) { CloseHandle(pipe_end); pipe_end = INVALID_HANDLE_VALUE; }
+		ASSERT (thread_killed == INVALID_HANDLE_VALUE && thread_handle == INVALID_HANDLE_VALUE);
+	} else {
 		bool tried = false;
-		HANDLE child_pipe;
+		HANDLE child_pipe = INVALID_HANDLE_VALUE;
 		EnterCriticalSection(&kill_lock);
 		kill_thread = true;
 		LeaveCriticalSection(&kill_lock);
@@ -219,11 +225,13 @@ SharedPortEndpoint::StopListener()
 				continue;
 			}
 
-			CloseHandle(child_pipe);
 			break;
 		}
+		if (child_pipe && (child_pipe != INVALID_HANDLE_VALUE)) {
+			CloseHandle(child_pipe); child_pipe = INVALID_HANDLE_VALUE;
+		}
 
-		CloseHandle(thread_handle);
+		CloseHandle(thread_handle); thread_handle = INVALID_HANDLE_VALUE;
 		DeleteCriticalSection(&received_lock);
 	}
 #else
@@ -256,9 +264,7 @@ SharedPortEndpoint::CreateListener()
 		return true;
 	}
 
-	std::stringstream ss;
-	ss << m_socket_dir.Value() << DIR_DELIM_CHAR << m_local_id.Value();
-	m_full_name = ss.str();
+	m_full_name.formatstr("%s%c%s", m_socket_dir.c_str(), DIR_DELIM_CHAR, m_local_id.c_str());
 
 	pipe_end = CreateNamedPipe(
 		m_full_name.Value(),
@@ -292,9 +298,7 @@ SharedPortEndpoint::CreateListener()
 	m_listener_sock.close();
 	m_listener_sock.assignDomainSocket( sock_fd );
 
-	std::stringstream ss;
-	ss << m_socket_dir.Value() << DIR_DELIM_CHAR << m_local_id.Value();
-	m_full_name = ss.str();
+	m_full_name.formatstr("%s%c%s", m_socket_dir.c_str(), DIR_DELIM_CHAR, m_local_id.c_str());
 
 	struct sockaddr_un named_sock_addr;
 	memset(&named_sock_addr, 0, sizeof(named_sock_addr));
@@ -446,6 +450,12 @@ SharedPortEndpoint::StartListenerWin32()
 	if( m_registered_listener )
 		return true;
 
+	m_registered_listener = true;
+	kill_thread = false;
+	thread_killed = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if(thread_killed == INVALID_HANDLE_VALUE)
+		EXCEPT("SharedPortEndpoint: Failed to create cleanup event: %d", GetLastError());
+
 	DWORD threadID;
 	thread_handle = CreateThread(NULL,
 		0,
@@ -455,18 +465,12 @@ SharedPortEndpoint::StartListenerWin32()
 		&threadID);
 	if(thread_handle == INVALID_HANDLE_VALUE)
 	{
+		m_registered_listener = false;
+		kill_thread = true;
+		CloseHandle(thread_killed); thread_killed = INVALID_HANDLE_VALUE;
 		EXCEPT("SharedPortEndpoint: Failed to create listener thread: %d", GetLastError());
 	}
 	dprintf(D_DAEMONCORE|D_FULLDEBUG, "SharedPortEndpoint: StartListenerWin32: Thread spun off, listening on pipes.\n");
-
-	kill_thread = false;
-
-	thread_killed = CreateEvent(NULL, TRUE, FALSE, NULL);
-
-	if(thread_killed == INVALID_HANDLE_VALUE)
-		EXCEPT("SharedPortEndpoint: Failed to create cleanup event: %d", GetLastError());
-
-	m_registered_listener = true;
 
 	return m_registered_listener;
 }
@@ -483,6 +487,23 @@ InstanceThread(void* instance)
 */	return 0;
 }
 
+#if 0 // set this to 1 if you need logging to visual studio debugger of the threaded code that cannot use dprintf
+#include <time.h>
+#include <sys\timeb.h>
+void ThreadSafeLogError(const char * msg, int err) {
+	char buf[200];
+	struct _timeb tv;
+	struct tm tm;
+	_ftime(&tv);
+	_localtime64_s(&tm, &tv.time);
+	strftime(buf, 80, "%H:%M:%S", &tm);
+	sprintf(buf+strlen(buf), ".%03d %.100s: %d\n", tv.millitm, msg, err);
+	OutputDebugString(buf);
+}
+#else
+#define ThreadSafeLogError (void)
+#endif
+
 /*
   The following function runs in its own thread.  We must therefore be
   very careful about what we do here.  Much of condor code is not
@@ -496,9 +517,11 @@ SharedPortEndpoint::PipeListenerThread()
 {
 	while(true)
 	{
-		if(!ConnectNamedPipe(pipe_end, NULL))
+		// a bit wierd, but ConnectNamedPipe returns true on success. OR it
+		// returns false and sets the error code to ERROR_PIPE_CONNECTED.
+		if(!ConnectNamedPipe(pipe_end, NULL) && (GetLastError() != ERROR_PIPE_CONNECTED))
 		{
-//			dprintf(D_ALWAYS, "SharedPortEndpoint: Client failed to connect: %d\n", GetLastError());
+			ThreadSafeLogError("SharedPortEndpoint: Client failed to connect", GetLastError());
 			continue;
 		}
 
@@ -506,16 +529,16 @@ SharedPortEndpoint::PipeListenerThread()
 		if(kill_thread)
 		{
 			LeaveCriticalSection(&kill_lock);
-//			dprintf(D_ALWAYS, "SharedPortEndpoint: Listener thread received kill request.\n");
+			ThreadSafeLogError("SharedPortEndpoint: Listener thread received kill request.", 0);
 			DisconnectNamedPipe(pipe_end);
-			CloseHandle(pipe_end);
+			CloseHandle(pipe_end); pipe_end = INVALID_HANDLE_VALUE;
 			DeleteCriticalSection(&kill_lock);
 			return;
 		}
 
 		LeaveCriticalSection(&kill_lock);
 
-//		dprintf(D_ALWAYS, "SharedPortEndpoint: Pipe connected\n");
+		ThreadSafeLogError("SharedPortEndpoint: Pipe connected", 0);
 		DWORD pID = GetProcessId(GetCurrentProcess());
 
 		DWORD bytes_written;
@@ -564,23 +587,19 @@ SharedPortEndpoint::PipeListenerThread()
 			//total_received += bytes;
 			int destOffset = expected - buffSize;
 			int destLeft = expected - total_received;
-//			dprintf(D_ALWAYS, "SharedPortEndpoint: Read: %d Offset: %d Left: %d\n", bytes, destOffset, destLeft);
+			//dprintf(D_ALWAYS, "SharedPortEndpoint: Read: %d Offset: %d Left: %d\n", bytes, destOffset, destLeft);
 			memcpy_s(storeBuff + destOffset, destLeft, readBuff, bytes);
 			int cmd;
 			memcpy_s(&cmd, sizeof(int), storeBuff, sizeof(int));
 			if( cmd != SHARED_PORT_PASS_SOCK ) {
-/*				dprintf(D_ALWAYS,
-					"SharedPortEndpoint: received unexpected command %d (%s) on named socket %s\n",
-					cmd,
-					getCommandString(cmd),
-					m_full_name.Value());
-*/				break;
+				ThreadSafeLogError("SharedPortEndpoint: received unexpected command", cmd);
+				break;
 			}
 
 			//WSAPROTOCOL_INFO protocol_info;
 			WSAPROTOCOL_INFO *last_rec = (WSAPROTOCOL_INFO *)HeapAlloc(GetProcessHeap(), 0, sizeof(WSAPROTOCOL_INFO));
 			memcpy_s(last_rec, sizeof(WSAPROTOCOL_INFO), storeBuff+sizeof(int), sizeof(WSAPROTOCOL_INFO));
-//			dprintf(D_ALWAYS, "SharedPortEndpoint: Copied WSAPROTOCOL_INFO\n");
+			ThreadSafeLogError("SharedPortEndpoint: Copied WSAPROTOCOL_INFO", wake_select_dest ? 1 : 0);
 			
 			EnterCriticalSection(&received_lock);
 			received_sockets.push(last_rec);
@@ -588,26 +607,26 @@ SharedPortEndpoint::PipeListenerThread()
 			
 			if(!wake_select_dest)
 			{
-//				dprintf(D_ALWAYS, "SharedPortEndpoint: Registering timer.\n");
-				int status = daemonCore->Register_Timer_TS(0, (TimerHandlercpp)&SharedPortEndpoint::PipeListenerHelper, "Received socket handler", this);
-//				dprintf(D_ALWAYS, "SharedPortEndpoint: Timer registration status: %d\n", status);
+				ThreadSafeLogError("SharedPortEndpoint: Registering Pump worker to move the socket", 0);
+				int status = daemonCore->Register_PumpWork_TS(SharedPortEndpoint::PipeListenerHelper, this, NULL);
+				ThreadSafeLogError("SharedPortEndpoint: back from Register_PumpWork_TS with status", status);
 			}
 			else
 			{
-//				dprintf(D_ALWAYS, "SharedPortEndpoint:CCB client, writing to sockets to wake select.\n");
 				char wake[1];
 				wake[0] = 'A';
 				//wake_select_source->put_bytes(&wake, sizeof(int));
 				//wake_select_source->end_of_message();
 				int sock_fd = wake_select_source->get_file_desc();
-//				dprintf(D_ALWAYS, "SharedPortEndpoint: Sock FD: %d\n", sock_fd);
+				ThreadSafeLogError("SharedPortEndpoint:CCB client, writing to socket to wake select", sock_fd);
 				int write_success = send(sock_fd, wake, sizeof(char), 0);
 				//TODO: DO SOMETHING THREADSAFE HERE IN PLACE OF EXCEPT!!!!!!!!!!!!!!!!
 				if(write_success == SOCKET_ERROR)
 					EXCEPT("SharedPortEndpoint: Failed to write to select wakeup: %d", WSAGetLastError());
 			}
 			
-//			dprintf(D_ALWAYS, "SharedPortEndpoint: Finished reading from pipe.\n");
+			ThreadSafeLogError("SharedPortEndpoint: Finished reading from pipe", cmd);
+
 
 			break;
 		}
@@ -618,13 +637,19 @@ SharedPortEndpoint::PipeListenerThread()
 	}
 }
 
-void
-SharedPortEndpoint::PipeListenerHelper()
+/* static */
+int SharedPortEndpoint::PipeListenerHelper(void* pv, void* data)
 {
-	dprintf(D_FULLDEBUG, "SharedPortEndpoint: Inside PipeListenerHelper\n");
-	DoListenerAccept(NULL);
+	SharedPortEndpoint * pthis = (SharedPortEndpoint *)pv;
+	//dprintf(D_FULLDEBUG, "SharedPortEndpoint: Inside PumpWork PipeListenerHelper\n");
+	ThreadSafeLogError("SharedPortEndpoint: Inside PipeListenerHelper", 0);
+	pthis->DoListenerAccept(NULL);
+	ThreadSafeLogError("SharedPortEndpoint: Inside PipeListenerHelper returning", 0);
+	return 0;
 }
-#endif
+
+#endif // WIN32
+
 int
 SharedPortEndpoint::TouchSocketInterval()
 {
@@ -912,7 +937,7 @@ void
 SharedPortEndpoint::DoListenerAccept(ReliSock *return_remote_sock)
 {
 #ifdef WIN32
-	dprintf(D_FULLDEBUG, "SharedPortEndpoint: Entered DoListerAccept Win32 path.\n");
+	dprintf(D_FULLDEBUG, "SharedPortEndpoint: Entered DoListenerAccept Win32 path.\n");
 	ReliSock *remote_sock = return_remote_sock;
 	if(!remote_sock)
 	{
@@ -924,6 +949,7 @@ SharedPortEndpoint::DoListenerAccept(ReliSock *return_remote_sock)
 		WSAPROTOCOL_INFO *received_socket = received_sockets.front();
 		received_sockets.pop();
 		LeaveCriticalSection(&received_lock);
+
 		remote_sock->assign(received_socket);
 		remote_sock->enter_connected_state();
 		remote_sock->isClient(false);
@@ -1112,15 +1138,18 @@ SharedPortEndpoint::serialize(MyString &inherit_buf,int &inherit_fd)
 	Serializing requires acquiring the handles of the respective pipes and seeding them into
 	the buffer.
 	*/
+	if (inheritable_to_child && inheritable_to_child != INVALID_HANDLE_VALUE) {
+		dprintf(D_ALWAYS, "SharedPortEndpoint::serialize called when inheritable_to_child already has a value\n");
+		CloseHandle(inheritable_to_child); inheritable_to_child = INVALID_HANDLE_VALUE;
+	}
 
 	HANDLE current_process = GetCurrentProcess();
-	HANDLE to_child;
-	if(!DuplicateHandle(current_process, pipe_end, current_process, &to_child, NULL, true, DUPLICATE_SAME_ACCESS))
+	if(!DuplicateHandle(current_process, pipe_end, current_process, &inheritable_to_child, NULL, true, DUPLICATE_SAME_ACCESS))
 	{
 		dprintf(D_ALWAYS, "SharedPortEndpoint: Failed to duplicate named pipe for inheritance.\n");
 		return false;
 	}
-	inherit_buf.formatstr_cat("%d", to_child);
+	inherit_buf.formatstr_cat("%d", inheritable_to_child);
 #else
 	inherit_fd = m_listener_sock.get_file_desc();
 	ASSERT( inherit_fd != -1 );

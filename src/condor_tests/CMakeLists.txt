@@ -70,7 +70,8 @@ if (BUILD_TESTING)
 	#endif(UNIX)
 
 	if(WINDOWS)
-		condor_exe_test(sleep.exe "sleep.cpp" "")
+		# can't build this using cmake because it insists on passing wrong compiler flags, the good thing is that we don't need to budil it anyway. 
+		# condor_exe_test(sleep.exe "sleep.cpp" "")
 	endif(WINDOWS)
 
 	if (NOT WINDOWS)
@@ -370,7 +371,7 @@ if (BUILD_TESTING)
 	#condor_pl_test(lib_auth_protocol-negot-prt4 "4 way negotiation test - last 8" "core;quick;full;quicknolink")
 	##### generic cmd tests
 
-	condor_pl_test(condor_status_dash_ads "Condor_status -any works as expected" "core;quick;full;quicknolink")
+	condor_pl_test(cmd_status_slot_variants "Condor_status works with static and partitionable slots" "core;quick;full;quicknolink")
 	condor_pl_test(cmd_status_shows-any "Condor_status -any works as expected" "core;quick;full;quicknolink")
 	condor_pl_test(cmd_status_shows-submitters "Condor_status -submitters works as expected" "core;quick;full;quicknolink")
 	condor_pl_test(cmd_status_shows-negotiator "Condor_status -negotiator works as expected" "core;quick;full;quicknolink")
@@ -479,6 +480,7 @@ if (BUILD_TESTING)
 	#condor_pl_test(lib_python_bindings "check python bindings" "core;quick;full")
 	condor_pl_test(lib_param_completeness "minimal knobs" "core;quick;full")
 	condor_pl_test(lib_param_conditionals "config conditionals" "core;quick;full")
+	condor_pl_test(unit_test_macro_expand "config macro unit tests" "core;quick;full")
 	#condor_pl_test(cmd_condor_ping_basic "Basic default test of condor_ping" "core;quick;full")
 	condor_pl_test(job_aggressive_flocking "Test aggressive flocking" "core;quick;full")
 	##### job tests

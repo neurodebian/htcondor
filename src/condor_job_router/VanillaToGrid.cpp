@@ -81,6 +81,11 @@ bool VanillaToGrid::vanillaToGrid(classad::ClassAd * ad, int target_universe, co
 	ad->Delete( ATTR_STAGE_IN_FINISH );
 	ad->Delete( ATTR_STAGE_IN_START );
 
+	// We aren't going to forward updates to this attribute,
+	// so strip it out.
+	// We do evaluate it locally in the source job ad.
+	ad->Delete(ATTR_TIMER_REMOVE_CHECK);
+
 	ad->Delete("SUBMIT_" ATTR_JOB_IWD); // the presence of this would prevent schedd from rewriting spooled iwd
 
 	// Stuff to reset
@@ -301,6 +306,10 @@ bool update_job_status( classad::ClassAd const & orig, classad::ClassAd & newgri
 		ATTR_JOB_CORE_DUMPED,
 		ATTR_EXECUTABLE_SIZE,
 		ATTR_IMAGE_SIZE,
+		ATTR_MEMORY_USAGE,
+		ATTR_RESIDENT_SET_SIZE,
+		ATTR_PROPORTIONAL_SET_SIZE,
+		ATTR_DISK_USAGE,
 		ATTR_SHADOW_BIRTHDATE,
 		ATTR_SPOOLED_OUTPUT_FILES,
 		NULL };		// list must end with a NULL

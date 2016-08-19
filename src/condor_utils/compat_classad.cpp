@@ -2014,6 +2014,9 @@ sPrintAd( MyString &output, const classad::ClassAd &ad, bool exclude_private, St
 			if ( attr_white_list && !attr_white_list->contains_anycase(itr->first.c_str()) ) {
 				continue; // not in white-list
 			}
+			if ( ad.LookupIgnoreChain(itr->first) ) {
+				continue; // attribute exists in child ad; we will print it below
+			}
 			if ( !exclude_private ||
 				 !ClassAdAttributeIsPrivate( itr->first.c_str() ) ) {
 				value = "";
@@ -2432,14 +2435,11 @@ sPrintAdAsXML(std::string &output, const classad::ClassAd &ad, StringList *attr_
 		attr_white_list->rewind();
 		while( (attr = attr_white_list->next()) ) {
 			if ( (expr = ad.Lookup( attr )) ) {
-				tmp_ad.Insert( attr, expr, false );
+				classad::ExprTree *new_expr = expr->Copy();
+				tmp_ad.Insert( attr, new_expr, false );
 			}
 		}
 		unparser.Unparse( xml, &tmp_ad );
-		attr_white_list->rewind();
-		while( (attr = attr_white_list->next()) ) {
-			tmp_ad.Remove( attr );
-		}
 	} else {
 		unparser.Unparse( xml, &ad );
 	}
@@ -2453,6 +2453,8 @@ EscapeAdStringValue(char const *val, std::string &buf)
 {
     if(val == NULL)
         return NULL;
+
+	buf.clear();
 
     classad::Value tmpValue;
     classad::ClassAdUnParser unparse;

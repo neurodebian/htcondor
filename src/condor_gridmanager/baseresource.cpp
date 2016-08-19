@@ -296,6 +296,9 @@ void BaseResource::PublishResourceAd( ClassAd *resource_ad )
 	resource_ad->Assign( ATTR_SCHEDD_NAME, ScheddName );
     resource_ad->Assign( ATTR_SCHEDD_IP_ADDR, ScheddObj->addr() );
 	resource_ad->Assign( ATTR_OWNER, myUserName );
+	if ( SelectionValue ) {
+		resource_ad->Assign( ATTR_GRIDMANAGER_SELECTION_VALUE, SelectionValue );
+	}
 	resource_ad->Assign( "NumJobs", registeredJobs.Number() );
 	resource_ad->Assign( "JobLimit", jobLimit );
 	resource_ad->Assign( "SubmitsAllowed", submitsAllowed.Number() );
@@ -336,6 +339,12 @@ void BaseResource::RegisterJob( BaseJob *job )
 		} else {
 			job->NotifyResourceUp();
 		}
+	}
+
+	int lease_expiration = -1;
+	job->jobAd->LookupInteger( ATTR_JOB_LEASE_EXPIRATION, lease_expiration );
+	if ( lease_expiration > 0 ) {
+		RequestUpdateLeases();
 	}
 
 	if ( deleteMeTid != TIMER_UNSET ) {
@@ -537,6 +546,13 @@ void BaseResource::DoPing( unsigned& ping_delay, bool& ping_complete,
 	ping_delay = 0;
 	ping_complete = true;
 	ping_succeeded = true;
+}
+
+void BaseResource::RequestUpdateLeases()
+{
+	if ( updateLeasesTimerId != TIMER_UNSET ) {
+		daemonCore->Reset_Timer( updateLeasesTimerId, 0 );
+	}
 }
 
 void BaseResource::UpdateLeases()
