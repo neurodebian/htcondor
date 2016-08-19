@@ -1,4 +1,4 @@
-condor (8.4.8~dfsg.1-1) UNRELEASED; urgency=medium
+condor (8.4.8~dfsg.1-1) unstable; urgency=medium
 
   * New upstream release (skipped several, more help wanted!)
     - Clarified license of doc/makeman/hard-test.html -- same as
