@@ -101,11 +101,14 @@ override_dh_auto_install:
 	chrpath -c -k ./debian/tmp/usr/lib/condor/libexec/* || true
 
 
-override_dh_install:
-	dh_install
-	# fix permissions
+override_dh_fixperms-arch:
 	chmod -x debian/htcondor/etc/default/condor
 	chmod -x debian/htcondor/usr/lib/condor/libexec/interactive.sub
+
+
+override_dh_install-arch:
+	dh_install
+	# fix permissions
 	# remove RPATH from public lib
 	chrpath -d debian/libclassad*/usr/lib/libclassad.so.*.*
 	# remove duplicate that is also installed as a config file
