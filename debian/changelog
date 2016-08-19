@@ -1,3 +1,18 @@
+condor (8.4.8~dfsg.1-1) UNRELEASED; urgency=medium
+
+  * New upstream release (skipped several, more help wanted!)
+    - Clarified license of doc/makeman/hard-test.html -- same as
+      main HTCondor license (Closes: #822404)
+  * Bumped Standards version to 3.9.8, no changes necessary.
+  * Add Debconf template translation:
+    - Brazilian Portuguese -- courtesy of Adriano Rafael Gomes
+      <adrianorg@arg.eti.br>.
+      (Closes: #816945)
+  * Prevent failure when creating arch-independent packages only.
+    Patch is courtesy of Santiago Vila <sanvila@unex.es> (Closes: #809112)
+
+ -- Michael Hanke <mih@debian.org>  Fri, 19 Aug 2016 10:14:12 +0200
+
 condor (8.4.2~dfsg.1-1) unstable; urgency=medium
 
   * New upstream release.
