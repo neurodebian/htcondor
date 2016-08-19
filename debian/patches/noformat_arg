@@ -9,23 +9,3 @@
  			}
  			return 0;
  		}
---- a/src/condor_daemon_core.V6/daemon_core.cpp
-+++ b/src/condor_daemon_core.V6/daemon_core.cpp
-@@ -973,7 +973,7 @@
- 		if ( comTable[j].num == command ) {
- 			MyString msg;
- 			msg.formatstr("DaemonCore: Same command registered twice (id=%d)", command);
--			EXCEPT(msg.c_str());
-+			EXCEPT("%s/n", msg.c_str());
- 		}
- 	}
- 	if ( i == -1 ) {
-@@ -10238,7 +10238,7 @@
- 
- 					std::string message;
- 					formatstr( message, "Warning: Failed to create IPv6 command socket for ports %d/%d%s", tcp_port, udp_port, want_udp ? "" : "no UDP" );
--					if( fatal ) { EXCEPT( message.c_str() ); }
-+					if( fatal ) { EXCEPT( "%s\n", message.c_str() ); }
- 					dprintf(D_ALWAYS | D_FAILURE, "%s\n", message.c_str() );
- 					return false;
- 				}
