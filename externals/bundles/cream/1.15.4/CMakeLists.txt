@@ -17,8 +17,8 @@
  ############################################################### 
 
 # Sources for some of the source tarballs:
-#   http://emisoft.web.cern.ch/emisoft/dist/EMI/3/sl6/SRPMS/updates/canl-c-2.1.5-1.el6.src.rpm.1
-#   http://emisoft.web.cern.ch/emisoft/dist/EMI/3/sl6/SRPMS/updates/gridsite-2.2.5-1.el6.src.rpm
+#   http://mirror.batlab.org/pub/linux/epel/6/SRPMS/canl-c-2.1.6-1.el6.src.rpm
+#   http://mirror.batlab.org/pub/linux/epel/6/SRPMS/gridsite-2.2.6-1.el6.src.rpm
 #   http://emisoft.web.cern.ch/emisoft/dist/EMI/3/sl6/SRPMS/updates/glite-lbjp-common-gss-3.2.16-1.el6.src.rpm
 #   http://emisoft.web.cern.ch/emisoft/dist/EMI/3/sl6/SRPMS/updates/glite-lbjp-common-gsoap-plugin-3.2.12-1.el6.src.rpm
 #   http://emisoft.web.cern.ch/emisoft/dist/EMI/3/sl6/SRPMS/base/glite-ce-wsdl-1.15.1-1.sl6.src.rpm
@@ -87,11 +87,11 @@ if ( WITH_CREAM )
 			set( CANL_C_FLAGS CFLAGS=-I/usr/include/c-ares19 LIBCARES_LIBS=-lcares19 )
 		endif()
 
-		condor_pre_external( CANL_C canl-c-2.1.5 "lib;include" "done")
+		condor_pre_external( CANL_C canl-c-2.1.6 "lib;include" "done")
 		ExternalProject_Add(canl_c
 			#-- Download Step ----------
 			DOWNLOAD_DIR ${CANL_C_STAGE}/dl
-			URL ${EXTERNALS_SOURCE_URL}/canl-c-2.1.5.tar.gz
+			URL ${EXTERNALS_SOURCE_URL}/canl-c-2.1.6.tar.gz
 			#--Patch step ----------
 			PATCH_COMMAND patch -N -i ${CMAKE_CURRENT_SOURCE_DIR}/canl_install.patch
 			#--Configure step ----------
@@ -107,12 +107,12 @@ if ( WITH_CREAM )
 
 #########################################
 
-		condor_pre_external( GRIDSITE gridsite-2.2.5 "lib;include" "done")
+		condor_pre_external( GRIDSITE gridsite-2.2.6 "lib;include" "done")
 		ExternalProject_Add(gridsite
 			DEPENDS ${CANL_C_REF}
 			#-- Download Step ----------
 			DOWNLOAD_DIR ${GRIDSITE_STAGE}/dl
-			URL ${EXTERNALS_SOURCE_URL}/gridsite-2.2.5.src.tar.gz
+			URL ${EXTERNALS_SOURCE_URL}/gridsite-core_R_2_2_6.tar.gz
 			#--Patch step ----------
 			PATCH_COMMAND sed -i -e "s|^CANL_C_CFLAGS.*|CANL_C_CFLAGS=-I${CANL_C_INSTALL_LOC}/include|" -e "s|^CANL_C_LIBS.*|CANL_C_LIBS=-L${CANL_C_INSTALL_LOC}/lib -lcanl_c|" src/Makefile
 			#--Configure step ----------
@@ -200,7 +200,7 @@ if ( WITH_CREAM )
 #########################################
 
 		# build cream c api library
-		condor_pre_external( CREAM glite-ce-cream-client-api-c-1.15.4 "lib;include;include/glite/security;opt" "done")
+		condor_pre_external( CREAM glite-ce-cream-client-api-c-1.15.4-p1 "lib;include;include/glite/security;opt" "done")
 
 		if(BOOST_INSTALL_LOC)
 			set (BOOST_PATH ${BOOST_INSTALL_LOC})
@@ -252,7 +252,9 @@ if ( WITH_CREAM )
 
 	else( NOT PROPER )
 
-		if ( ${SYSTEM_NAME} MATCHES "rhel6" OR ${SYSTEM_NAME} MATCHES "centos6" OR ${SYSTEM_NAME} MATCHES "sl6")
+		if ( ${SYSTEM_NAME} MATCHES "rhel7" OR ${SYSTEM_NAME} MATCHES "centos7" OR ${SYSTEM_NAME} MATCHES "sl7")
+			find_multiple("glite_ce_cream_client_soap;glite_ce_cream_client_util;glite_security_gsoap_plugin_2816_cxx;glite_security_gss;gsoapssl++;globus_gssapi_gsi;globus_common;log4cpp;gridsite;boost_thread;boost_regex" CREAM_FOUND )
+		elseif ( ${SYSTEM_NAME} MATCHES "rhel6" OR ${SYSTEM_NAME} MATCHES "centos6" OR ${SYSTEM_NAME} MATCHES "sl6")
 			find_multiple("glite_ce_cream_client_soap;glite_ce_cream_client_util;glite_security_gsoap_plugin_2716_cxx;glite_security_gss;log4cpp;gridsite;boost_thread;boost_regex" CREAM_FOUND )
 		else()
 			find_multiple("glite_ce_cream_client_soap;glite_ce_cream_client_util;glite_security_gsoap_plugin_2713_cxx;glite_security_gss;log4cpp;gridsite;boost_thread;boost_regex" CREAM_FOUND )

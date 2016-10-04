@@ -418,7 +418,9 @@ static expr_character_t Characterize_config_if_expression(const char * expr, boo
 		case ct_alpha|ct_space|ct_ident:
 		case ct_alpha|ct_space|ct_ident|ct_colon:
 		case ct_alpha|ct_space|ct_digit:
+		case ct_alpha|ct_space|ct_digit|ct_ident:
 		case ct_alpha|ct_space|ct_digit|ct_float:
+		case ct_alpha|ct_space|ct_digit|ct_ident|ct_float:
 			if (keyword_check && matches_literal_ignore_case(begin, "defined", false))
 				return CIFT_IFDEF; // identify bare defined to insure a reasonable error message
 			return CIFT_COMPLEX;
@@ -1300,7 +1302,7 @@ int strjoincasecmp(const char * key, const char * prefix, const char * name, cha
 		while (*k && tolower(*k) == tolower(*p)) { ++k; ++p; }
 		if ( ! *k) { // ran out of key
 			if ( ! *p) return name ? -1 : 0;
-			else return *p;
+			else return -1; // because tolower(*p) > tolower(*k) must be true here..
 		} else if (*p) { // still have prefix, but does not match
 			return tolower(*p) > tolower(*k) ? -1 : 1;
 		} else if (sep) {
@@ -2174,7 +2176,7 @@ static const char * evaluate_macro_func (
 				EXCEPT( "$CHOICE() config macro: index %d is out of range!", (int)index );
 			}
 
-			if (tmp2) free(tmp2); tmp2 = NULL;
+			if (tmp2) {free(tmp2);} tmp2 = NULL;
 		}
 		break;
 
@@ -2209,7 +2211,7 @@ static const char * evaluate_macro_func (
 					EXCEPT( "$SUBSTR() macro: %s is invalid start index!", arg );
 				}
 				start_pos = (int)index;
-				if (tmp3) free(tmp3); tmp3 = NULL;
+				if (tmp3) {free(tmp3);} tmp3 = NULL;
 			}
 
 			int sub_len = INT_MAX/2;
@@ -2228,7 +2230,7 @@ static const char * evaluate_macro_func (
 					EXCEPT( "$SUBSTR() macro: %s is invalid length !", arg );
 				}
 				sub_len = (int)index;
-				if (tmp3) free(tmp3); tmp3 = NULL;
+				if (tmp3) {free(tmp3);} tmp3 = NULL;
 			}
 
 			const char * mval = lookup_macro(name, macro_set, ctx);
@@ -2314,7 +2316,7 @@ static const char * evaluate_macro_func (
 				if (fmt && ! strchr(buf, '.')) { strcat(buf, ".0"); } // force it to look like a real
 			}
 
-			if (tmp2) free(tmp2); tmp2 = NULL;
+			if (tmp2) {free(tmp2);} tmp2 = NULL;
 		}
 		break;
 

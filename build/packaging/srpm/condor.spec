@@ -97,7 +97,6 @@
 %if 0%{?osg} && 0%{?rhel} == 7
 %define aviary 0
 %define std_univ 0
-%define cream 0
 %endif
 
 %define glexec 1
@@ -174,8 +173,6 @@ Source1: generate-tarball.sh
 %endif
 
 # % if %systemd
-Source2: %{name}-tmpfiles.conf
-Source3: %{name}.service
 # % else
 Source4: condor.osg-sysconfig
 # % endif
@@ -1010,11 +1007,11 @@ rm -rf %{buildroot}/%{_sysconfdir}/init.d
 
 %if %systemd
 # install tmpfiles.d/condor.conf
-mkdir -p %{buildroot}%{_sysconfdir}/tmpfiles.d
-install -m 0644 %{SOURCE2} %{buildroot}%{_sysconfdir}/tmpfiles.d/%{name}.conf
+mkdir -p %{buildroot}%{_tmpfilesdir}
+install -m 0644 %{buildroot}/etc/examples/condor-tmpfiles.conf %{buildroot}%{_tmpfilesdir}/%{name}.conf
 
 mkdir -p %{buildroot}%{_unitdir}
-cp %{SOURCE3} %{buildroot}%{_unitdir}/condor.service
+install -m 0644 %{buildroot}/etc/examples/condor.service %{buildroot}%{_unitdir}/condor.service
 %else
 # install the lsb init script
 install -Dp -m0755 %{buildroot}/etc/examples/condor.init %{buildroot}%{_initrddir}/condor
@@ -1187,7 +1184,7 @@ rm -rf %{buildroot}
 %dir %_sysconfdir/condor/
 %config(noreplace) %_sysconfdir/condor/condor_config
 %if %systemd
-%config(noreplace) %_sysconfdir/tmpfiles.d/%{name}.conf
+%{_tmpfilesdir}/%{name}.conf
 %{_unitdir}/condor.service
 %else
 %_initrddir/condor
@@ -1424,14 +1421,9 @@ rm -rf %{buildroot}
 %dir %_var/lib/condor/execute/
 %dir %_var/log/condor/
 %dir %_var/lib/condor/spool/
-%if %systemd
-%ghost %dir %_var/lock/condor/
-%ghost %dir %_var/run/condor/
-%else
 %dir %_var/lock/condor
 %dir %_var/lock/condor/local
 %dir %_var/run/condor
-%endif
 
 #################
 %files procd
@@ -1821,7 +1813,6 @@ fi
 if [ $1 -eq 1 ] ; then
     # Initial installation 
     /bin/systemctl daemon-reload >/dev/null 2>&1 || :
-    /bin/systemd-tmpfiles --create /etc/tmpfiles.d/%{name}.conf 2>&1 || :
 fi
 
 %preun
@@ -1904,6 +1895,14 @@ fi
 %endif
 
 %changelog
+* Thu Sep 29 2016 Tim Theisen <tim@cs.wisc.edu> - 8.4.9-1
+- The condor_startd removes orphaned Docker containers on restart
+- Job Router and HTCondor-C job job submission prompts schedd reschedule
+- Fixed bugs in the Job Router's hooks
+- Improved systemd integration on Enterprise Linux 7
+- Upped default number of Chirp attributes to 100, and made it configurable
+- Fixed a bug where variables starting with STARTD. or STARTER. were ignored
+
 * Tue Jul 05 2016 Tim Theisen <tim@cs.wisc.edu> - 8.4.8-1
 - Fixed a memory leak triggered by the python htcondor.Schedd().query() call
 - Fixed a bug that could cause Bosco file transfers to fail
@@ -1979,7 +1978,7 @@ fi
 - a bug fix to prevent sending spurious data on a SOAP file transfer
 - a bug fix to always present jobs in order in condor_history
 
-* Thu Sep 14 2015 Tim Theisen <tim@cs.wisc.edu> - 8.4.0-1
+* Mon Sep 14 2015 Tim Theisen <tim@cs.wisc.edu> - 8.4.0-1
 - a Docker Universe to run a Docker container as an HTCondor job
 - the submit file can queue a job for each file found
 - the submit file can contain macros

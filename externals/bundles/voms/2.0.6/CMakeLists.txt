@@ -61,6 +61,8 @@ if ( WITH_VOMS AND WITH_GLOBUS )
 			string(REPLACE "-std=c++11" "" VOMS_C_FLAGS "${CMAKE_C_FLAGS}")
 			string(REPLACE "-std=c++11" "" VOMS_LDFLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 			set ( VOMS_CXX_COMPILER  "clang++" )
+			set ( VOMS_C_FLAGS "${VOMS_C_FLAGS} -I${DARWIN_OPENSSL_INCLUDE}" )
+			set ( VOMS_CXX_FLAGS "${VOMS_CXX_FLAGS} -I${DARWIN_OPENSSL_INCLUDE}" )
                 else()
 			set ( VOMS_CXX_FLAGS ${CMAKE_CXX_FLAGS} )
 			set ( VOMS_C_FLAGS ${CMAKE_C_FLAGS} )
@@ -117,7 +119,7 @@ if ( WITH_VOMS AND WITH_GLOBUS )
 			# external is built.
 			install( CODE "execute_process(COMMAND mkdir -p \$ENV{DESTDIR}/${CMAKE_INSTALL_PREFIX}/${EXTERNALS_LIB})" )
 			install( CODE "execute_process(COMMAND find ${VOMS_INSTALL_LOC}/lib -maxdepth 1 -name *.so*
-				COMMAND xargs -isrc cp -a src \$ENV{DESTDIR}/${CMAKE_INSTALL_PREFIX}/${EXTERNALS_LIB})" )
+				COMMAND xargs -isrc cp -a --remove-destination src \$ENV{DESTDIR}/${CMAKE_INSTALL_PREFIX}/${EXTERNALS_LIB})" )
 			if ( CONDOR_STRIP_PACKAGES )
 				# Strip the libraries manually.
 				# Since cmake didn't create the libraries

@@ -1,8 +1,8 @@
 
 [Unit]
 Description=Condor Distributed High-Throughput-Computing
-After=syslog.target network.target
-Wants=network.target
+After=syslog.target network-online.target nslcd.service ypbind.service
+Wants=network-online.target
 
 [Service]
 EnvironmentFile=-/etc/sysconfig/condor
@@ -10,7 +10,7 @@ ExecStart=/usr/sbin/condor_master -f
 ExecStop=/usr/sbin/condor_off -master
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
-RestartSec=5
+RestartSec=1minute
 StandardOutput=syslog
 LimitNOFILE=16384
 ControlGroup=/condor
