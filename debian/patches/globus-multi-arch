@@ -5,7 +5,7 @@ Author: Mattias Ellert <mattias.ellert@fysast.uu.se>
 
 --- a/externals/bundles/globus/5.2.5/CMakeLists.txt
 +++ b/externals/bundles/globus/5.2.5/CMakeLists.txt
-@@ -286,7 +286,16 @@
+@@ -287,7 +287,16 @@
  		find_multiple( "globus_gass_transfer;globus_gram_client;globus_gram_protocol" GLOBUS_GRID_UNIVERSE_GT2 )
  		find_multiple( "globus_ftp_client" GLOBUS_GRID_UNIVERSE_NORDUGRID)
  		if (GLOBUS_FOUND)

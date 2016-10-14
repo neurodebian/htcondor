@@ -90,7 +90,7 @@ Author: Michael Hanke <mih@debian.org>
  version=7.9.0
  type=string
  reconfig=true
-@@ -7045,7 +7045,7 @@
+@@ -7055,7 +7055,7 @@
  tags=c++_util,condor_config
  
  [GANGLIA_LIB64_PATH]
@@ -99,7 +99,7 @@ Author: Michael Hanke <mih@debian.org>
  type=string
  reconfig=true
  customization=seldom
-@@ -7741,7 +7741,7 @@
+@@ -7751,7 +7751,7 @@
  review=?
  
  [CRED_STORE_DIR]
@@ -134,8 +134,8 @@ Author: Michael Hanke <mih@debian.org>
  
  [Unit]
  Description=Condor Distributed High-Throughput-Computing
--After=syslog.target network.target
-+After=network.target
- Wants=network.target
+-After=syslog.target network-online.target nslcd.service ypbind.service
++After=network-online.target nslcd.service ypbind.service
+ Wants=network-online.target
  
  [Service]

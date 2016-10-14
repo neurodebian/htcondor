@@ -1,9 +1,9 @@
 Description: add raspbian to os detection code.
 Author: Peter Michael Green <plugwash@raspbian.org>
 
---- condor-8.0.5~dfsg.1.orig/build/cmake/macros/SystemSpecificInformations.cmake
-+++ condor-8.0.5~dfsg.1/build/cmake/macros/SystemSpecificInformations.cmake
-@@ -159,7 +159,14 @@ if(UNIX)
+--- a/build/cmake/macros/SystemSpecificInformations.cmake
++++ b/build/cmake/macros/SystemSpecificInformations.cmake
+@@ -163,7 +163,14 @@
  	set(LINUX_VER "${CMAKE_MATCH_1}")        
  	set(SYSTEM_NAME "Debian-${CMAKE_MATCH_1}")
  	set(DEB_SYSTEM_NAME "deb_${CMAKE_MATCH_1}")
