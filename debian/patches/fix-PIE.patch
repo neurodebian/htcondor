@@ -1,0 +1,22 @@
+Description: Fix the PIE build
+ -fno-PIC also disables PIE, which is now the default in Debian.
+ .
+ Linking PIE binaries fails when there are objects compiled without PIE.
+ .
+ Add -fPIE after passing -fno-PIC.
+Author: Adrian Bunk <bunk@stusta.de>
+Bug-Debian: https://bugs.debian.org/837402
+
+--- condor-8.4.9~dfsg.1.orig/src/condor_sysapi/CMakeLists.txt
++++ condor-8.4.9~dfsg.1/src/condor_sysapi/CMakeLists.txt
+@@ -35,8 +35,8 @@ condor_exe(condor_kflops "kflops_main.cp
+ 
+ if (NOT WINDOWS)
+     # compiling everything with -fPIC is needed to dynamically load libraries, but it messes up the benchmarks so turn it back off here
+-    set_property(SOURCE clinpack.cpp APPEND_STRING PROPERTY COMPILE_FLAGS " -fno-PIC")
+-    set_property(SOURCE dhry21a.cpp APPEND_STRING PROPERTY COMPILE_FLAGS " -fno-PIC")
++    set_property(SOURCE clinpack.cpp APPEND_STRING PROPERTY COMPILE_FLAGS " -fno-PIC -fPIE")
++    set_property(SOURCE dhry21a.cpp APPEND_STRING PROPERTY COMPILE_FLAGS " -fno-PIC -fPIE")
+ endif (NOT WINDOWS)
+ 
+ condor_exe(condor_mips "mips_main.cpp;dhry21a.cpp;../condor_utils/utc_time.cpp" ${C_LIBEXEC} "" OFF)
