@@ -1,7 +1,10 @@
-condor (8.4.9~dfsg.1-2) UNRELEASED; urgency=medium
+condor (8.4.9~dfsg.1-2) unstable; urgency=medium
 
   * Add patch to fix FTBFS due to -fPIE being default now. Thanks
     to Adrian Bunk <bunk@stusta.de> for the patch (Closes: #837402).
+  * Disable VOMS support for now to workaround VOMS not being ready for
+    OpenSSL 1.1.0 (Closes: #828269). To be re-enabled once #844877
+    was addressed.
 
  -- Michael Hanke <mih@debian.org>  Fri, 04 Nov 2016 14:44:04 +0100
 
