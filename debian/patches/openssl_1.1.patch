@@ -1,0 +1,471 @@
+diff --git a/src/condor_includes/condor_crypt_3des.h b/src/condor_includes/condor_crypt_3des.h
+index e2967d8..dc29b6a 100644
+--- a/src/condor_includes/condor_crypt_3des.h
++++ b/src/condor_includes/condor_crypt_3des.h
+@@ -61,7 +61,7 @@ class Condor_Crypt_3des : public Condor_Crypt_Base {
+     //------------------------------------------
+     // Private constructor
+     //------------------------------------------
+-    des_key_schedule  keySchedule1_, keySchedule2_, keySchedule3_;
++    DES_key_schedule  keySchedule1_, keySchedule2_, keySchedule3_;
+     unsigned char     ivec_[8];
+     int               num_;
+ };
+diff --git a/src/condor_io/condor_auth_ssl.cpp b/src/condor_io/condor_auth_ssl.cpp
+index b8bb6cf..3c366b3 100644
+--- a/src/condor_io/condor_auth_ssl.cpp
++++ b/src/condor_io/condor_auth_ssl.cpp
+@@ -36,7 +36,9 @@
+ #endif
+ 
+ // Symbols from libssl
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ static long (*SSL_CTX_ctrl_ptr)(SSL_CTX *, int, long, void *) = NULL;
++#endif
+ static void (*SSL_CTX_free_ptr)(SSL_CTX *) = NULL;
+ static int (*SSL_CTX_load_verify_locations_ptr)(SSL_CTX *, const char *, const char *) = NULL;
+ #if OPENSSL_VERSION_NUMBER < 0x10000000L
+@@ -55,8 +57,12 @@ static void (*SSL_free_ptr)(SSL *) = NULL;
+ static int (*SSL_get_error_ptr)(const SSL *, int) = NULL;
+ static X509 *(*SSL_get_peer_certificate_ptr)(const SSL *) = NULL;
+ static long (*SSL_get_verify_result_ptr)(const SSL *) = NULL;
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ static int (*SSL_library_init_ptr)() = NULL;
+ static void (*SSL_load_error_strings_ptr)() = NULL;
++#else
++static int (*OPENSSL_init_ssl_ptr)(uint64_t, const OPENSSL_INIT_SETTINGS *) = NULL;
++#endif
+ static SSL *(*SSL_new_ptr)(SSL_CTX *) = NULL;
+ static int (*SSL_read_ptr)(SSL *, void *, int) = NULL;
+ static void (*SSL_set_bio_ptr)(SSL *, BIO *, BIO *) = NULL;
+@@ -79,7 +85,11 @@ Condor_Auth_SSL :: Condor_Auth_SSL(ReliSock * sock, int /* remote */)
+ 
+ Condor_Auth_SSL :: ~Condor_Auth_SSL()
+ {
++#if OPENSSL_VERSION_NUMBER < 0x10000000L
+     ERR_remove_state( 0 );
++#elif OPENSSL_VERSION_NUMBER < 0x10100000L
++    ERR_remove_thread_state( 0 );
++#endif
+ 	if(m_crypto) delete(m_crypto);
+ }
+ 
+@@ -96,7 +106,9 @@ bool Condor_Auth_SSL::Initialize()
+ 
+ 	if ( Condor_Auth_Kerberos::Initialize() == false ||
+ 		 (dl_hdl = dlopen(LIBSSL_SO, RTLD_LAZY)) == NULL ||
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ 		 !(SSL_CTX_ctrl_ptr = (long (*)(SSL_CTX *, int, long, void *))dlsym(dl_hdl, "SSL_CTX_ctrl")) ||
++#endif
+ 		 !(SSL_CTX_free_ptr = (void (*)(SSL_CTX *))dlsym(dl_hdl, "SSL_CTX_free")) ||
+ 		 !(SSL_CTX_load_verify_locations_ptr = (int (*)(SSL_CTX *, const char *, const char *))dlsym(dl_hdl, "SSL_CTX_load_verify_locations")) ||
+ #if OPENSSL_VERSION_NUMBER < 0x10000000L
+@@ -115,8 +127,12 @@ bool Condor_Auth_SSL::Initialize()
+ 		 !(SSL_get_error_ptr = (int (*)(const SSL *, int))dlsym(dl_hdl, "SSL_get_error")) ||
+ 		 !(SSL_get_peer_certificate_ptr = (X509 *(*)(const SSL *))dlsym(dl_hdl, "SSL_get_peer_certificate")) ||
+ 		 !(SSL_get_verify_result_ptr = (long (*)(const SSL *))dlsym(dl_hdl, "SSL_get_verify_result")) ||
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ 		 !(SSL_library_init_ptr = (int (*)())dlsym(dl_hdl, "SSL_library_init")) ||
+ 		 !(SSL_load_error_strings_ptr = (void (*)())dlsym(dl_hdl, "SSL_load_error_strings")) ||
++#else
++		 !(OPENSSL_init_ssl_ptr = (int (*)(uint64_t, const OPENSSL_INIT_SETTINGS *))dlsym(dl_hdl, "OPENSSL_init_ssl")) ||
++#endif
+ 		 !(SSL_new_ptr = (SSL *(*)(SSL_CTX *))dlsym(dl_hdl, "SSL_new")) ||
+ 		 !(SSL_read_ptr = (int (*)(SSL *, void *, int))dlsym(dl_hdl, "SSL_read")) ||
+ 		 !(SSL_set_bio_ptr = (void (*)(SSL *, BIO *, BIO *))dlsym(dl_hdl, "SSL_set_bio")) ||
+@@ -141,7 +157,9 @@ bool Condor_Auth_SSL::Initialize()
+ 		m_initSuccess = true;
+ 	}
+ #else
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ 	SSL_CTX_ctrl_ptr = SSL_CTX_ctrl;
++#endif
+ 	SSL_CTX_free_ptr = SSL_CTX_free;
+ 	SSL_CTX_load_verify_locations_ptr = SSL_CTX_load_verify_locations;
+ 	SSL_CTX_new_ptr = SSL_CTX_new;
+@@ -156,8 +174,12 @@ bool Condor_Auth_SSL::Initialize()
+ 	SSL_get_error_ptr = SSL_get_error;
+ 	SSL_get_peer_certificate_ptr = SSL_get_peer_certificate;
+ 	SSL_get_verify_result_ptr = SSL_get_verify_result;
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ 	SSL_library_init_ptr = SSL_library_init;
+ 	SSL_load_error_strings_ptr = SSL_load_error_strings;
++#else
++	OPENSSL_init_ssl_ptr = OPENSSL_init_ssl;
++#endif
+ 	SSL_new_ptr = SSL_new;
+ 	SSL_read_ptr = SSL_read;
+ 	SSL_set_bio_ptr = SSL_set_bio;
+@@ -747,10 +769,17 @@ Condor_Auth_SSL::unwrap(char *   input,
+ 
+ int Condor_Auth_SSL :: init_OpenSSL(void)
+ {
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+     if (!(*SSL_library_init_ptr)()) {
+         return AUTH_SSL_ERROR;
+     }
+     (*SSL_load_error_strings_ptr)();
++#else
++    if (!(*OPENSSL_init_ssl_ptr)(OPENSSL_INIT_LOAD_SSL_STRINGS \
++                               | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL)) {
++        return AUTH_SSL_ERROR;
++    }
++#endif
+     // seed_pnrg(); TODO: 
+     return AUTH_SSL_A_OK;
+ }
+@@ -1125,9 +1154,11 @@ SSL_CTX *Condor_Auth_SSL :: setup_ssl_ctx( bool is_server )
+ 		goto setup_server_ctx_err;
+ 	}
+ 
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+ 	// disable SSLv2.  it has vulnerabilities.
+ 	//SSL_CTX_set_options( ctx, SSL_OP_NO_SSLv2 );
+ 	(*SSL_CTX_ctrl_ptr)( ctx, SSL_CTRL_OPTIONS, SSL_OP_NO_SSLv2, NULL );
++#endif
+ 
+     if( (*SSL_CTX_load_verify_locations_ptr)( ctx, cafile, cadir ) != 1 ) {
+         ouch( "Error loading CA file and/or directory\n" );
+@@ -1147,8 +1178,10 @@ SSL_CTX *Condor_Auth_SSL :: setup_ssl_ctx( bool is_server )
+ 		// TODO where's this?
+     (*SSL_CTX_set_verify_ptr)( ctx, SSL_VERIFY_PEER, verify_callback ); 
+     (*SSL_CTX_set_verify_depth_ptr)( ctx, 4 ); // TODO arbitrary?
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+     //SSL_CTX_set_options( ctx, SSL_OP_ALL|SSL_OP_NO_SSLv2 );
+     (*SSL_CTX_ctrl_ptr)( ctx, SSL_CTRL_OPTIONS, SSL_OP_ALL|SSL_OP_NO_SSLv2, NULL );
++#endif
+     if((*SSL_CTX_set_cipher_list_ptr)( ctx, cipherlist ) != 1 ) {
+         ouch( "Error setting cipher list (no valid ciphers)\n" );
+         goto setup_server_ctx_err;
+diff --git a/src/condor_io/condor_crypt_3des.cpp b/src/condor_io/condor_crypt_3des.cpp
+index 2537e2f..5c8b4e7 100644
+--- a/src/condor_io/condor_crypt_3des.cpp
++++ b/src/condor_io/condor_crypt_3des.cpp
+@@ -35,9 +35,9 @@ Condor_Crypt_3des :: Condor_Crypt_3des(const KeyInfo& key)
+ 	unsigned char * keyData = k.getPaddedKeyData(24);
+ 	ASSERT(keyData);
+ 
+-    des_set_key((des_cblock *)  keyData    , keySchedule1_);
+-    des_set_key((des_cblock *) (keyData+8) , keySchedule2_);
+-    des_set_key((des_cblock *) (keyData+16), keySchedule3_);
++    DES_set_key((DES_cblock *)  keyData    , &keySchedule1_);
++    DES_set_key((DES_cblock *) (keyData+8) , &keySchedule2_);
++    DES_set_key((DES_cblock *) (keyData+16), &keySchedule3_);
+ 
+     // initialize ivsec
+     resetState();
+@@ -71,9 +71,9 @@ bool Condor_Crypt_3des :: encrypt(unsigned char *  input,
+     output = (unsigned char *) malloc(input_len);
+ 
+     if (output) {
+-        des_ede3_cfb64_encrypt(input, output, output_len,
+-                               keySchedule1_, keySchedule2_, keySchedule3_,
+-                               (des_cblock *)ivec_, &num_, DES_ENCRYPT);
++        DES_ede3_cfb64_encrypt(input, output, output_len,
++                               &keySchedule1_, &keySchedule2_, &keySchedule3_,
++                               (DES_cblock *)ivec_, &num_, DES_ENCRYPT);
+         return true;   
+     }
+     else {
+@@ -95,9 +95,9 @@ bool Condor_Crypt_3des :: decrypt(unsigned char *  input,
+     if (output) {
+         output_len = input_len;
+ 
+-        des_ede3_cfb64_encrypt(input, output, output_len,
+-                               keySchedule1_, keySchedule2_, keySchedule3_,
+-                               (des_cblock *)ivec_, &num_, DES_DECRYPT);
++        DES_ede3_cfb64_encrypt(input, output, output_len,
++                               &keySchedule1_, &keySchedule2_, &keySchedule3_,
++                               (DES_cblock *)ivec_, &num_, DES_DECRYPT);
+         
+         return true;           // Should be changed
+     }
+diff --git a/src/condor_utils/condor_dh.cpp b/src/condor_utils/condor_dh.cpp
+deleted file mode 100644
+index 8450244..0000000
+--- a/src/condor_utils/condor_dh.cpp
++++ /dev/null
+@@ -1,204 +0,0 @@
+-/***************************************************************
+- *
+- * Copyright (C) 1990-2011, Condor Team, Computer Sciences Department,
+- * University of Wisconsin-Madison, WI.
+- * 
+- * Licensed under the Apache License, Version 2.0 (the "License"); you
+- * may not use this file except in compliance with the License.  You may
+- * obtain a copy of the License at
+- * 
+- *    http://www.apache.org/licenses/LICENSE-2.0
+- * 
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- *
+- ***************************************************************/
+-
+-
+-#include "condor_common.h"
+-#include "condor_dh.h"
+-#include "condor_debug.h"
+-#include "condor_config.h"
+-
+-#if HAVE_EXT_OPENSSL
+-
+-//#include <openssl/pem.h>
+-//#include <openssl/bn.h>
+-
+-const char DH_CONFIG_FILE[] = "CONDOR_DH_CONFIG";
+-
+-Condor_Diffie_Hellman :: Condor_Diffie_Hellman()
+-    : dh_     (0),
+-      secret_ (0),
+-      keySize_(0)
+-{
+-    initialize();
+-}
+-
+-Condor_Diffie_Hellman :: ~Condor_Diffie_Hellman()
+-{
+-    if (dh_) {
+-        DH_free(dh_);
+-    }
+-    if (secret_) {
+-        free(secret_);
+-    }
+-    keySize_ = 0;
+-
+-}
+-
+-int Condor_Diffie_Hellman :: compute_shared_secret(const char * pk)
+-{
+-    // the input pk is assumed to be an encoded string representing
+-    // the binary data for the remote party's public key -- y (or x)
+-    // the local DH knows about g and x, now, it will compute
+-    // (g^x)^y, or (g^y)^x
+-
+-    BIGNUM * remote_pubKey = NULL;
+-
+-    if (BN_hex2bn(&remote_pubKey, pk) == 0) {
+-        dprintf(D_ALWAYS, "Unable to obtain remote public key\n");
+-        goto error;
+-    }
+-
+-    if ((dh_ != NULL) && (remote_pubKey != NULL)) {
+-
+-        secret_ = (unsigned char *) malloc(DH_size(dh_));
+-
+-        // Now compute
+-        keySize_ = DH_compute_key(secret_, remote_pubKey, dh_);
+-        BN_clear_free(remote_pubKey);
+-
+-        if (keySize_ == -1) {
+-            dprintf(D_ALWAYS, "Unable to compute shared secret\n");
+-            goto error;
+-        }
+-    }   
+-    else {
+-        goto error;
+-    }
+-    return 1;
+-
+- error:
+-    if (remote_pubKey) {
+-        BN_clear_free(remote_pubKey);
+-    }
+-    if (secret_) {
+-        free(secret_);
+-        secret_ = NULL;
+-    }
+-    return 0;
+-}
+-    
+-char * Condor_Diffie_Hellman :: getPublicKeyChar()
+-{
+-    // This will return g^x, x is the secret, encoded in HEX format
+-    if (dh_ && dh_->pub_key) {
+-        return BN_bn2hex(dh_->pub_key);
+-    }
+-    else {
+-        return NULL;
+-    }
+-}
+-
+-BIGNUM * Condor_Diffie_Hellman::getPrime()
+-{
+-    if (dh_) {
+-        return dh_->p;
+-    }
+-    else {
+-        return 0;
+-    }
+-}
+-
+-char * Condor_Diffie_Hellman :: getPrimeChar()
+-{
+-    if (dh_ && dh_->p) {
+-        return BN_bn2hex(dh_->p);
+-    }
+-    else {
+-        return NULL;
+-    }
+-}
+-
+-BIGNUM * Condor_Diffie_Hellman :: getGenerator()
+-{
+-    if (dh_) {
+-        return dh_->g;
+-    }
+-    else {
+-        return 0;
+-    }
+-}
+-
+-char * Condor_Diffie_Hellman :: getGeneratorChar()
+-{
+-    if (dh_ && dh_->g) {
+-        return BN_bn2hex(dh_->g);
+-    }
+-    else {
+-        return NULL;
+-    }
+-}
+-
+-const unsigned char * Condor_Diffie_Hellman :: getSecret() const
+-{
+-    return secret_;
+-}
+-
+-int Condor_Diffie_Hellman :: getSecretSize() const
+-{
+-    return keySize_;
+-}
+-
+-int Condor_Diffie_Hellman :: initialize()
+-{
+-    // First, check the config file to find out where is the file
+-    // with all the parameters
+-    config();
+-    char * dh_config = param(DH_CONFIG_FILE);
+-
+-    FILE * fp = 0;
+-    if ( dh_config ) {
+-        if ( (fp = safe_fopen_wrapper_follow(dh_config, "r")) == NULL) {
+-            dprintf(D_ALWAYS, "Unable to open condor_dh_config file %s\n", dh_config);
+-            goto error;
+-        }
+-
+-        dh_ = PEM_read_DHparams(fp, NULL, NULL, NULL);
+-        if (dh_ == NULL) {
+-            dprintf(D_ALWAYS, "Unable to read DH structure from the configuration file.\n");
+-            goto error;
+-        }
+-
+-        // Now generate private key
+-        if (DH_generate_key(dh_) == 0) {
+-            dprintf(D_ALWAYS, "Unable to generate a private key \n");
+-            goto error;
+-        }
+-    }
+-    else {
+-        dprintf(D_ALWAYS, "The required configuration parameter CONDOR_DH_CONFIG is not specified in the condor configuration file!\n");
+-        goto error;
+-    }
+-    fclose(fp);
+-    free(dh_config);
+-    return 1;
+- error:
+-    if (dh_) {
+-        DH_free(dh_);
+-        dh_ = 0;
+-    }
+-    if (dh_config) {
+-        free(dh_config);
+-    }
+-    if (fp) {
+-        fclose(fp);
+-    }
+-    return 0;
+-}
+-
+-#endif
+diff --git a/src/condor_utils/condor_dh.h b/src/condor_utils/condor_dh.h
+deleted file mode 100644
+index 63ba8ed..0000000
+--- a/src/condor_utils/condor_dh.h
++++ /dev/null
+@@ -1,73 +0,0 @@
+-/***************************************************************
+- *
+- * Copyright (C) 1990-2007, Condor Team, Computer Sciences Department,
+- * University of Wisconsin-Madison, WI.
+- * 
+- * Licensed under the Apache License, Version 2.0 (the "License"); you
+- * may not use this file except in compliance with the License.  You may
+- * obtain a copy of the License at
+- * 
+- *    http://www.apache.org/licenses/LICENSE-2.0
+- * 
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- *
+- ***************************************************************/
+-
+-#ifndef CONDOR_DH
+-#define CONDOR_DH
+-
+-#include "condor_common.h"
+-
+-#if HAVE_EXT_OPENSSL
+-
+-#include <openssl/ssl.h>
+-//#include <openssl/rand.h>
+-
+-//----------------------------------------------------------------------
+-//  Diffie-Hellman key exchange, based on API provided by OpenSSL
+-//  privately known variables: x and y -- the secret, one for each
+-//                             party
+-//  publicly known variables:  g -- the generator, p -- the prime, 
+-//                             g^x -- the public key
+-//----------------------------------------------------------------------
+-
+-class Condor_Diffie_Hellman {
+-
+- public:
+-    Condor_Diffie_Hellman();
+-    ~Condor_Diffie_Hellman();
+-    
+-    char * getPublicKeyChar();
+-    //------------------------------------------
+-    // PURPOSE: Return public key in HEX encoded format
+-    // REQUIRE: None
+-    // RETURNS: HEX string or NULL
+-    //------------------------------------------
+-
+-    BIGNUM * getPrime();
+-    BIGNUM * getGenerator();
+-    // These two methods return the prime and the generator
+-    
+-    char * getPrimeChar();
+-    char * getGeneratorChar();
+-    // These two methods return the prime and the generator
+-    // in HEX encoded format if they exist. Otherwise, NULL is returned.
+-
+-    int  compute_shared_secret(const char * pk);
+-    const unsigned char * getSecret() const;
+-    int getSecretSize() const;
+-
+- private:
+-    int initialize();
+-
+-    DH * dh_;
+-    unsigned char * secret_;
+-    int keySize_;
+-};
+-#endif
+-
+-#endif

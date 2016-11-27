@@ -5,8 +5,10 @@ condor (8.4.9~dfsg.1-2) unstable; urgency=medium
   * Disable VOMS support for now to workaround VOMS not being ready for
     OpenSSL 1.1.0 (Closes: #828269). To be re-enabled once #844877
     was addressed.
+  * Add upstream patch for OpenSSL 1.1 compatibility (to be released with
+    8.4.10).
 
- -- Michael Hanke <mih@debian.org>  Fri, 04 Nov 2016 14:44:04 +0100
+ -- Michael Hanke <mih@debian.org>  Sun, 27 Nov 2016 08:45:09 +0100
 
 condor (8.4.9~dfsg.1-1) unstable; urgency=medium
 

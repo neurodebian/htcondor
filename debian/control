@@ -39,7 +39,6 @@ Build-Depends: autotools-dev,
                python-dev,
                transfig,
                uuid-dev,
-               voms-dev,
                zlib1g-dev
 Standards-Version: 3.9.8
 Vcs-Browser: https://anonscm.debian.org/cgit/pkg-exppsy/condor.git
